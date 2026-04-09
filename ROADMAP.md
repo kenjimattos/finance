@@ -2,27 +2,38 @@
 
 Ideas and planned features, roughly grouped by theme. Nothing here is committed — this is a thinking space for prioritization. When something moves to implementation, it gets a PR and leaves this list.
 
-## Fatura por banco (arquitetura decidida, não implementada)
+## Fatura por banco (arquitetura revisada, não implementada)
 
-Hoje existe um único `card_settings` por `itemId` com um par `closing_day`/`due_day`. Quando o usuário conectar um segundo banco no Meu Pluggy, os cartões dos dois bancos vão aparecer misturados no mesmo item, cada banco com ciclo de fatura diferente.
+Hoje existe um único `card_settings` por `itemId` com um par `closing_day`/`due_day`. Quando o usuário conectar um segundo banco no Meu Pluggy, os cartões dos dois bancos aparecem misturados no mesmo item mas em **accounts separadas** — cada account do tipo `CREDIT` representa um produto de cartão de crédito de um banco específico.
 
-Decisão arquitetural: criar uma entidade **"fatura"** acima dos grupos de cartão.
+Descoberta: `fetchAccounts(itemId)` sem filtro já retorna as accounts separadas com `name` legível (ex: "Pic Pay Mastercard Black", "Itaú Visa Platinum"). Cada transação já carrega `account_id`, então a separação por banco é automática — não precisa de entidade manual "fatura".
+
+Arquitetura proposta:
 
 ```
-Fatura (closing_day, due_day, display_name)
-  └── Grupo de cartão (nome, cor, quais card_last4)
-        └── Transações
+Account CREDIT (detectada do Pluggy, name = "Pic Pay Mastercard Black")
+  ├── closing_day, due_day (configurado uma vez pelo usuário por account)
+  ├── Grupo "Eu"        → card_last4 pertencentes a essa account
+  ├── Grupo "Esposa"    → ...
+  └── Grupo "Virtual"   → ...
 ```
 
-Cada fatura tem seu ciclo independente. Os cards de breakdown ficam dentro da fatura selecionada. O headline da tela vira um seletor de fatura ou tabs.
+`card_settings` migra de per-`itemId` pra per-`accountId`. `card_groups` ganha FK pra `accountId` em vez de `itemId`. O frontend ganha um seletor de account (tabs ou picker) no topo; dentro de cada account, tudo funciona como hoje.
 
-Implica: nova tabela, migração dos `card_settings` + `card_groups` existentes, refatoração do `/bills/current/breakdown` pra calcular janela por fatura, refatoração do frontend (seletor de fatura no topo).
+Dados já disponíveis na conexão atual:
+
+| type | name | number |
+|---|---|---|
+| BANK | PicPay Instituição de Pagamento S.A | 00649316-5 |
+| CREDIT | Pic Pay Mastercard Black | 3021 |
+
+A account BANK (conta corrente) é relevante pro fluxo de caixa (ver seção abaixo).
 
 ## Fluxo de caixa (conta corrente)
 
 Tela separada que projeta o saldo futuro da conta corrente. A fatura do cartão entra como saída na data de vencimento. Entradas e saídas manuais (salário, aluguel, freelas) são adicionadas pelo usuário.
 
-Requer: novo schema (`manual_entries` ou similar), nova tela, possivelmente novas fontes de dados do Pluggy (accounts do tipo BANK). Discussão de schema necessária antes de implementar.
+Requer: novo schema (`manual_entries` ou similar), nova tela. A conexão Meu Pluggy **já fornece** uma account do tipo `BANK` / `CHECKING_ACCOUNT` com saldo — só não é sincronizada hoje porque o sync filtra por `'CREDIT'`. Chamar `fetchTransactions` na account BANK traria entradas e saídas da conta corrente (Pix, transferências, boletos).
 
 ## Navegação entre faturas
 
