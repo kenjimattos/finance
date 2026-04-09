@@ -7,7 +7,13 @@ import { api, ApiError } from '../lib/api';
  * Shown whenever /card-settings/:itemId returns 404. Pluggy can't tell us
  * these values — they have to come from the user, once.
  */
-export function CardSettingsSetup({ itemId }: { itemId: string }) {
+export function CardSettingsSetup({
+  itemId,
+  accountId,
+}: {
+  itemId: string;
+  accountId: string;
+}) {
   const [closingDay, setClosingDay] = useState<number>(16);
   const [dueDay, setDueDay] = useState<number>(25);
   const [displayName, setDisplayName] = useState<string>('');
@@ -15,13 +21,13 @@ export function CardSettingsSetup({ itemId }: { itemId: string }) {
 
   const mut = useMutation({
     mutationFn: () =>
-      api.putCardSettings(itemId, {
+      api.putAccountSettings(accountId, {
         closingDay,
         dueDay,
         displayName: displayName.trim() || undefined,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['cardSettings', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['accountSettings', accountId] });
       queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
     },
   });

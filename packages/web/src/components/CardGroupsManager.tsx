@@ -23,20 +23,22 @@ import { formatCardLabel, formatDateShort } from '../lib/format';
  */
 export function CardGroupsManager({
   itemId,
+  accountId,
   onClose,
 }: {
   itemId: string;
+  accountId: string;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
 
   const groupsQ = useQuery({
-    queryKey: ['cardGroups', itemId],
-    queryFn: () => api.listCardGroups(itemId),
+    queryKey: ['cardGroups', itemId, accountId],
+    queryFn: () => api.listCardGroups(itemId, accountId),
   });
   const cardsQ = useQuery({
-    queryKey: ['cards', itemId],
-    queryFn: () => api.listCards(itemId),
+    queryKey: ['cards', itemId, accountId],
+    queryFn: () => api.listCards(itemId, accountId),
   });
 
   useEffect(() => {
@@ -99,6 +101,7 @@ export function CardGroupsManager({
 
         <GroupsSection
           itemId={itemId}
+          accountId={accountId}
           groups={groups}
           onChanged={invalidateAll}
         />
@@ -121,17 +124,19 @@ export function CardGroupsManager({
 
 function GroupsSection({
   itemId,
+  accountId,
   groups,
   onChanged,
 }: {
   itemId: string;
+  accountId: string;
   groups: CardGroup[];
   onChanged: () => void;
 }) {
   const [newName, setNewName] = useState('');
 
   const createMut = useMutation({
-    mutationFn: (name: string) => api.createCardGroup(itemId, name),
+    mutationFn: (name: string) => api.createCardGroup(itemId, name, accountId),
     onSuccess: () => {
       setNewName('');
       onChanged();

@@ -19,6 +19,7 @@ import { useToast } from './Toast';
  */
 export function TransactionInbox({
   itemId,
+  accountId,
   periodStart,
   periodEnd,
   previousPeriodStart,
@@ -29,6 +30,7 @@ export function TransactionInbox({
   categoryFilter,
 }: {
   itemId: string;
+  accountId: string;
   periodStart: string;
   periodEnd: string;
   previousPeriodStart: string;
@@ -47,6 +49,7 @@ export function TransactionInbox({
     queryKey: [
       'transactions',
       itemId,
+      accountId,
       periodStart,
       periodEnd,
       cardGroupQuery ?? 'all',
@@ -54,6 +57,7 @@ export function TransactionInbox({
     queryFn: () =>
       api.listTransactions({
         itemId,
+        accountId,
         from: periodStart,
         to: periodEnd,
         previousFrom: previousPeriodStart,
