@@ -10,8 +10,8 @@ Nothing here is committed to a timeline. When something moves to implementation,
 
 Small, high-leverage items that make the codebase safer to refactor.
 
-- [ ] **Tests for pure services** — choose a runner (vitest? node --test?) and cover `billWindow`, `merchantSlug`, sign convention. These functions will be refactored in phase 2; tests make that safe.
-- [ ] **Clean PARCxx/yy suffix globally** — strip the installment suffix from transaction descriptions in the `shapeRow` response, not just in the card render. 3 lines, benefits the entire UI.
+- [x] **Tests for pure services** — `node --test` + `tsx` loader, 28 tests covering `billWindow` and `merchantSlug`. These functions will be refactored in phase 2; tests make that safe.
+- [x] **Clean PARCxx/yy suffix globally** — stripped in `shapeRow` (API layer) so all consumers get clean descriptions.
 
 ## Phase 2 — Fatura por banco (structural)
 
