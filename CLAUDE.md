@@ -34,9 +34,11 @@ npm run build                         # tsc → api/dist, then vite build → we
 npm run typecheck                     # typecheck both workspaces
 npm run -w @finance/api typecheck     # just the api
 npm run -w @finance/web typecheck     # just the web
+npm test                              # run api tests (node --test + tsx)
+npm run -w @finance/api test          # same, explicit workspace
 ```
 
-Both dev servers bind to `0.0.0.0`, so other devices on the local network can access the app via the host machine's IP (e.g. `http://192.168.1.x:5173`). Vite proxies `/api/*` → `http://localhost:3333` during dev so the frontend has no CORS dance. There are no tests yet. Before adding a test runner, ask the user which one — don't default to Jest.
+Both dev servers bind to `0.0.0.0`, so other devices on the local network can access the app via the host machine's IP (e.g. `http://192.168.1.x:5173`). Vite proxies `/api/*` → `http://localhost:3333` during dev so the frontend has no CORS dance. Tests use `node --test` with `tsx` as the ESM loader — no extra dependencies. Test files live next to the modules they cover (`*.test.ts`).
 
 ## Working style in this repo
 
@@ -152,7 +154,7 @@ The dashboard lays out: big headline → grid of per-group cards → `CategoryTa
 - `creditCardMetadata.billId` links a transaction to its closed bill, populated only after the bill closes.
 - `creditCardMetadata.installmentNumber` / `totalInstallments` are populated for parceladas; these are already columns in the schema and surface in the per-group card breakdown.
 - `creditCardMetadata.cardNumber` comes in inconsistent shapes across connectors (`"1234"`, `"****1234"`, `"1234 **** **** 5678"`). Normalized to last-4 via `lastFourDigits()` in [transactions.ts](packages/api/src/routes/transactions.ts).
-- Pluggy embeds `PARCxx/yy` directly in `description` for installments (e.g. `MERCADO*MERCADPARC05/10`), which is redundant with the structured `installmentNumber`/`totalInstallments`. Stripped at render time in the installment sub-section, not mutated in storage.
+- Pluggy embeds `PARCxx/yy` directly in `description` for installments (e.g. `MERCADO*MERCADPARC05/10`), which is redundant with the structured `installmentNumber`/`totalInstallments`. Stripped in the API layer (`shapeRow` in transactions.ts) so all consumers get clean descriptions. Not mutated in storage.
 - Connect tokens are short-lived (~20 min); generate per widget session.
 - Webhooks require HTTPS; localhost is not accepted. Use manual `POST /transactions/sync` for local dev.
 
