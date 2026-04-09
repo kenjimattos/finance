@@ -80,6 +80,7 @@ export interface Transaction {
   installmentNumber: number | null;
   totalInstallments: number | null;
   billId: string | null;
+  cardLast4: string | null;
   userCategory: UserCategoryRef | null;
 }
 
