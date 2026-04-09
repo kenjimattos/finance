@@ -9,6 +9,7 @@ export const transactionsRouter = Router();
 
 const querySchema = z.object({
   itemId: z.string().min(1),
+  accountId: z.string().min(1).optional(),
   from: z.string().optional(), // yyyy-mm-dd
   to: z.string().optional(),
   refresh: z.enum(['true', 'false']).optional(),
@@ -68,6 +69,7 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
   try {
     const {
       itemId,
+      accountId,
       from,
       to,
       refresh,
@@ -85,6 +87,7 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
 
     const onlyUncategorized = uncategorized === 'true';
     const groupFilter = parseCardGroupFilter(cardGroupId);
+    const filterByAccount = !!accountId;
 
     // Shift-aware mode kicks in only when the caller provides BOTH the
     // current window (from/to) AND both neighbor windows. Otherwise we fall
@@ -127,6 +130,7 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
          LEFT JOIN card_group_members    m  ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
          LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
          WHERE t.item_id = ?
+           AND (? = 0 OR t.account_id = ?)
            ${dateClause}
            AND (? = 0 OR tc.transaction_id IS NULL)
            AND (
@@ -138,6 +142,8 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
       )
       .all(
         itemId,
+        filterByAccount ? 1 : 0,
+        accountId ?? null,
         ...dateParams,
         onlyUncategorized ? 1 : 0,
         groupFilter.kind,

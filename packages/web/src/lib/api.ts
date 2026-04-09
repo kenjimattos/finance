@@ -166,6 +166,7 @@ export interface BillGroupBreakdown {
 
 export interface BillBreakdown {
   itemId: string;
+  accountId: string | null;
   displayName: string | null;
   periodStart: string;
   periodEnd: string;
@@ -225,13 +226,15 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
-  getBillBreakdown: (itemId: string) =>
-    request<BillBreakdown>(
-      `/bills/current/breakdown?itemId=${encodeURIComponent(itemId)}`,
-    ),
+  getBillBreakdown: (itemId: string, accountId?: string) => {
+    const qs = new URLSearchParams({ itemId });
+    if (accountId) qs.set('accountId', accountId);
+    return request<BillBreakdown>(`/bills/current/breakdown?${qs}`);
+  },
 
   listTransactions: (params: {
     itemId: string;
+    accountId?: string;
     from?: string;
     to?: string;
     uncategorized?: boolean;
@@ -243,6 +246,7 @@ export const api = {
     nextTo?: string;
   }) => {
     const qs = new URLSearchParams({ itemId: params.itemId });
+    if (params.accountId) qs.set('accountId', params.accountId);
     if (params.from) qs.set('from', params.from);
     if (params.to) qs.set('to', params.to);
     if (params.uncategorized) qs.set('uncategorized', 'true');
