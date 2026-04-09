@@ -142,6 +142,30 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_cgm_group ON card_group_members(card_group_id);
+
+  -- Manual bill-cycle shifts. A row here says "pretend this transaction
+  -- belongs to a neighboring cycle instead of the one its date would
+  -- naturally place it in". Used to fix cases where Pluggy reports a
+  -- transaction with its purchase date, but the charge actually lands on
+  -- a different bill (common for merchants that batch-submit days later).
+  --
+  -- shift values:
+  --    -1  → one cycle EARLIER  ("this belongs to last month's bill")
+  --    +1  → one cycle LATER    ("this belongs to next month's bill")
+  --
+  -- Higher magnitudes (±2, ±3) are allowed by the schema but the UI
+  -- only exposes ±1 for now. A row with shift=0 is nonsensical and
+  -- forbidden by the CHECK constraint.
+  --
+  -- Lives in its own table (not as a column on transactions) so that a
+  -- re-sync from Pluggy never wipes the user's manual corrections. Same
+  -- rationale as transaction_categories.
+  CREATE TABLE IF NOT EXISTS transaction_bill_overrides (
+    transaction_id TEXT PRIMARY KEY,
+    shift INTEGER NOT NULL CHECK (shift <> 0),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
 `);
 
 // -----------------------------------------------------------------------------
