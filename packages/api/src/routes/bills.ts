@@ -150,7 +150,7 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
     const { column: gCol, value: gVal } = groupScopeClause(scope);
     const groups = db
       .prepare(
-        `SELECT id, name, color FROM card_groups WHERE ${gCol} = ? ORDER BY name ASC`,
+        `SELECT g.id, g.name, g.color FROM card_groups g WHERE ${gCol} = ? ORDER BY g.name ASC`,
       )
       .all(gVal) as Array<{ id: number; name: string; color: string }>;
 
