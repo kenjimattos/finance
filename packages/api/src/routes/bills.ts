@@ -11,6 +11,13 @@ import { parseCardGroupFilter } from './transactions.js';
 
 export const billsRouter = Router();
 
+interface AccountSettingsRow {
+  account_id: string;
+  display_name: string | null;
+  closing_day: number;
+  due_day: number;
+}
+
 interface CardSettingsRow {
   item_id: string;
   display_name: string | null;
@@ -20,6 +27,34 @@ interface CardSettingsRow {
 
 interface SumRow {
   total: number | null;
+}
+
+/**
+ * Scope filter for SQL queries — either by account_id (phase 2) or item_id (legacy).
+ * All SQL helpers use this to pick the right WHERE clause.
+ */
+type Scope =
+  | { kind: 'account'; accountId: string }
+  | { kind: 'item'; itemId: string };
+
+function scopeClause(s: Scope): { column: string; value: string } {
+  return s.kind === 'account'
+    ? { column: 't.account_id', value: s.accountId }
+    : { column: 't.item_id', value: s.itemId };
+}
+
+function groupScopeClause(s: Scope): { column: string; value: string } {
+  return s.kind === 'account'
+    ? { column: 'g.account_id', value: s.accountId }
+    : { column: 'g.item_id', value: s.itemId };
+}
+
+function requireAccountSettings(accountId: string): AccountSettingsRow | null {
+  return (
+    (db
+      .prepare('SELECT * FROM account_settings WHERE account_id = ?')
+      .get(accountId) as AccountSettingsRow | undefined) ?? null
+  );
 }
 
 function requireCardSettings(itemId: string): CardSettingsRow | null {
@@ -64,67 +99,83 @@ billsRouter.get('/bills', (req, res, next) => {
  */
 billsRouter.get('/bills/current/breakdown', (req, res, next) => {
   try {
-    const { itemId } = z.object({ itemId: z.string().min(1) }).parse(req.query);
+    const { itemId, accountId } = z
+      .object({
+        itemId: z.string().min(1),
+        accountId: z.string().min(1).optional(),
+      })
+      .parse(req.query);
 
-    const settings = requireCardSettings(itemId);
-    if (!settings) {
-      res.status(412).json({
-        error: 'CardSettingsMissing',
-        message:
-          'Configure closing_day and due_day for this card via PUT /card-settings/:itemId before querying the open bill.',
-      });
-      return;
+    // Determine scope and settings: prefer account-level, fall back to item-level.
+    let scope: Scope;
+    let displayName: string | null;
+    let closingDay: number;
+    let dueDay: number;
+
+    if (accountId) {
+      const as = requireAccountSettings(accountId);
+      if (!as) {
+        res.status(412).json({
+          error: 'AccountSettingsMissing',
+          message:
+            'Configure closing_day and due_day for this account via PUT /account-settings/:accountId before querying the open bill.',
+        });
+        return;
+      }
+      scope = { kind: 'account', accountId };
+      displayName = as.display_name;
+      closingDay = as.closing_day;
+      dueDay = as.due_day;
+    } else {
+      const cs = requireCardSettings(itemId);
+      if (!cs) {
+        res.status(412).json({
+          error: 'CardSettingsMissing',
+          message:
+            'Configure closing_day and due_day for this card via PUT /card-settings/:itemId before querying the open bill.',
+        });
+        return;
+      }
+      scope = { kind: 'item', itemId };
+      displayName = cs.display_name;
+      closingDay = cs.closing_day;
+      dueDay = cs.due_day;
     }
 
-    const settingsT = {
-      closingDay: settings.closing_day,
-      dueDay: settings.due_day,
-    };
+    const settingsT = { closingDay, dueDay };
     const current = computeOpenBillWindow(settingsT);
     const previous = computePreviousBillWindow(settingsT);
     const next = computeNextBillWindow(settingsT);
 
-    // Groups defined for this item. We iterate them (plus an "all" slot at
-    // the front) and build a card per group with total, delta, and a sorted
-    // list of category breakdowns. Tiny loop — user will have ≤3 groups in
-    // practice, so there's no need for a single complex CTE query.
+    const { column: gCol, value: gVal } = groupScopeClause(scope);
     const groups = db
       .prepare(
-        `SELECT id, name, color FROM card_groups WHERE item_id = ? ORDER BY name ASC`,
+        `SELECT id, name, color FROM card_groups WHERE ${gCol} = ? ORDER BY name ASC`,
       )
-      .all(itemId) as Array<{ id: number; name: string; color: string }>;
+      .all(gVal) as Array<{ id: number; name: string; color: string }>;
 
     const allFilter = parseCardGroupFilter(undefined); // "any"
 
-    // The CURRENT bill respects manual bill-shift overrides (transactions
-    // pulled in from previous/pushed out to next). The PREVIOUS bill is
-    // computed with the simpler unshifted sum — we deliberately don't chase
-    // shifts across two cycles, since the delta vs anterior is already an
-    // approximation and double-shifted transactions are vanishingly rare
-    // in practice.
     const breakdown = [
       {
         groupId: null as number | null,
         name: 'Todos',
         color: null as string | null,
         total: round2(
-          sumBillTotalWithShifts(itemId, current, previous, next, allFilter),
+          sumBillTotalWithShifts(scope, current, previous, next, allFilter),
         ),
         previousTotal: round2(
-          sumBillTotal(itemId, previous.periodStart, previous.periodEnd, allFilter),
+          sumBillTotal(scope, previous.periodStart, previous.periodEnd, allFilter),
         ),
         categories: categoryBreakdownWithShifts(
-          itemId,
+          scope,
           current,
           previous,
           next,
           allFilter,
         ),
-        // "Todos" is rendered as the big headline, not as a card, so the
-        // frontend never reads this — but keep it present for a uniform
-        // response shape.
         installments: installmentBreakdownWithShifts(
-          itemId,
+          scope,
           current,
           previous,
           next,
@@ -135,31 +186,28 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
 
     for (const g of groups) {
       const filter = parseCardGroupFilter(String(g.id));
-      const total = sumBillTotalWithShifts(itemId, current, previous, next, filter);
+      const total = sumBillTotalWithShifts(scope, current, previous, next, filter);
       const previousTotal = sumBillTotal(
-        itemId,
+        scope,
         previous.periodStart,
         previous.periodEnd,
         filter,
       );
       const categories = categoryBreakdownWithShifts(
-        itemId,
+        scope,
         current,
         previous,
         next,
         filter,
       );
       const installments = installmentBreakdownWithShifts(
-        itemId,
+        scope,
         current,
         previous,
         next,
         filter,
       );
 
-      // Skip groups with no categorized spending this cycle — an empty card
-      // is worse than a missing one. "Todos" is never skipped because it
-      // represents the whole bill and the user expects to see it.
       if (total === 0 && categories.length === 0) continue;
 
       breakdown.push({
@@ -175,13 +223,12 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
 
     res.json({
       itemId,
-      displayName: settings.display_name,
+      accountId: accountId ?? null,
+      displayName,
       periodStart: current.periodStart,
       periodEnd: current.periodEnd,
       closingDate: current.nextClosingDate,
       dueDate: current.nextDueDate,
-      // Neighbor windows are exposed so the frontend can pass them to
-      // GET /transactions and get a shift-aware list matching the card totals.
       previousPeriodStart: previous.periodStart,
       previousPeriodEnd: previous.periodEnd,
       nextPeriodStart: next.periodStart,
@@ -218,12 +265,13 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
  * exposes ±1 anyway.
  */
 function sumBillTotalWithShifts(
-  itemId: string,
+  scope: Scope,
   current: BillWindow,
   previous: BillWindow,
   next: BillWindow,
   groupFilter: ReturnType<typeof parseCardGroupFilter>,
 ): number {
+  const { column, value } = scopeClause(scope);
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(t.amount), 0) AS total
@@ -232,7 +280,7 @@ function sumBillTotalWithShifts(
        LEFT JOIN card_group_members m
          ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       WHERE t.item_id = ?
+       WHERE ${column} = ?
          AND (
               (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
            OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
@@ -245,7 +293,7 @@ function sumBillTotalWithShifts(
          )`,
     )
     .get(
-      itemId,
+      value,
       current.periodStart, current.periodEnd,
       previous.periodStart, previous.periodEnd,
       next.periodStart, next.periodEnd,
@@ -269,7 +317,7 @@ function sumBillTotalWithShifts(
  * transaction inbox convention.
  */
 function installmentBreakdownWithShifts(
-  itemId: string,
+  scope: Scope,
   current: BillWindow,
   previous: BillWindow,
   next: BillWindow,
@@ -282,6 +330,7 @@ function installmentBreakdownWithShifts(
   installmentNumber: number;
   totalInstallments: number;
 }> {
+  const { column, value } = scopeClause(scope);
   const rows = db
     .prepare(
       `SELECT t.id                  AS id,
@@ -294,7 +343,7 @@ function installmentBreakdownWithShifts(
        LEFT JOIN card_group_members m
          ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       WHERE t.item_id = ?
+       WHERE ${column} = ?
          AND t.installment_number IS NOT NULL
          AND t.total_installments IS NOT NULL
          AND (
@@ -310,7 +359,7 @@ function installmentBreakdownWithShifts(
        ORDER BY t.date DESC, t.id DESC`,
     )
     .all(
-      itemId,
+      value,
       current.periodStart, current.periodEnd,
       previous.periodStart, previous.periodEnd,
       next.periodStart, next.periodEnd,
@@ -334,12 +383,13 @@ function installmentBreakdownWithShifts(
  * Same windowing logic as sumBillTotalWithShifts.
  */
 function categoryBreakdownWithShifts(
-  itemId: string,
+  scope: Scope,
   current: BillWindow,
   previous: BillWindow,
   next: BillWindow,
   groupFilter: ReturnType<typeof parseCardGroupFilter>,
 ): Array<{ id: number; name: string; color: string; total: number }> {
+  const { column, value } = scopeClause(scope);
   const rows = db
     .prepare(
       `SELECT uc.id        AS id,
@@ -352,7 +402,7 @@ function categoryBreakdownWithShifts(
        LEFT JOIN card_group_members m
          ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       WHERE t.item_id = ?
+       WHERE ${column} = ?
          AND (
               (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
            OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
@@ -367,7 +417,7 @@ function categoryBreakdownWithShifts(
        ORDER BY total DESC`,
     )
     .all(
-      itemId,
+      value,
       current.periodStart, current.periodEnd,
       previous.periodStart, previous.periodEnd,
       next.periodStart, next.periodEnd,
@@ -401,11 +451,12 @@ function categoryBreakdownWithShifts(
  * schema, no ignore flag — the absence of a category IS the exclusion.
  */
 function sumBillTotal(
-  itemId: string,
+  scope: Scope,
   periodStart: string,
   periodEnd: string,
   groupFilter: ReturnType<typeof parseCardGroupFilter>,
 ): number {
+  const { column, value } = scopeClause(scope);
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(t.amount), 0) AS total
@@ -413,7 +464,7 @@ function sumBillTotal(
        INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
        LEFT JOIN card_group_members m
          ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
-       WHERE t.item_id = ?
+       WHERE ${column} = ?
          AND t.date >= ?
          AND t.date <= ?
          AND (
@@ -423,7 +474,7 @@ function sumBillTotal(
          )`,
     )
     .get(
-      itemId,
+      value,
       periodStart,
       periodEnd,
       groupFilter.kind,
