@@ -29,6 +29,22 @@ db.exec(`
     FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
   );
 
+  -- Credit (and eventually bank) accounts discovered from Pluggy. Each item
+  -- may have multiple accounts (e.g. one CREDIT per brand/product). This is
+  -- the anchor for per-account settings, groups, and bill windows.
+  CREATE TABLE IF NOT EXISTS accounts (
+    id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL,
+    name TEXT,
+    number TEXT,
+    type TEXT,
+    raw_json TEXT NOT NULL,
+    synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_accounts_item ON accounts(item_id);
+
   -- Raw transactions cache from Pluggy. raw_json keeps the full payload so
   -- new fields can be surfaced later without a backfill.
   CREATE TABLE IF NOT EXISTS transactions (

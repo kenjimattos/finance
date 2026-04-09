@@ -229,6 +229,24 @@ transactionsRouter.post('/transactions/sync', async (req, res, next) => {
 async function syncItem(itemId: string) {
   const { results: accounts } = await pluggy.fetchAccounts(itemId, 'CREDIT');
 
+  // Upsert discovered accounts so downstream code (settings, groups, bill
+  // windows) can reference them by account_id.
+  const upsertAccount = db.prepare(`
+    INSERT OR REPLACE INTO accounts
+      (id, item_id, name, number, type, raw_json, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+  `);
+  for (const account of accounts) {
+    upsertAccount.run(
+      account.id,
+      itemId,
+      account.name ?? null,
+      account.number ?? null,
+      account.type ?? null,
+      JSON.stringify(account),
+    );
+  }
+
   let txCount = 0;
   let billCount = 0;
 

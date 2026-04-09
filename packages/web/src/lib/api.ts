@@ -42,6 +42,15 @@ export interface Item {
   created_at: string;
 }
 
+export interface Account {
+  id: string;
+  itemId: string;
+  name: string | null;
+  number: string | null;
+  type: string | null;
+  syncedAt: string;
+}
+
 export interface CardSettings {
   item_id: string;
   display_name: string | null;
@@ -168,6 +177,9 @@ export const api = {
     request<{ accessToken: string }>('/connect-token', { method: 'POST' }),
 
   listItems: () => request<Item[]>('/items'),
+
+  listAccounts: (itemId: string) =>
+    request<Account[]>(`/accounts?itemId=${encodeURIComponent(itemId)}`),
   saveItem: (itemId: string) =>
     request<{ id: string; connectorName: string | null }>('/items', {
       method: 'POST',
