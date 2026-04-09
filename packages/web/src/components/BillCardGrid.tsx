@@ -1,12 +1,17 @@
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   api,
   type BillGroupBreakdown,
   type BillBreakdown,
+  type BillInstallmentBreakdown,
   type CardGroupFilter,
 } from '../lib/api';
-import { formatBRL, formatDateLong, formatDelta } from '../lib/format';
+import { formatBRL, formatDateLong, formatDateShort, formatDelta } from '../lib/format';
+
+const CATEGORY_COLLAPSE_LIMIT = 4;
+const INSTALLMENT_COLLAPSE_LIMIT = 4;
 
 /**
  * Layout philosophy (as of this iteration):
@@ -203,11 +208,41 @@ function BillCard({
   const categoriesSum = group.categories.reduce((acc, c) => acc + Math.max(0, c.total), 0);
   const denominator = categoriesSum > 0 ? categoriesSum : 1;
 
+  const [categoriesExpanded, setCategoriesExpanded] = useState(false);
+  const [installmentsExpanded, setInstallmentsExpanded] = useState(false);
+
+  const visibleCategories = categoriesExpanded
+    ? group.categories
+    : group.categories.slice(0, CATEGORY_COLLAPSE_LIMIT);
+  const hiddenCategoryCount = group.categories.length - visibleCategories.length;
+
+  const visibleInstallments = installmentsExpanded
+    ? group.installments
+    : group.installments.slice(0, INSTALLMENT_COLLAPSE_LIMIT);
+  const hiddenInstallmentCount =
+    group.installments.length - visibleInstallments.length;
+
+  // The whole card is clickable (toggles the active filter), but it has
+  // interactive children (expand/collapse buttons) so it can't be a real
+  // <button> — nesting buttons is invalid HTML. Use a role="button" div
+  // with keyboard support instead.
+  function handleCardActivate(
+    e: React.KeyboardEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>,
+  ) {
+    if ('key' in e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+    }
+    onClick();
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group relative flex flex-col border p-5 text-left transition-[background,border-color] hover:bg-[color:var(--color-paper-tint)]"
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={handleCardActivate}
+      onKeyDown={handleCardActivate}
+      className="group relative flex cursor-pointer flex-col border p-5 text-left transition-[background,border-color] hover:bg-[color:var(--color-paper-tint)] focus-visible:outline-2 focus-visible:outline-[color:var(--color-accent)]"
       style={{
         borderColor: active ? 'var(--color-accent)' : 'var(--color-paper-rule)',
         background: active ? 'var(--color-paper-tint)' : 'transparent',
@@ -262,31 +297,41 @@ function BillCard({
 
       {/* Category breakdown — thin bars, small type */}
       {group.categories.length > 0 && (
-        <ul className="mt-6 space-y-2.5">
-          {group.categories.map((cat) => (
-            <li key={cat.id}>
-              <div className="flex items-baseline justify-between gap-3 font-body text-[12px]">
-                <span className="truncate text-[color:var(--color-ink-soft)]">
-                  {cat.name}
-                </span>
-                <span className="font-mono tabular-nums text-[color:var(--color-ink-muted)]">
-                  {formatBRL(cat.total)}
-                </span>
-              </div>
-              {/* The thin proportional bar — 2px high, category color.
-                  Width is this category's share of the card's total spend. */}
-              <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
-                <div
-                  className="h-full"
-                  style={{
-                    background: cat.color,
-                    width: `${Math.round((Math.max(0, cat.total) / denominator) * 100)}%`,
-                  }}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
+        <div className="mt-6">
+          <SubsectionLabel>Categorias</SubsectionLabel>
+          <ul className="mt-2 space-y-2.5">
+            {visibleCategories.map((cat) => (
+              <li key={cat.id}>
+                <div className="flex items-baseline justify-between gap-3 font-body text-[12px]">
+                  <span className="truncate text-[color:var(--color-ink-soft)]">
+                    {cat.name}
+                  </span>
+                  <span className="font-mono tabular-nums text-[color:var(--color-ink-muted)]">
+                    {formatBRL(cat.total)}
+                  </span>
+                </div>
+                {/* The thin proportional bar — 2px high, category color.
+                    Width is this category's share of the card's total spend. */}
+                <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
+                  <div
+                    className="h-full"
+                    style={{
+                      background: cat.color,
+                      width: `${Math.round((Math.max(0, cat.total) / denominator) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+          {(hiddenCategoryCount > 0 || categoriesExpanded) && (
+            <ExpandToggle
+              expanded={categoriesExpanded}
+              hiddenCount={hiddenCategoryCount}
+              onToggle={() => setCategoriesExpanded((e) => !e)}
+            />
+          )}
+        </div>
       )}
 
       {group.categories.length === 0 && (
@@ -294,6 +339,109 @@ function BillCard({
           Nenhuma transação categorizada ainda neste grupo.
         </p>
       )}
+
+      {/* Installment sub-section — pre-committed spending landing in this bill */}
+      {group.installments.length > 0 && (
+        <div className="mt-6 border-t border-[color:var(--color-paper-rule)] pt-4">
+          <SubsectionLabel>Parceladas</SubsectionLabel>
+          <ul className="mt-2 space-y-2">
+            {visibleInstallments.map((inst) => (
+              <InstallmentRow key={inst.id} installment={inst} />
+            ))}
+          </ul>
+          {(hiddenInstallmentCount > 0 || installmentsExpanded) && (
+            <ExpandToggle
+              expanded={installmentsExpanded}
+              hiddenCount={hiddenInstallmentCount}
+              onToggle={() => setInstallmentsExpanded((e) => !e)}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Small caps header used to label a sub-section inside a card.
+ */
+function SubsectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Toggle for expand/collapse of a sub-section list.
+ *
+ * stopPropagation on click is essential: the whole card is a clickable
+ * region that toggles the active filter, so without it, clicking
+ * "+ N mais" would also toggle the filter.
+ */
+function ExpandToggle({
+  expanded,
+  hiddenCount,
+  onToggle,
+}: {
+  expanded: boolean;
+  hiddenCount: number;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      className="mt-3 font-body text-[11px] uppercase tracking-[0.1em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+    >
+      {expanded ? '− recolher' : `+ ${hiddenCount} mais`}
     </button>
   );
+}
+
+/**
+ * One row of the installment sub-section.
+ *
+ * Shows: cleaned description (slice off the trailing " PARCxx/yy" suffix
+ * Pluggy embeds), the installment counter in mono, and the amount.
+ * The counter slice is a display-time local cleanup — we deliberately do
+ * NOT mutate t.description in the shared transaction shape, because the
+ * user asked to keep that untouched for now.
+ */
+function InstallmentRow({
+  installment,
+}: {
+  installment: BillInstallmentBreakdown;
+}) {
+  const cleanDescription = stripInstallmentSuffix(installment.description);
+  return (
+    <li className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]">
+      <span className="truncate text-[color:var(--color-ink-soft)]">
+        {cleanDescription}
+      </span>
+      <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
+        {installment.installmentNumber}/{installment.totalInstallments}
+      </span>
+      <span className="font-mono tabular-nums text-[color:var(--color-ink-muted)]">
+        {formatBRL(installment.amount)}
+      </span>
+    </li>
+  );
+}
+
+/**
+ * Remove the Pluggy " PARCxx/yy" suffix from a transaction description.
+ * Pluggy embeds the installment counter directly in the description
+ * string (e.g. "MERCADO*MERCADPARC05/10"), which is redundant with the
+ * structured installmentNumber/totalInstallments we already render.
+ *
+ * Matches both the space-separated and glued-on variants defensively.
+ */
+function stripInstallmentSuffix(description: string | null): string {
+  if (!description) return '—';
+  return description.replace(/\s*PARC\d{1,2}\/\d{1,2}\s*$/i, '').trim() || '—';
 }
