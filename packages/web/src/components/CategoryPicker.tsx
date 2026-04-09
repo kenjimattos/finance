@@ -70,16 +70,26 @@ function CategoryPickerPortal({
       if (!rootRef.current) return;
       if (!rootRef.current.contains(e.target as Node)) onClose();
     }
-    function onScrollOrResize() {
+    // Close on scroll OUTSIDE the picker — that's the case where the trigger
+    // moved and the dropdown would visually detach. Scroll INSIDE the picker
+    // (the category list itself) is expected behavior and must not close.
+    // Using capture:true to catch events in the document tree, then checking
+    // the target so internal scroll is ignored.
+    function onScroll(e: Event) {
+      if (!rootRef.current) return;
+      if (rootRef.current.contains(e.target as Node)) return;
+      onClose();
+    }
+    function onResize() {
       onClose();
     }
     document.addEventListener('mousedown', onDocMouseDown);
-    window.addEventListener('scroll', onScrollOrResize, true);
-    window.addEventListener('resize', onScrollOrResize);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
     return () => {
       document.removeEventListener('mousedown', onDocMouseDown);
-      window.removeEventListener('scroll', onScrollOrResize, true);
-      window.removeEventListener('resize', onScrollOrResize);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
     };
   }, [onClose]);
 
