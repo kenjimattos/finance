@@ -137,3 +137,28 @@ function shiftMonthBack(isoDate: string): string {
   const shifted = addMonths(y, m, -1);
   return ymd(shifted.year, shifted.month1, d);
 }
+
+function shiftMonthForward(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const shifted = addMonths(y, m, 1);
+  return ymd(shifted.year, shifted.month1, d);
+}
+
+/**
+ * The *next* bill window — useful for manual bill-shift overrides, where a
+ * transaction with shift=-1 belongs to the current cycle but its raw date
+ * lands in the next cycle. The start is the day AFTER the current window's
+ * end, and everything else shifts forward by one month.
+ */
+export function computeNextBillWindow(
+  settings: CardSettings,
+  today: Date = new Date(),
+): BillWindow {
+  const current = computeOpenBillWindow(settings, today);
+  return {
+    periodStart: shiftMonthForward(current.periodStart),
+    periodEnd: shiftMonthForward(current.periodEnd),
+    nextClosingDate: shiftMonthForward(current.nextClosingDate),
+    nextDueDate: shiftMonthForward(current.nextDueDate),
+  };
+}
