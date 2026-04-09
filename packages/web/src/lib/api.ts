@@ -51,6 +51,15 @@ export interface Account {
   syncedAt: string;
 }
 
+export interface AccountSettings {
+  account_id: string;
+  display_name: string | null;
+  closing_day: number;
+  due_day: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CardSettings {
   item_id: string;
   display_name: string | null;
@@ -184,6 +193,17 @@ export const api = {
     request<{ id: string; connectorName: string | null }>('/items', {
       method: 'POST',
       body: JSON.stringify({ itemId }),
+    }),
+
+  getAccountSettings: (accountId: string) =>
+    request<AccountSettings>(`/account-settings/${accountId}`),
+  putAccountSettings: (
+    accountId: string,
+    body: { displayName?: string; closingDay: number; dueDay: number },
+  ) =>
+    request<AccountSettings>(`/account-settings/${accountId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
     }),
 
   getCardSettings: (itemId: string) =>

@@ -45,6 +45,19 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_accounts_item ON accounts(item_id);
 
+  -- Per-account settings (closing/due day). Replaces the old per-item
+  -- card_settings table. Each credit account under a Pluggy item can have
+  -- its own billing cycle.
+  CREATE TABLE IF NOT EXISTS account_settings (
+    account_id TEXT PRIMARY KEY,
+    display_name TEXT,
+    closing_day INTEGER NOT NULL,
+    due_day INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+  );
+
   -- Raw transactions cache from Pluggy. raw_json keeps the full payload so
   -- new fields can be surfaced later without a backfill.
   CREATE TABLE IF NOT EXISTS transactions (
@@ -212,6 +225,38 @@ db.exec(`
     AND json_extract(raw_json, '$.creditCardMetadata.cardNumber') IS NOT NULL
     AND TRIM(json_extract(raw_json, '$.creditCardMetadata.cardNumber')) <> ''
 `);
+
+// Phase 2: backfill account_settings from card_settings for existing users.
+// For each card_settings row, copy closing/due day to every CREDIT account
+// under that item. Only runs when account_settings is empty and accounts
+// have been synced. Idempotent — safe to re-run.
+{
+  const hasAccountSettings = db
+    .prepare('SELECT COUNT(*) AS n FROM account_settings')
+    .get() as { n: number };
+  if (hasAccountSettings.n === 0) {
+    const oldSettings = db
+      .prepare('SELECT item_id, display_name, closing_day, due_day FROM card_settings')
+      .all() as Array<{
+      item_id: string;
+      display_name: string | null;
+      closing_day: number;
+      due_day: number;
+    }>;
+    for (const s of oldSettings) {
+      const accts = db
+        .prepare("SELECT id FROM accounts WHERE item_id = ? AND type = 'CREDIT'")
+        .all(s.item_id) as Array<{ id: string }>;
+      for (const a of accts) {
+        db.prepare(
+          `INSERT OR IGNORE INTO account_settings
+             (account_id, display_name, closing_day, due_day)
+           VALUES (?, ?, ?, ?)`,
+        ).run(a.id, s.display_name, s.closing_day, s.due_day);
+      }
+    }
+  }
+}
 
 function addColumnIfMissing(table: string, column: string, decl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
