@@ -9,6 +9,10 @@ import { config } from './config.js';
 import { connectRouter } from './routes/connect.js';
 import { itemsRouter } from './routes/items.js';
 import { transactionsRouter } from './routes/transactions.js';
+import { cardSettingsRouter } from './routes/cardSettings.js';
+import { categoriesRouter } from './routes/categories.js';
+import { billsRouter } from './routes/bills.js';
+import { categorizeRouter } from './routes/categorize.js';
 
 const app = express();
 
@@ -22,7 +26,11 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.use(connectRouter);
 app.use(itemsRouter);
+app.use(cardSettingsRouter);
+app.use(categoriesRouter);
+app.use(billsRouter);
 app.use(transactionsRouter);
+app.use(categorizeRouter);
 
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof ZodError) {
