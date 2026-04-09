@@ -112,6 +112,8 @@ export interface Transaction {
   totalInstallments: number | null;
   billId: string | null;
   cardLast4: string | null;
+  /** -1 = pulled from next cycle, +1 = pushed from previous cycle, null = unshifted */
+  billShift: -1 | 1 | null;
   userCategory: UserCategoryRef | null;
 }
 
@@ -140,6 +142,11 @@ export interface BillBreakdown {
   periodEnd: string;
   closingDate: string;
   dueDate: string;
+  /** Adjacent windows — needed so callers can ask /transactions for a shift-aware list. */
+  previousPeriodStart: string;
+  previousPeriodEnd: string;
+  nextPeriodStart: string;
+  nextPeriodEnd: string;
   /** First entry is always "Todos" (groupId: null). Empty groups are filtered out. */
   groups: BillGroupBreakdown[];
 }
@@ -186,12 +193,21 @@ export const api = {
     to?: string;
     uncategorized?: boolean;
     cardGroupId?: string;
+    /** Passing all four neighbor-window fields switches the backend to shift-aware mode. */
+    previousFrom?: string;
+    previousTo?: string;
+    nextFrom?: string;
+    nextTo?: string;
   }) => {
     const qs = new URLSearchParams({ itemId: params.itemId });
     if (params.from) qs.set('from', params.from);
     if (params.to) qs.set('to', params.to);
     if (params.uncategorized) qs.set('uncategorized', 'true');
     if (params.cardGroupId) qs.set('cardGroupId', params.cardGroupId);
+    if (params.previousFrom) qs.set('previousFrom', params.previousFrom);
+    if (params.previousTo) qs.set('previousTo', params.previousTo);
+    if (params.nextFrom) qs.set('nextFrom', params.nextFrom);
+    if (params.nextTo) qs.set('nextTo', params.nextTo);
     return request<Transaction[]>(`/transactions?${qs}`);
   },
 
@@ -242,6 +258,15 @@ export const api = {
     request<unknown>(`/transactions/${transactionId}/category`, {
       method: 'DELETE',
     }),
+
+  shiftTransactionBill: (transactionId: string, shift: -1 | 0 | 1) =>
+    request<{ ok: true; transactionId: string; shift: number }>(
+      `/transactions/${transactionId}/bill-shift`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ shift }),
+      },
+    ),
 
   bulkCategorize: (transactionIds: string[], categoryId: number) =>
     request<{ ok: true; applied: number; total: number }>(

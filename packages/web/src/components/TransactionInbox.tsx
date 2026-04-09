@@ -20,12 +20,20 @@ export function TransactionInbox({
   itemId,
   periodStart,
   periodEnd,
+  previousPeriodStart,
+  previousPeriodEnd,
+  nextPeriodStart,
+  nextPeriodEnd,
   cardGroupQuery,
   categoryFilter,
 }: {
   itemId: string;
   periodStart: string;
   periodEnd: string;
+  previousPeriodStart: string;
+  previousPeriodEnd: string;
+  nextPeriodStart: string;
+  nextPeriodEnd: string;
   cardGroupQuery: string | undefined;
   categoryFilter: CategoryTabFilter;
 }) {
@@ -34,12 +42,22 @@ export function TransactionInbox({
   const [showCategorized, setShowCategorized] = useState(true);
 
   const txsQ = useQuery({
-    queryKey: ['transactions', itemId, periodStart, periodEnd, cardGroupQuery ?? 'all'],
+    queryKey: [
+      'transactions',
+      itemId,
+      periodStart,
+      periodEnd,
+      cardGroupQuery ?? 'all',
+    ],
     queryFn: () =>
       api.listTransactions({
         itemId,
         from: periodStart,
         to: periodEnd,
+        previousFrom: previousPeriodStart,
+        previousTo: previousPeriodEnd,
+        nextFrom: nextPeriodStart,
+        nextTo: nextPeriodEnd,
         cardGroupId: cardGroupQuery,
       }),
   });
@@ -61,6 +79,15 @@ export function TransactionInbox({
 
   const clearMut = useMutation({
     mutationFn: (txId: string) => api.clearCategory(txId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+    },
+  });
+
+  const shiftMut = useMutation({
+    mutationFn: ({ txId, shift }: { txId: string; shift: -1 | 0 | 1 }) =>
+      api.shiftTransactionBill(txId, shift),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
       queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
@@ -165,6 +192,7 @@ export function TransactionInbox({
                 assignMut.mutate({ txId: tx.id, categoryId })
               }
               onClear={() => clearMut.mutate(tx.id)}
+              onShift={(shift) => shiftMut.mutate({ txId: tx.id, shift })}
             />
           ))}
         </div>
@@ -196,6 +224,7 @@ export function TransactionInbox({
                   assignMut.mutate({ txId: tx.id, categoryId })
                 }
                 onClear={() => clearMut.mutate(tx.id)}
+                onShift={(shift) => shiftMut.mutate({ txId: tx.id, shift })}
               />
             ))}
             {categorized.length === 0 && (

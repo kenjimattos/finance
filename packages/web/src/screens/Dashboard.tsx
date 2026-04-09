@@ -102,6 +102,10 @@ export function Dashboard({ itemId }: { itemId: string }) {
         itemId={itemId}
         periodStart={breakdownQ.data.periodStart}
         periodEnd={breakdownQ.data.periodEnd}
+        previousPeriodStart={breakdownQ.data.previousPeriodStart}
+        previousPeriodEnd={breakdownQ.data.previousPeriodEnd}
+        nextPeriodStart={breakdownQ.data.nextPeriodStart}
+        nextPeriodEnd={breakdownQ.data.nextPeriodEnd}
         cardGroupQuery={cardGroupQuery}
         categoryFilter={categoryFilter}
       />
