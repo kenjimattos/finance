@@ -182,7 +182,7 @@ function categoryBreakdown(
       `SELECT uc.id        AS id,
               uc.name      AS name,
               uc.color     AS color,
-              -SUM(t.amount) AS total
+              SUM(t.amount) AS total
        FROM transactions t
        INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
        INNER JOIN user_categories uc        ON uc.id = tc.user_category_id
@@ -212,21 +212,25 @@ function categoryBreakdown(
 }
 
 /**
- * Sum the absolute spend in a bill window, optionally filtered by card group.
- * Returns a POSITIVE number representing "how much you owe" — amounts are
- * stored negative for purchases (Pluggy convention), so we invert via -SUM().
+ * Sum the spend in a bill window, optionally filtered by card group.
  *
- * Only CATEGORIZED transactions contribute to the total. This is intentional:
- * categorization is the user's way of saying "yes, this belongs in my bill".
- * Anything the user hasn't yet touched (including noise like "pagamento de
- * fatura" or "pagamento recebido") stays out of the number, and the user
- * just leaves those rows uncategorized to exclude them. No extra schema,
- * no ignore flag — the absence of a category IS the exclusion.
+ * Sign convention in the Pluggy data we actually receive (verified against
+ * Meu Pluggy): DEBIT transactions (purchases) come with a POSITIVE amount,
+ * CREDIT transactions (refunds, reversals) come with a NEGATIVE amount.
+ * This is the bank's own bookkeeping perspective: "amount you owe". So a
+ * plain SUM() already gives "how much you owe net of reversals" without
+ * any sign inversion.
  *
- * Side effect to be aware of: the number starts at R$ 0 on a freshly synced
- * card and grows as the user categorizes. Delta-vs-previous is also
- * categorized-vs-categorized so both sides of the comparison are apples to
- * apples.
+ * (The original code did `-SUM(amount)` based on the pluggy-sdk type
+ *  documentation, which said "positive = CREDIT = inflow". That doc
+ *  disagreed with the data actually returned for credit card accounts,
+ *  leading to negative totals. Trust the data, not the docs — again.)
+ *
+ * Only CATEGORIZED transactions contribute to the total. This is
+ * intentional: categorization is the user's way of saying "yes, this
+ * belongs in my bill". Anything uncategorized (including noise like
+ * "pagamento de fatura" or "pagamento recebido") stays out. No extra
+ * schema, no ignore flag — the absence of a category IS the exclusion.
  */
 function sumBillTotal(
   itemId: string,
@@ -236,7 +240,7 @@ function sumBillTotal(
 ): number {
   const row = db
     .prepare(
-      `SELECT -COALESCE(SUM(t.amount), 0) AS total
+      `SELECT COALESCE(SUM(t.amount), 0) AS total
        FROM transactions t
        INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
        LEFT JOIN card_group_members m
