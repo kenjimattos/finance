@@ -30,6 +30,7 @@ interface TransactionRow {
   installment_number: number | null;
   total_installments: number | null;
   bill_id: string | null;
+  card_last4: string | null;
   user_category_id: number | null;
   user_category_name: string | null;
   user_category_color: string | null;
@@ -62,7 +63,7 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
         `SELECT t.id, t.account_id, t.item_id, t.date, t.description, t.amount,
                 t.currency_code, t.pluggy_category, t.pluggy_category_id,
                 t.type, t.status, t.installment_number, t.total_installments,
-                t.bill_id,
+                t.bill_id, t.card_last4,
                 uc.id    AS user_category_id,
                 uc.name  AS user_category_name,
                 uc.color AS user_category_color,
@@ -122,8 +123,8 @@ async function syncItem(itemId: string) {
     INSERT OR REPLACE INTO transactions
       (id, account_id, item_id, date, description, amount, currency_code,
        pluggy_category, pluggy_category_id, type, status, installment_number,
-       total_installments, bill_id, raw_json, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       total_installments, bill_id, card_last4, raw_json, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   `);
 
   const insertBill = db.prepare(`
@@ -151,6 +152,7 @@ async function syncItem(itemId: string) {
         metadata?.installmentNumber ?? null,
         metadata?.totalInstallments ?? null,
         metadata?.billId ?? null,
+        lastFourDigits(metadata?.cardNumber),
         JSON.stringify(t),
       );
       txCount++;
@@ -248,6 +250,20 @@ function applyLearnedRules(itemId: string) {
   })();
 }
 
+/**
+ * Pluggy returns the cardNumber field in creditCardMetadata with inconsistent
+ * shapes across connectors: some send just "1234", others send "****1234",
+ * others send the full masked string like "1234 **** **** 5678". We only
+ * care about the last 4 digits for display, so normalize to exactly that,
+ * or null if the input doesn't contain 4 digits.
+ */
+function lastFourDigits(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < 4) return null;
+  return digits.slice(-4);
+}
+
 function toYmd(d: Date | string): string {
   if (typeof d === 'string') {
     // Pluggy sometimes returns date as string already; take the first 10 chars.
@@ -274,6 +290,7 @@ function shapeRow(r: TransactionRow) {
     installmentNumber: r.installment_number,
     totalInstallments: r.total_installments,
     billId: r.bill_id,
+    cardLast4: r.card_last4,
     userCategory:
       r.user_category_id == null
         ? null
