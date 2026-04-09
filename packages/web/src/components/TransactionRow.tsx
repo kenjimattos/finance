@@ -28,7 +28,12 @@ export function TransactionRow({
   onAssign: (categoryId: number) => void;
   onClear: () => void;
 }) {
-  const isOutflow = tx.amount < 0;
+  // Sign convention (from Meu Pluggy for credit card accounts):
+  //   DEBIT  = purchase     → amount positive  → outflow (ink)
+  //   CREDIT = refund/credit → amount negative  → inflow  (olive)
+  // We key on tx.type instead of the sign so the display is explicit and
+  // doesn't break if a connector ever sends zero-amount entries.
+  const isOutflow = tx.type === 'DEBIT';
   const amountDisplay = formatBRL(Math.abs(tx.amount));
 
   return (
