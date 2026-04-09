@@ -179,6 +179,11 @@ db.exec(`
 // DB out there has already run them.
 addColumnIfMissing('transactions', 'card_last4', 'TEXT');
 
+// Re-enable all category rules that were auto-disabled by the old
+// "2 overrides = disabled" logic. Rules now stay active regardless of
+// override_count — the user corrects minority cases manually.
+db.exec(`UPDATE category_rules SET disabled = 0 WHERE disabled = 1`);
+
 // Backfill: transactions that have a non-numeric cardNumber in raw_json
 // (e.g. "DIGITAL-PICPAY") were previously stored with card_last4 = NULL
 // because lastFourDigits() only extracted numeric suffixes. The function

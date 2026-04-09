@@ -328,12 +328,14 @@ function applyLearnedRules(itemId: string) {
 
   if (candidates.length === 0) return;
 
+  // Load ALL rules — including previously "disabled" ones. The disabled flag
+  // is no longer used for filtering (rules stay active regardless of override
+  // count), but the column remains in the schema for historical tracking.
   const ruleBySlug = new Map<string, number>();
   for (const row of db
     .prepare(
       `SELECT merchant_slug, user_category_id
-       FROM category_rules
-       WHERE disabled = 0`,
+       FROM category_rules`,
     )
     .all() as Array<{ merchant_slug: string; user_category_id: number }>) {
     ruleBySlug.set(row.merchant_slug, row.user_category_id);
