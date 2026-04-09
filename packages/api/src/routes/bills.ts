@@ -162,6 +162,12 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
       periodEnd: current.periodEnd,
       closingDate: current.nextClosingDate,
       dueDate: current.nextDueDate,
+      // Neighbor windows are exposed so the frontend can pass them to
+      // GET /transactions and get a shift-aware list matching the card totals.
+      previousPeriodStart: previous.periodStart,
+      previousPeriodEnd: previous.periodEnd,
+      nextPeriodStart: next.periodStart,
+      nextPeriodEnd: next.periodEnd,
       groups: breakdown.map((b) => ({
         groupId: b.groupId,
         name: b.name,
