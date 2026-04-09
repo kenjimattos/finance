@@ -5,6 +5,7 @@ import { api, type Transaction } from '../lib/api';
 import type { CategoryTabFilter } from './CategoryTabs';
 import { TransactionRow } from './TransactionRow';
 import { CategoryTrigger } from './CategoryPicker';
+import { useToast } from './Toast';
 
 /**
  * The categorization inbox — the main work surface of the app.
@@ -38,6 +39,7 @@ export function TransactionInbox({
   categoryFilter: CategoryTabFilter;
 }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showCategorized, setShowCategorized] = useState(true);
 
@@ -93,6 +95,34 @@ export function TransactionInbox({
       queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
     },
   });
+
+  /**
+   * Shift a transaction's bill cycle AND surface an undo toast. After a
+   * successful shift, the row drops out of the current list (the backend
+   * query no longer returns it), so without undo there'd be no way to
+   * recover from a mistaken click — we don't have historical bill
+   * navigation yet. The toast holds that recovery window open for 6s.
+   */
+  function runShift(txId: string, shift: -1 | 0 | 1) {
+    shiftMut.mutate(
+      { txId, shift },
+      {
+        onSuccess: () => {
+          if (shift === 0) return; // no toast needed for a restore
+          const message =
+            shift === 1
+              ? 'Movida para a próxima fatura'
+              : 'Movida para a fatura anterior';
+          toast.show({
+            message,
+            undo: () => {
+              shiftMut.mutate({ txId, shift: 0 });
+            },
+          });
+        },
+      },
+    );
+  }
 
   const bulkMut = useMutation({
     mutationFn: ({
@@ -192,7 +222,7 @@ export function TransactionInbox({
                 assignMut.mutate({ txId: tx.id, categoryId })
               }
               onClear={() => clearMut.mutate(tx.id)}
-              onShift={(shift) => shiftMut.mutate({ txId: tx.id, shift })}
+              onShift={(shift) => runShift(tx.id, shift)}
             />
           ))}
         </div>
@@ -224,7 +254,7 @@ export function TransactionInbox({
                   assignMut.mutate({ txId: tx.id, categoryId })
                 }
                 onClear={() => clearMut.mutate(tx.id)}
-                onShift={(shift) => shiftMut.mutate({ txId: tx.id, shift })}
+                onShift={(shift) => runShift(tx.id, shift)}
               />
             ))}
             {categorized.length === 0 && (

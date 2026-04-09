@@ -1,20 +1,20 @@
 import type { Category, Transaction } from '../lib/api';
 import { formatBRL, formatDateShort } from '../lib/format';
 import { CategoryTrigger } from './CategoryPicker';
+import { RowActionsMenu, type RowAction } from './RowActionsMenu';
 
 /**
  * One printed-row-of-the-broadsheet per transaction.
  *
  * Layout:
- *   [checkbox] [date] [description + category + shift]         [amount]
+ *   [checkbox] [date] [description + category]         [amount] [⋯]
  *
  * - Description is in the body font (Inter), compact
  * - Amount is mono, right-aligned, tabular-nums for clean columns
  * - Category lives inline underneath the description as a small pill
  * - `assignedBy === 'learned'` is rendered with a subtle "auto" hint
- * - Next to the category, a native <select> lets the user push the
- *   transaction into the neighboring bill cycle when the purchase
- *   date doesn't match when the charge actually lands
+ * - The trailing "⋯" opens a menu with rare actions — currently just
+ *   "mover para outra fatura", but the container is ready to grow
  */
 export function TransactionRow({
   tx,
@@ -41,9 +41,20 @@ export function TransactionRow({
   const isOutflow = tx.type === 'DEBIT';
   const amountDisplay = formatBRL(Math.abs(tx.amount));
 
+  const actions: RowAction[] = [
+    {
+      label: '→ Mover para próxima fatura',
+      onClick: () => onShift(1),
+    },
+    {
+      label: '← Mover para fatura anterior',
+      onClick: () => onShift(-1),
+    },
+  ];
+
   return (
     <div
-      className="row-reveal group grid grid-cols-[24px_56px_1fr_auto] items-center gap-4 py-3 transition-colors"
+      className="row-reveal group grid grid-cols-[24px_56px_1fr_auto_24px] items-center gap-4 py-3 transition-colors"
       style={{
         background: selected ? 'var(--color-paper-tint)' : 'transparent',
       }}
@@ -91,7 +102,6 @@ export function TransactionRow({
               auto
             </span>
           )}
-          <BillShiftSelect value={tx.billShift} onChange={onShift} />
         </div>
       </div>
 
@@ -106,50 +116,8 @@ export function TransactionRow({
         {isOutflow ? '−' : '+'}
         {amountDisplay}
       </div>
-    </div>
-  );
-}
 
-/**
- * Native <select> styled as a tiny pill. Three states:
- *    null  → "neste ciclo"  (default; no override)
- *    +1    → "→ próxima"    (pushed forward)
- *    -1    → "← anterior"   (pulled backward)
- *
- * When the value is non-null, the pill gets the accent color so a
- * shifted row visually stands out from a plain one.
- */
-function BillShiftSelect({
-  value,
-  onChange,
-}: {
-  value: -1 | 1 | null;
-  onChange: (shift: -1 | 0 | 1) => void;
-}) {
-  const isShifted = value != null;
-  return (
-    <select
-      value={value ?? 0}
-      onChange={(e) => {
-        const n = Number(e.target.value);
-        if (n === -1 || n === 0 || n === 1) onChange(n);
-      }}
-      onClick={(e) => e.stopPropagation()}
-      className="cursor-pointer border px-2 py-0.5 font-body text-[10px] uppercase tracking-[0.1em] transition-colors focus:outline-none"
-      style={{
-        borderColor: isShifted ? 'var(--color-accent)' : 'var(--color-paper-rule)',
-        background: isShifted
-          ? 'var(--color-paper-tint)'
-          : 'var(--color-paper-tint)',
-        color: isShifted
-          ? 'var(--color-accent)'
-          : 'var(--color-ink-faint)',
-      }}
-      title="Mover este lançamento para outro ciclo"
-    >
-      <option value={0}>neste ciclo</option>
-      <option value={1}>→ próxima fatura</option>
-      <option value={-1}>← fatura anterior</option>
-    </select>
+      <RowActionsMenu actions={actions} />
+    </div>
   );
 }
