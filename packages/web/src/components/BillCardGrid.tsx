@@ -26,11 +26,13 @@ export function BillCardGrid({
   itemId,
   selected,
   onSelect,
+  onManageCards,
 }: {
   breakdown: BillBreakdown;
   itemId: string;
   selected: CardGroupFilter;
   onSelect: (filter: CardGroupFilter) => void;
+  onManageCards: () => void;
 }) {
   const queryClient = useQueryClient();
   const sync = useMutation({
@@ -66,14 +68,23 @@ export function BillCardGrid({
             </span>
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => sync.mutate()}
-          disabled={sync.isPending}
-          className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
-        >
-          {sync.isPending ? 'sincronizando…' : 'sincronizar ↻'}
-        </button>
+        <div className="flex items-center gap-5">
+          <button
+            type="button"
+            onClick={onManageCards}
+            className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+          >
+            gerenciar cartões
+          </button>
+          <button
+            type="button"
+            onClick={() => sync.mutate()}
+            disabled={sync.isPending}
+            className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
+          >
+            {sync.isPending ? 'sincronizando…' : 'sincronizar ↻'}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
