@@ -45,12 +45,14 @@ const INSTALLMENT_COLLAPSE_LIMIT = 4;
 export function BillCardGrid({
   breakdown,
   itemId,
+  accountId,
   selected,
   onSelect,
   onManageCards,
 }: {
   breakdown: BillBreakdown;
   itemId: string;
+  accountId: string;
   selected: CardGroupFilter;
   onSelect: (filter: CardGroupFilter) => void;
   onManageCards: () => void;
@@ -59,8 +61,9 @@ export function BillCardGrid({
   const sync = useMutation({
     mutationFn: () => api.syncTransactions(itemId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts', itemId] });
     },
   });
 
