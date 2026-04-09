@@ -12,6 +12,7 @@
     "dev:web": "npm run dev -w @finance/web",
     "build": "npm run build -w @finance/api && npm run build -w @finance/web",
     "start": "npm run start -w @finance/api",
-    "typecheck": "npm run typecheck -w @finance/api && npm run typecheck -w @finance/web"
+    "typecheck": "npm run typecheck -w @finance/api && npm run typecheck -w @finance/web",
+    "test": "npm run test -w @finance/api"
   }
 }
