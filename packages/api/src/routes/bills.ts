@@ -105,6 +105,18 @@ billsRouter.get('/bills/current', (req, res, next) => {
  * Sum the absolute spend in a bill window, optionally filtered by card group.
  * Returns a POSITIVE number representing "how much you owe" — amounts are
  * stored negative for purchases (Pluggy convention), so we invert via -SUM().
+ *
+ * Only CATEGORIZED transactions contribute to the total. This is intentional:
+ * categorization is the user's way of saying "yes, this belongs in my bill".
+ * Anything the user hasn't yet touched (including noise like "pagamento de
+ * fatura" or "pagamento recebido") stays out of the number, and the user
+ * just leaves those rows uncategorized to exclude them. No extra schema,
+ * no ignore flag — the absence of a category IS the exclusion.
+ *
+ * Side effect to be aware of: the number starts at R$ 0 on a freshly synced
+ * card and grows as the user categorizes. Delta-vs-previous is also
+ * categorized-vs-categorized so both sides of the comparison are apples to
+ * apples.
  */
 function sumBillTotal(
   itemId: string,
@@ -116,6 +128,7 @@ function sumBillTotal(
     .prepare(
       `SELECT -COALESCE(SUM(t.amount), 0) AS total
        FROM transactions t
+       INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
        LEFT JOIN card_group_members m
          ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
        WHERE t.item_id = ?
