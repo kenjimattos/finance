@@ -403,13 +403,20 @@ function toYmd(d: Date | string): string {
   return `${year}-${month}-${day}`;
 }
 
+const INSTALLMENT_SUFFIX = /\s*PARC\d{1,2}\/\d{1,2}\s*$/i;
+
+function stripInstallmentSuffix(desc: string | null): string | null {
+  if (!desc) return desc;
+  return desc.replace(INSTALLMENT_SUFFIX, '').trim() || desc;
+}
+
 function shapeRow(r: TransactionRow) {
   return {
     id: r.id,
     accountId: r.account_id,
     itemId: r.item_id,
     date: r.date,
-    description: r.description,
+    description: stripInstallmentSuffix(r.description),
     amount: r.amount,
     currencyCode: r.currency_code,
     pluggyCategory: r.pluggy_category,
