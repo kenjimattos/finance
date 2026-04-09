@@ -112,7 +112,7 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
 
 /**
  * Parse the cardGroupId query param into a discriminated shape so the SQL
- * can branch cleanly. Kept as a pure function for reuse by /bills/current.
+ * can branch cleanly. Kept as a pure function for reuse by /bills/current/breakdown.
  */
 export function parseCardGroupFilter(
   raw: string | undefined,

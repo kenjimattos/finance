@@ -39,7 +39,6 @@ export function BillCardGrid({
     mutationFn: () => api.syncTransactions(itemId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['currentBill', itemId] });
       queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
     },
   });

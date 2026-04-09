@@ -44,63 +44,6 @@ billsRouter.get('/bills', (req, res, next) => {
   }
 });
 
-const currentQuerySchema = z.object({
-  itemId: z.string().min(1),
-  cardGroupId: z.string().optional(),
-});
-
-// GET /bills/current?itemId=...&cardGroupId=...
-// Returns the *open* bill window (computed, not stored) plus its running total
-// and a comparison against the previous bill window. This is the main summary
-// card the frontend renders at the top of the screen.
-//
-// cardGroupId filter semantics:
-//   omitted → all cards (full bill)
-//   "none"  → cards with no group (unassigned)
-//   "<id>"  → cards in that group
-billsRouter.get('/bills/current', (req, res, next) => {
-  try {
-    const { itemId, cardGroupId } = currentQuerySchema.parse(req.query);
-    const groupFilter = parseCardGroupFilter(cardGroupId);
-
-    const settings = requireCardSettings(itemId);
-    if (!settings) {
-      res.status(412).json({
-        error: 'CardSettingsMissing',
-        message:
-          'Configure closing_day and due_day for this card via PUT /card-settings/:itemId before querying the open bill.',
-      });
-      return;
-    }
-
-    const current = computeOpenBillWindow({
-      closingDay: settings.closing_day,
-      dueDay: settings.due_day,
-    });
-    const previous = computePreviousBillWindow({
-      closingDay: settings.closing_day,
-      dueDay: settings.due_day,
-    });
-
-    const currentTotal = sumBillTotal(itemId, current.periodStart, current.periodEnd, groupFilter);
-    const previousTotal = sumBillTotal(itemId, previous.periodStart, previous.periodEnd, groupFilter);
-
-    res.json({
-      itemId,
-      displayName: settings.display_name,
-      periodStart: current.periodStart,
-      periodEnd: current.periodEnd,
-      closingDate: current.nextClosingDate,
-      dueDate: current.nextDueDate,
-      total: round2(currentTotal),
-      previousTotal: round2(previousTotal),
-      delta: round2(currentTotal - previousTotal),
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
 /**
  * GET /bills/current/breakdown?itemId=...
  *
