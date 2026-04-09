@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'motion/react';
 import { api, type Transaction } from '../lib/api';
+import type { CategoryTabFilter } from './CategoryTabs';
 import { TransactionRow } from './TransactionRow';
 import { CategoryTrigger } from './CategoryPicker';
 
@@ -20,11 +21,13 @@ export function TransactionInbox({
   periodStart,
   periodEnd,
   cardGroupQuery,
+  categoryFilter,
 }: {
   itemId: string;
   periodStart: string;
   periodEnd: string;
   cardGroupQuery: string | undefined;
+  categoryFilter: CategoryTabFilter;
 }) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -52,7 +55,7 @@ export function TransactionInbox({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
       queryClient.invalidateQueries({ queryKey: ['categories'] });
-      queryClient.invalidateQueries({ queryKey: ['currentBill', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
     },
   });
 
@@ -60,7 +63,7 @@ export function TransactionInbox({
     mutationFn: (txId: string) => api.clearCategory(txId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['currentBill', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
     },
   });
 
@@ -75,17 +78,34 @@ export function TransactionInbox({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
       queryClient.invalidateQueries({ queryKey: ['categories'] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
       setSelected(new Set());
     },
   });
 
+  // Apply the category tab filter on top of whatever came back from the
+  // backend (which is already card-group-filtered). Filtering client-side
+  // keeps /transactions simple and avoids an extra query parameter.
+  //
+  // Special case: when a category is selected, ONLY that category's
+  // transactions make sense — uncategorized rows are hidden entirely,
+  // because there's no way to compare "uncategorized" against "Alimentação".
+  // Clearing the tab (selecting "Todas") brings them back.
   const { uncategorized, categorized } = useMemo(() => {
-    const txs: Transaction[] = txsQ.data ?? [];
+    const all: Transaction[] = txsQ.data ?? [];
+    if (categoryFilter === 'all') {
+      return {
+        uncategorized: all.filter((t) => t.userCategory == null),
+        categorized: all.filter((t) => t.userCategory != null),
+      };
+    }
     return {
-      uncategorized: txs.filter((t) => t.userCategory == null),
-      categorized: txs.filter((t) => t.userCategory != null),
+      uncategorized: [] as Transaction[],
+      categorized: all.filter(
+        (t) => t.userCategory != null && t.userCategory.id === categoryFilter,
+      ),
     };
-  }, [txsQ.data]);
+  }, [txsQ.data, categoryFilter]);
 
   function toggle(id: string) {
     setSelected((prev) => {
