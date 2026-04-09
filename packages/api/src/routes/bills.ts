@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db/index.js';
-import { computeOpenBillWindow, computePreviousBillWindow } from '../services/billWindow.js';
+import {
+  computeOpenBillWindow,
+  computePreviousBillWindow,
+  computeNextBillWindow,
+  type BillWindow,
+} from '../services/billWindow.js';
 import { parseCardGroupFilter } from './transactions.js';
 
 export const billsRouter = Router();
@@ -71,14 +76,13 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
       return;
     }
 
-    const current = computeOpenBillWindow({
+    const settingsT = {
       closingDay: settings.closing_day,
       dueDay: settings.due_day,
-    });
-    const previous = computePreviousBillWindow({
-      closingDay: settings.closing_day,
-      dueDay: settings.due_day,
-    });
+    };
+    const current = computeOpenBillWindow(settingsT);
+    const previous = computePreviousBillWindow(settingsT);
+    const next = computeNextBillWindow(settingsT);
 
     // Groups defined for this item. We iterate them (plus an "all" slot at
     // the front) and build a card per group with total, delta, and a sorted
@@ -92,21 +96,28 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
 
     const allFilter = parseCardGroupFilter(undefined); // "any"
 
+    // The CURRENT bill respects manual bill-shift overrides (transactions
+    // pulled in from previous/pushed out to next). The PREVIOUS bill is
+    // computed with the simpler unshifted sum — we deliberately don't chase
+    // shifts across two cycles, since the delta vs anterior is already an
+    // approximation and double-shifted transactions are vanishingly rare
+    // in practice.
     const breakdown = [
       {
         groupId: null as number | null,
         name: 'Todos',
         color: null as string | null,
         total: round2(
-          sumBillTotal(itemId, current.periodStart, current.periodEnd, allFilter),
+          sumBillTotalWithShifts(itemId, current, previous, next, allFilter),
         ),
         previousTotal: round2(
           sumBillTotal(itemId, previous.periodStart, previous.periodEnd, allFilter),
         ),
-        categories: categoryBreakdown(
+        categories: categoryBreakdownWithShifts(
           itemId,
-          current.periodStart,
-          current.periodEnd,
+          current,
+          previous,
+          next,
           allFilter,
         ),
       },
@@ -114,17 +125,18 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
 
     for (const g of groups) {
       const filter = parseCardGroupFilter(String(g.id));
-      const total = sumBillTotal(itemId, current.periodStart, current.periodEnd, filter);
+      const total = sumBillTotalWithShifts(itemId, current, previous, next, filter);
       const previousTotal = sumBillTotal(
         itemId,
         previous.periodStart,
         previous.periodEnd,
         filter,
       );
-      const categories = categoryBreakdown(
+      const categories = categoryBreakdownWithShifts(
         itemId,
-        current.periodStart,
-        current.periodEnd,
+        current,
+        previous,
+        next,
         filter,
       );
 
@@ -166,15 +178,69 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
 });
 
 /**
- * Sum each category's absolute spend in a bill window, optionally filtered
- * by card group. Returns rows sorted by total descending so the frontend
- * doesn't need to sort again. Only categorized transactions are included
- * (same rule as sumBillTotal).
+ * Variant of sumBillTotal that honors manual bill-shift overrides. The
+ * caller passes the three adjacent windows (previous / current / next)
+ * and we include, in the CURRENT window's sum:
+ *
+ *   - transactions whose raw date falls in `current` AND have no override
+ *   - transactions whose raw date falls in `previous` AND have an
+ *     override shift = +1 (pushed forward into current)
+ *   - transactions whose raw date falls in `next` AND have an override
+ *     shift = -1 (pulled back into current)
+ *
+ * Double-shifted transactions (|shift| >= 2) are intentionally NOT handled
+ * — they'd require chasing windows two cycles away, and the UI only
+ * exposes ±1 anyway.
  */
-function categoryBreakdown(
+function sumBillTotalWithShifts(
   itemId: string,
-  periodStart: string,
-  periodEnd: string,
+  current: BillWindow,
+  previous: BillWindow,
+  next: BillWindow,
+  groupFilter: ReturnType<typeof parseCardGroupFilter>,
+): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(t.amount), 0) AS total
+       FROM transactions t
+       INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
+       LEFT JOIN card_group_members m
+         ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
+       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+       WHERE t.item_id = ?
+         AND (
+              (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
+           OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
+           OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+         )
+         AND (
+           ? = 'any'
+           OR (? = 'none' AND m.card_group_id IS NULL)
+           OR (? = 'id'   AND m.card_group_id = ?)
+         )`,
+    )
+    .get(
+      itemId,
+      current.periodStart, current.periodEnd,
+      previous.periodStart, previous.periodEnd,
+      next.periodStart, next.periodEnd,
+      groupFilter.kind,
+      groupFilter.kind,
+      groupFilter.kind,
+      groupFilter.kind === 'id' ? groupFilter.id : null,
+    ) as SumRow;
+  return row.total ?? 0;
+}
+
+/**
+ * Variant of categoryBreakdown that honors manual bill-shift overrides.
+ * Same windowing logic as sumBillTotalWithShifts.
+ */
+function categoryBreakdownWithShifts(
+  itemId: string,
+  current: BillWindow,
+  previous: BillWindow,
+  next: BillWindow,
   groupFilter: ReturnType<typeof parseCardGroupFilter>,
 ): Array<{ id: number; name: string; color: string; total: number }> {
   const rows = db
@@ -188,9 +254,13 @@ function categoryBreakdown(
        INNER JOIN user_categories uc        ON uc.id = tc.user_category_id
        LEFT JOIN card_group_members m
          ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
+       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
        WHERE t.item_id = ?
-         AND t.date >= ?
-         AND t.date <= ?
+         AND (
+              (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
+           OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
+           OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+         )
          AND (
            ? = 'any'
            OR (? = 'none' AND m.card_group_id IS NULL)
@@ -201,8 +271,9 @@ function categoryBreakdown(
     )
     .all(
       itemId,
-      periodStart,
-      periodEnd,
+      current.periodStart, current.periodEnd,
+      previous.periodStart, previous.periodEnd,
+      next.periodStart, next.periodEnd,
       groupFilter.kind,
       groupFilter.kind,
       groupFilter.kind,
