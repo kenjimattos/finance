@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   api,
   ApiError,
@@ -196,10 +196,13 @@ function AccountDashboard({
  * Shown when accounts haven't been synced yet (upgrade path from pre-phase-2).
  */
 function SyncPrompt({ itemId }: { itemId: string }) {
-  const queryClient = useQuery({
-    queryKey: ['_sync_prompt'],
+  const qc = useQueryClient();
+  const syncQ = useQuery({
+    queryKey: ['_sync_prompt', itemId],
     queryFn: async () => {
       await api.syncTransactions(itemId);
+      // After sync, accounts are populated — invalidate so Dashboard re-renders.
+      qc.invalidateQueries({ queryKey: ['accounts', itemId] });
       return true;
     },
   });
@@ -207,9 +210,9 @@ function SyncPrompt({ itemId }: { itemId: string }) {
   return (
     <div className="opacity-70">
       <div className="eyebrow mb-4">
-        {queryClient.isLoading ? 'Sincronizando contas…' : 'Nenhuma conta encontrada'}
+        {syncQ.isLoading ? 'Sincronizando contas…' : 'Nenhuma conta encontrada'}
       </div>
-      {queryClient.isError && (
+      {syncQ.isError && (
         <p className="text-sm text-[color:var(--color-accent)]">
           Erro ao sincronizar. Verifique a conexão.
         </p>
