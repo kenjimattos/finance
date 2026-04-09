@@ -1,59 +1,78 @@
 # Roadmap
 
-Ideas and planned features, roughly grouped by theme. Nothing here is committed — this is a thinking space for prioritization. When something moves to implementation, it gets a PR and leaves this list.
+Ideas and planned features, organized by implementation phase. The sequence is designed so each phase builds on the previous — no work is thrown away, and structural changes happen before features that depend on them.
 
-## Fatura por banco (arquitetura revisada, não implementada)
+Nothing here is committed to a timeline. When something moves to implementation, it gets commits and leaves this list.
 
-Hoje existe um único `card_settings` por `itemId` com um par `closing_day`/`due_day`. Quando o usuário conectar um segundo banco no Meu Pluggy, os cartões dos dois bancos aparecem misturados no mesmo item mas em **accounts separadas** — cada account do tipo `CREDIT` representa um produto de cartão de crédito de um banco específico.
+---
 
-Descoberta: `fetchAccounts(itemId)` sem filtro já retorna as accounts separadas com `name` legível (ex: "Pic Pay Mastercard Black", "Itaú Visa Platinum"). Cada transação já carrega `account_id`, então a separação por banco é automática — não precisa de entidade manual "fatura".
+## Phase 1 — Stabilize before growing
 
-Arquitetura proposta:
+Small, high-leverage items that make the codebase safer to refactor.
+
+- [ ] **Tests for pure services** — choose a runner (vitest? node --test?) and cover `billWindow`, `merchantSlug`, sign convention. These functions will be refactored in phase 2; tests make that safe.
+- [ ] **Clean PARCxx/yy suffix globally** — strip the installment suffix from transaction descriptions in the `shapeRow` response, not just in the card render. 3 lines, benefits the entire UI.
+
+## Phase 2 — Fatura por banco (structural)
+
+The only feature that **blocks** adding a second bank. Biggest refactoring — better to do it before more code accumulates on the current structure.
+
+`fetchAccounts(itemId)` without a type filter already returns separate accounts per bank, each with a readable `name` (e.g. "Pic Pay Mastercard Black"). Transactions already carry `account_id`, so separation by bank is automatic.
+
+Architecture:
 
 ```
-Account CREDIT (detectada do Pluggy, name = "Pic Pay Mastercard Black")
-  ├── closing_day, due_day (configurado uma vez pelo usuário por account)
-  ├── Grupo "Eu"        → card_last4 pertencentes a essa account
-  ├── Grupo "Esposa"    → ...
-  └── Grupo "Virtual"   → ...
+Account CREDIT (detected from Pluggy, name = "Pic Pay Mastercard Black")
+  ├── closing_day, due_day (configured once per account by the user)
+  ├── Group "Eu"        → card_last4 belonging to this account
+  ├── Group "Esposa"    → ...
+  └── Group "Virtual"   → ...
 ```
 
-`card_settings` migra de per-`itemId` pra per-`accountId`. `card_groups` ganha FK pra `accountId` em vez de `itemId`. O frontend ganha um seletor de account (tabs ou picker) no topo; dentro de cada account, tudo funciona como hoje.
+Implies:
+- [ ] `card_settings` migrates from per-`itemId` to per-`accountId`
+- [ ] `card_groups` gains FK to `accountId` instead of `itemId`
+- [ ] `/bills/current/breakdown` computes one window per account
+- [ ] Frontend: account selector (tabs or picker) at the top; within each account everything works as today
+- [ ] Onboarding: setup form asks closing/due per account instead of per item
 
-Dados já disponíveis na conexão atual:
+Data already available in the current connection:
 
 | type | name | number |
 |---|---|---|
 | BANK | PicPay Instituição de Pagamento S.A | 00649316-5 |
 | CREDIT | Pic Pay Mastercard Black | 3021 |
 
-A account BANK (conta corrente) é relevante pro fluxo de caixa (ver seção abaixo).
+The BANK account is relevant for phase 4 (cash flow).
 
-## Fluxo de caixa (conta corrente)
+## Phase 3 — Depth in the current experience
 
-Tela separada que projeta o saldo futuro da conta corrente. A fatura do cartão entra como saída na data de vencimento. Entradas e saídas manuais (salário, aluguel, freelas) são adicionadas pelo usuário.
+Features that become essential once there are multiple accounts and months of history.
 
-Requer: novo schema (`manual_entries` ou similar), nova tela. A conexão Meu Pluggy **já fornece** uma account do tipo `BANK` / `CHECKING_ACCOUNT` com saldo — só não é sincronizada hoje porque o sync filtra por `'CREDIT'`. Chamar `fetchTransactions` na account BANK traria entradas e saídas da conta corrente (Pix, transferências, boletos).
+- [ ] **Navigate between bill cycles** — ← / → arrows or month picker to browse closed bills. `/bills` (closed bills from Pluggy) already exists as a local cache; the work is UI + wiring to the breakdown.
+- [ ] **Smarter bulk categorization** — when categorizing, suggest "apply to all with the same merchant?" instead of requiring manual multi-select. Essential for catching up on hundreds of uncategorized historical transactions.
+- [ ] **Keyboard shortcuts in the inbox** — `j`/`k` navigate, `Space` selects, `c` opens picker, `u` undoes. Amplifies bulk categorization speed.
+- [ ] **Categorization engine improvements** — the current slug-based system is good for the majority case but has known edge cases:
+  - Slug granularity: "UBER *EATS" and "UBER *TRIP" collapse to the same slug "UBER". Preserving the second token would reduce false matches.
+  - Ambiguous merchants: the same supermarket can be Alimentação or Casa depending on what was bought. The system should always apply the **majority** category (already changed in v0.1.0 — rules no longer auto-disable after overrides) and let the user correct the minority.
+  - Future: a rules management UI so the user can see, edit, and delete learned rules explicitly (backend `GET /rules` already exists, no UI yet).
 
-## Navegação entre faturas
+## Phase 4 — Cash flow (new feature area)
 
-Hoje só é possível ver a fatura atual (aberta). Adicionar setas ← / → ou um seletor de mês pra navegar em faturas fechadas. O `/bills` (faturas fechadas do Pluggy) já existe como cache local — a questão é construir a UI e ligar com o breakdown.
+Separate screen projecting the future balance of the checking account. The credit card bill enters as an outflow on its due date. Manual entries (salary, rent, freelance) are added by the user.
 
-## Melhorias de categorização
+Depends on:
+- Phase 2 (needs to know which bill is due when, per account)
+- Phase 3 navigation (projecting the future requires understanding the past)
+- The Meu Pluggy connection **already provides** a BANK/CHECKING_ACCOUNT with balance and transactions — just not synced yet because the current code filters by `'CREDIT'`
 
-- **Regras visíveis**: tela pra ver/editar/deletar as regras aprendidas (hoje só existe o endpoint `GET /rules`, sem UI)
-- **Bulk smarter**: ao categorizar em lote, sugerir "aplicar a todos com mesmo merchant?" em vez de exigir seleção manual prévia
-- **Categorias com ícone ou emoji**: além da cor automática, um identificador visual rápido
+Requires: new schema (`manual_entries` or similar), new screen, discussion before implementation.
 
-## UX / polish
+## Anytime (independent, no sequencing constraint)
 
-- **Keyboard shortcuts no inbox**: `j`/`k` pra navegar, `Space` pra selecionar, `c` pra abrir picker, `u` pra desfazer
-- **Busca de transações**: filtro por texto na descrição, dentro do inbox
-- **Responsividade mobile**: os cards de breakdown e o inbox funcionam em telas pequenas mas não estão otimizados
-- **Limpeza do sufixo PARCxx/yy**: strip global no shape de transação pra descrições mais limpas em toda a UI, não só nos cards de parcelamento
-
-## Infraestrutura
-
-- **Testes**: escolher runner (vitest? node --test?) e cobrir pelo menos billWindow, merchantSlug, e a sign convention
-- **CHANGELOG**: manter atualizado conforme features aterrissam (formato Keep a Changelog, já existe o v0.1.0)
-- **Deploy local simplificado**: script `start.sh` que roda `npm install` + `npm run dev` pra quem clonar o repo
+- [ ] **Visible rules UI** — screen to view/edit/delete learned category rules
+- [ ] **Category icons or emoji** — visual identifier beyond auto-assigned color
+- [ ] **Transaction search** — text filter on description within the inbox
+- [ ] **Mobile responsiveness** — cards and inbox work on small screens but aren't optimized
+- [ ] **Simplified local deploy** — `start.sh` script for cloning and running
+- [ ] **Keep CHANGELOG updated** — add bullets as features land (format already established in v0.1.0)
