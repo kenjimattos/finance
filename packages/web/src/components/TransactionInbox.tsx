@@ -19,19 +19,26 @@ export function TransactionInbox({
   itemId,
   periodStart,
   periodEnd,
+  cardGroupQuery,
 }: {
   itemId: string;
   periodStart: string;
   periodEnd: string;
+  cardGroupQuery: string | undefined;
 }) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showCategorized, setShowCategorized] = useState(true);
 
   const txsQ = useQuery({
-    queryKey: ['transactions', itemId, periodStart, periodEnd],
+    queryKey: ['transactions', itemId, periodStart, periodEnd, cardGroupQuery ?? 'all'],
     queryFn: () =>
-      api.listTransactions({ itemId, from: periodStart, to: periodEnd }),
+      api.listTransactions({
+        itemId,
+        from: periodStart,
+        to: periodEnd,
+        cardGroupId: cardGroupQuery,
+      }),
   });
 
   const categoriesQ = useQuery({

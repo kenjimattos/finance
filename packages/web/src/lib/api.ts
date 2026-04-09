@@ -59,6 +59,37 @@ export interface Category {
   created_at: string;
 }
 
+export interface CardGroup {
+  id: number;
+  item_id: string;
+  name: string;
+  color: string;
+  memberCount: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Card {
+  cardLast4: string;
+  txCount: number;
+  lastUsed: string;
+  group: { id: number; name: string; color: string } | null;
+}
+
+/**
+ * Frontend-wide filter state for "which cards should I see?".
+ * 'all' → no filter, show everything
+ * 'none' → show only transactions from cards with no group
+ * number → show only that group
+ */
+export type CardGroupFilter = 'all' | 'none' | number;
+
+export function cardGroupFilterToQuery(f: CardGroupFilter): string | undefined {
+  if (f === 'all') return undefined;
+  if (f === 'none') return 'none';
+  return String(f);
+}
+
 export interface UserCategoryRef {
   id: number;
   name: string;
@@ -127,21 +158,57 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
-  getCurrentBill: (itemId: string) =>
-    request<OpenBill>(`/bills/current?itemId=${encodeURIComponent(itemId)}`),
+  getCurrentBill: (itemId: string, cardGroupId?: string) => {
+    const qs = new URLSearchParams({ itemId });
+    if (cardGroupId) qs.set('cardGroupId', cardGroupId);
+    return request<OpenBill>(`/bills/current?${qs}`);
+  },
 
   listTransactions: (params: {
     itemId: string;
     from?: string;
     to?: string;
     uncategorized?: boolean;
+    cardGroupId?: string;
   }) => {
     const qs = new URLSearchParams({ itemId: params.itemId });
     if (params.from) qs.set('from', params.from);
     if (params.to) qs.set('to', params.to);
     if (params.uncategorized) qs.set('uncategorized', 'true');
+    if (params.cardGroupId) qs.set('cardGroupId', params.cardGroupId);
     return request<Transaction[]>(`/transactions?${qs}`);
   },
+
+  listCards: (itemId: string) =>
+    request<Card[]>(`/cards?itemId=${encodeURIComponent(itemId)}`),
+
+  listCardGroups: (itemId: string) =>
+    request<CardGroup[]>(`/card-groups?itemId=${encodeURIComponent(itemId)}`),
+
+  createCardGroup: (itemId: string, name: string) =>
+    request<CardGroup>('/card-groups', {
+      method: 'POST',
+      body: JSON.stringify({ itemId, name }),
+    }),
+
+  renameCardGroup: (id: number, name: string) =>
+    request<CardGroup>(`/card-groups/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteCardGroup: (id: number) =>
+    request<unknown>(`/card-groups/${id}`, { method: 'DELETE' }),
+
+  assignCardToGroup: (
+    cardLast4: string,
+    itemId: string,
+    cardGroupId: number | null,
+  ) =>
+    request<unknown>(`/cards/${cardLast4}/group`, {
+      method: 'PUT',
+      body: JSON.stringify({ itemId, cardGroupId }),
+    }),
 
   syncTransactions: (itemId: string) =>
     request<{ ok: true; transactions: number; bills: number }>(
