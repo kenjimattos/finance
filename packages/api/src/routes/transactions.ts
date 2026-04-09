@@ -364,17 +364,30 @@ function applyLearnedRules(itemId: string) {
 }
 
 /**
- * Pluggy returns the cardNumber field in creditCardMetadata with inconsistent
- * shapes across connectors: some send just "1234", others send "****1234",
- * others send the full masked string like "1234 **** **** 5678". We only
- * care about the last 4 digits for display, so normalize to exactly that,
- * or null if the input doesn't contain 4 digits.
+ * Normalize the cardNumber field from creditCardMetadata into a stable
+ * identifier for grouping transactions by physical/virtual card.
+ *
+ * Pluggy connectors return this field in inconsistent shapes:
+ *   - "1234"                       → numeric last-4
+ *   - "****1234"                   → masked with last-4
+ *   - "1234 **** **** 5678"        → full masked PAN
+ *   - "DIGITAL-PICPAY"             → non-numeric identifier for virtual cards
+ *   - null / undefined / ""        → no card info (internal entries like
+ *                                    "pagamento de fatura")
+ *
+ * Rules:
+ *   1. null/empty → null (no card association possible)
+ *   2. Contains ≥4 digits → extract last 4 digits (covers most physical cards)
+ *   3. Non-numeric string (like "DIGITAL-PICPAY") → keep as-is, uppercased
+ *      and trimmed, so it surfaces as a distinct "card" the user can assign
+ *      to a group in the card manager
  */
 function lastFourDigits(raw: string | undefined | null): string | null {
-  if (!raw) return null;
+  if (!raw || raw.trim() === '') return null;
   const digits = raw.replace(/\D/g, '');
-  if (digits.length < 4) return null;
-  return digits.slice(-4);
+  if (digits.length >= 4) return digits.slice(-4);
+  // Non-numeric identifier (virtual card, digital wallet, etc.)
+  return raw.trim().toUpperCase();
 }
 
 function toYmd(d: Date | string): string {
