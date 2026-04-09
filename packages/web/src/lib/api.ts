@@ -127,6 +127,35 @@ export interface OpenBill {
   delta: number;
 }
 
+export interface BillCategoryBreakdown {
+  id: number;
+  name: string;
+  color: string;
+  total: number;
+}
+
+export interface BillGroupBreakdown {
+  /** null for the "all" slot; number for a concrete card group */
+  groupId: number | null;
+  name: string;
+  color: string | null;
+  total: number;
+  previousTotal: number;
+  delta: number;
+  categories: BillCategoryBreakdown[];
+}
+
+export interface BillBreakdown {
+  itemId: string;
+  displayName: string | null;
+  periodStart: string;
+  periodEnd: string;
+  closingDate: string;
+  dueDate: string;
+  /** First entry is always "Todos" (groupId: null). Empty groups are filtered out. */
+  groups: BillGroupBreakdown[];
+}
+
 // ---------- Endpoints ----------
 
 export const api = {
@@ -163,6 +192,11 @@ export const api = {
     if (cardGroupId) qs.set('cardGroupId', cardGroupId);
     return request<OpenBill>(`/bills/current?${qs}`);
   },
+
+  getBillBreakdown: (itemId: string) =>
+    request<BillBreakdown>(
+      `/bills/current/breakdown?itemId=${encodeURIComponent(itemId)}`,
+    ),
 
   listTransactions: (params: {
     itemId: string;
