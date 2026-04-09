@@ -183,9 +183,9 @@ cardGroupsRouter.delete('/card-groups/:id', (req, res) => {
 cardGroupsRouter.put('/cards/:last4/group', (req, res, next) => {
   try {
     const { itemId, cardGroupId } = assignSchema.parse(req.body);
-    const last4 = req.params.last4;
-    if (!/^\d{4}$/.test(last4)) {
-      res.status(400).json({ error: 'InvalidLast4' });
+    const last4 = decodeURIComponent(req.params.last4).trim();
+    if (!last4) {
+      res.status(400).json({ error: 'InvalidCardIdentifier' });
       return;
     }
 
