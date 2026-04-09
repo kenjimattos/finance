@@ -1,5 +1,5 @@
 import type { Category, Transaction } from '../lib/api';
-import { formatBRL, formatDateShort } from '../lib/format';
+import { formatBRL, formatCardLabel, formatDateShort } from '../lib/format';
 import { CategoryTrigger } from './CategoryPicker';
 import { RowActionsMenu, type RowAction } from './RowActionsMenu';
 
@@ -85,7 +85,7 @@ export function TransactionRow({
           )}
           {tx.cardLast4 && (
             <span className="font-mono text-[10px] tracking-wider text-[color:var(--color-ink-faint)]">
-              ····{tx.cardLast4}
+              {formatCardLabel(tx.cardLast4)}
             </span>
           )}
         </div>

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { api, type Card, type CardGroup } from '../lib/api';
-import { formatDateShort } from '../lib/format';
+import { formatCardLabel, formatDateShort } from '../lib/format';
 
 /**
  * Full-screen overlay for managing card groups.
@@ -300,7 +300,7 @@ function CardsSection({
           >
             <div>
               <div className="font-mono text-[15px] tracking-wider text-[color:var(--color-ink)]">
-                ····{card.cardLast4}
+                {formatCardLabel(card.cardLast4)}
               </div>
               <div className="mt-0.5 font-body text-[11px] text-[color:var(--color-ink-faint)]">
                 {card.txCount} transações · última em {formatDateShort(card.lastUsed)}

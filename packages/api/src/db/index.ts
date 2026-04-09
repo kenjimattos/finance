@@ -179,6 +179,19 @@ db.exec(`
 // DB out there has already run them.
 addColumnIfMissing('transactions', 'card_last4', 'TEXT');
 
+// Backfill: transactions that have a non-numeric cardNumber in raw_json
+// (e.g. "DIGITAL-PICPAY") were previously stored with card_last4 = NULL
+// because lastFourDigits() only extracted numeric suffixes. The function
+// now preserves non-numeric identifiers as-is (uppercased). This one-time
+// UPDATE catches any rows synced before that fix landed.
+db.exec(`
+  UPDATE transactions
+  SET card_last4 = UPPER(TRIM(json_extract(raw_json, '$.creditCardMetadata.cardNumber')))
+  WHERE card_last4 IS NULL
+    AND json_extract(raw_json, '$.creditCardMetadata.cardNumber') IS NOT NULL
+    AND TRIM(json_extract(raw_json, '$.creditCardMetadata.cardNumber')) <> ''
+`);
+
 function addColumnIfMissing(table: string, column: string, decl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
     name: string;

@@ -48,6 +48,20 @@ function parseYmd(iso: string): Date {
 }
 
 /**
+ * Format a card_last4 value for display.
+ * Numeric (4 digits) → "····1234"
+ * Non-numeric (e.g. "DIGITAL-PICPAY") → title-cased with hyphens as spaces
+ */
+export function formatCardLabel(cardLast4: string): string {
+  if (/^\d{4}$/.test(cardLast4)) return `····${cardLast4}`;
+  // Title-case: "DIGITAL-PICPAY" → "Digital Picpay"
+  return cardLast4
+    .toLowerCase()
+    .replace(/[-_]/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
  * Sign-aware delta formatting. Positive = more expensive than last period
  * (shown with an up triangle), negative = cheaper (down triangle).
  * Never uses red/green because the same number can be good or bad
