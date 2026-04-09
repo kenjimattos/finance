@@ -9,6 +9,22 @@ import {
 import { formatBRL, formatDateLong, formatDelta } from '../lib/format';
 
 /**
+ * Layout philosophy (as of this iteration):
+ *
+ *   - The "Todos" entry returned by the backend is NOT rendered as a card
+ *     in the grid. Its total becomes the big editorial number at the top;
+ *     its category breakdown is not shown at all because the per-card
+ *     breakdowns below tell the story per cartão.
+ *   - The grid shows one card per user-defined card group, and nothing
+ *     else. If the user has no groups yet, a small hint points to
+ *     "gerenciar cartões" so the tela doesn't look broken.
+ *   - Clicking a card toggles it as the active filter. Clicking it again
+ *     (or clicking another card that was active) returns to "Todos".
+ *     There is no separate "Todos" card to click — the absence of
+ *     selection IS the "Todos" state.
+ */
+
+/**
  * The new dashboard header: an editorial grid of cards — one per card group
  * plus an "all" card at the front — each showing the group's total, delta,
  * and a sorted category breakdown.
@@ -43,6 +59,21 @@ export function BillCardGrid({
     },
   });
 
+  // The "all" slot comes first from the backend. Extract it for the headline
+  // and render only real groups in the grid.
+  const allSlot =
+    breakdown.groups.find((g) => g.groupId == null) ?? null;
+  const groupSlots = breakdown.groups.filter((g) => g.groupId != null);
+
+  const allDelta = allSlot ? formatDelta(allSlot.delta) : null;
+  const allDeltaDirection = !allSlot
+    ? 'flat'
+    : allSlot.delta > 0.01
+      ? 'higher'
+      : allSlot.delta < -0.01
+        ? 'lower'
+        : 'flat';
+
   return (
     <motion.section
       initial={{ opacity: 0, y: 12 }}
@@ -50,24 +81,53 @@ export function BillCardGrid({
       transition={{ duration: 0.4, ease: [0.2, 0.65, 0.3, 0.9] }}
       className="pt-2"
     >
-      {/* Small editorial header above the grid */}
-      <div className="mb-6 flex items-baseline justify-between">
+      {/* Editorial header: eyebrow + giant total + dates on one side,
+          action links on the other. */}
+      <div className="mb-10 flex items-start justify-between gap-6">
         <div>
           <div className="eyebrow">
             {breakdown.displayName ?? 'Fatura em aberto'}
           </div>
-          <p className="mt-1 font-body text-sm leading-relaxed text-[color:var(--color-ink-muted)]">
-            fecha em{' '}
-            <span className="text-[color:var(--color-ink-soft)]">
-              {formatDateLong(breakdown.closingDate)}
-            </span>{' '}
-            · vence em{' '}
-            <span className="text-[color:var(--color-ink-soft)]">
-              {formatDateLong(breakdown.dueDate)}
+          <div className="mt-3 font-display text-[72px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[96px]">
+            {formatBRL(allSlot?.total ?? 0)}
+          </div>
+          <div className="mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-1 font-body text-sm text-[color:var(--color-ink-muted)]">
+            <span>
+              fecha em{' '}
+              <span className="text-[color:var(--color-ink-soft)]">
+                {formatDateLong(breakdown.closingDate)}
+              </span>
             </span>
-          </p>
+            <span>
+              vence em{' '}
+              <span className="text-[color:var(--color-ink-soft)]">
+                {formatDateLong(breakdown.dueDate)}
+              </span>
+            </span>
+            {allDelta && (
+              <span className="flex items-center gap-2">
+                <span
+                  className="font-mono"
+                  style={{
+                    color:
+                      allDeltaDirection === 'higher'
+                        ? 'var(--color-accent)'
+                        : allDeltaDirection === 'lower'
+                          ? 'var(--color-positive)'
+                          : 'var(--color-ink-faint)',
+                  }}
+                >
+                  {allDelta.symbol}
+                </span>
+                <span>
+                  {allDelta.text}{' '}
+                  <span className="text-[color:var(--color-ink-faint)]">vs anterior</span>
+                </span>
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-5">
+        <div className="flex shrink-0 items-center gap-5 pt-2">
           <button
             type="button"
             onClick={onManageCards}
@@ -86,36 +146,44 @@ export function BillCardGrid({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {breakdown.groups.map((g) => {
-          const filter: CardGroupFilter =
-            g.groupId == null ? 'all' : g.groupId;
-          const isActive =
-            (selected === 'all' && g.groupId == null) ||
-            selected === g.groupId;
-          return (
-            <BillCard
-              key={g.groupId ?? 'all'}
-              group={g}
-              isAll={g.groupId == null}
-              active={isActive}
-              onClick={() => onSelect(isActive ? 'all' : filter)}
-            />
-          );
-        })}
-      </div>
+      {groupSlots.length === 0 ? (
+        <p className="rule-top py-6 font-body text-sm italic text-[color:var(--color-ink-faint)]">
+          Crie grupos de cartão em{' '}
+          <button
+            type="button"
+            onClick={onManageCards}
+            className="underline decoration-[color:var(--color-accent)] underline-offset-4 hover:text-[color:var(--color-accent)]"
+          >
+            gerenciar cartões
+          </button>{' '}
+          para ver o breakdown por cartão.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {groupSlots.map((g) => {
+            const filter: CardGroupFilter = g.groupId as number;
+            const isActive = selected === g.groupId;
+            return (
+              <BillCard
+                key={g.groupId}
+                group={g}
+                active={isActive}
+                onClick={() => onSelect(isActive ? 'all' : filter)}
+              />
+            );
+          })}
+        </div>
+      )}
     </motion.section>
   );
 }
 
 function BillCard({
   group,
-  isAll,
   active,
   onClick,
 }: {
   group: BillGroupBreakdown;
-  isAll: boolean;
   active: boolean;
   onClick: () => void;
 }) {
@@ -166,11 +234,8 @@ function BillCard({
         </span>
       </div>
 
-      {/* The total — Fraunces, bigger on the "all" card */}
-      <div
-        className="font-display leading-none tracking-[-0.02em] text-[color:var(--color-ink)]"
-        style={{ fontSize: isAll ? '52px' : '44px' }}
-      >
+      {/* The total — Fraunces, subordinate to the big headline above */}
+      <div className="font-display text-[44px] leading-none tracking-[-0.02em] text-[color:var(--color-ink)]">
         {formatBRL(group.total)}
       </div>
 
