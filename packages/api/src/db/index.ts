@@ -46,6 +46,7 @@ db.exec(`
     installment_number INTEGER,
     total_installments INTEGER,
     bill_id TEXT,                    -- only set once the bill closes (Pluggy limitation)
+    card_last4 TEXT,                 -- last 4 digits of the physical card (from creditCardMetadata.cardNumber)
     raw_json TEXT NOT NULL,
     synced_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -112,3 +113,22 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_rules_slug ON category_rules(merchant_slug);
 `);
+
+// -----------------------------------------------------------------------------
+// Migrations
+// -----------------------------------------------------------------------------
+// SQLite's CREATE TABLE IF NOT EXISTS never adds columns to existing tables,
+// so structural changes after the first boot have to run as idempotent
+// ALTER TABLE steps. Each migration checks the current schema via
+// PRAGMA table_info and only runs if the column is missing. Keep these
+// append-only — never delete or edit past migrations, because someone's
+// DB out there has already run them.
+addColumnIfMissing('transactions', 'card_last4', 'TEXT');
+
+function addColumnIfMissing(table: string, column: string, decl: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+    name: string;
+  }>;
+  if (cols.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+}
