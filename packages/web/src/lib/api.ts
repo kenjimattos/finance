@@ -222,6 +222,11 @@ export const api = {
       body: JSON.stringify({ categoryId }),
     }),
 
+  clearCategory: (transactionId: string) =>
+    request<unknown>(`/transactions/${transactionId}/category`, {
+      method: 'DELETE',
+    }),
+
   bulkCategorize: (transactionIds: string[], categoryId: number) =>
     request<{ ok: true; applied: number; total: number }>(
       '/transactions/bulk-categorize',

@@ -56,6 +56,14 @@ export function TransactionInbox({
     },
   });
 
+  const clearMut = useMutation({
+    mutationFn: (txId: string) => api.clearCategory(txId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['currentBill', itemId] });
+    },
+  });
+
   const bulkMut = useMutation({
     mutationFn: ({
       txIds,
@@ -136,6 +144,7 @@ export function TransactionInbox({
               onAssign={(categoryId) =>
                 assignMut.mutate({ txId: tx.id, categoryId })
               }
+              onClear={() => clearMut.mutate(tx.id)}
             />
           ))}
         </div>
@@ -166,6 +175,7 @@ export function TransactionInbox({
                 onAssign={(categoryId) =>
                   assignMut.mutate({ txId: tx.id, categoryId })
                 }
+                onClear={() => clearMut.mutate(tx.id)}
               />
             ))}
             {categorized.length === 0 && (
