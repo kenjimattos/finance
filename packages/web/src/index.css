@@ -1,0 +1,172 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens — editorial / financial-press.
+ *
+ * Light theme, warm paper background with a single burnt-orange accent.
+ * Type system: Fraunces (display serif) dominates, JetBrains Mono for
+ * numbers, Inter as a neutral fallback for small metadata only.
+ *
+ * All colors live on --ink-* and --paper-* so the whole screen reads
+ * like a printed page: ink on paper, with accents used sparingly.
+ */
+@theme {
+  /* PAPER: warm near-white, slightly pinkish, like an uncoated magazine stock */
+  --color-paper: #fbf8f4;
+  --color-paper-tint: #f5efe6;
+  --color-paper-rule: #e4ddcf;
+  --color-paper-shadow: #d9d0bd;
+
+  /* INK: never pure black — a warm near-black for printed feel */
+  --color-ink: #1a1614;
+  --color-ink-soft: #3a322d;
+  --color-ink-muted: #6a615a;
+  --color-ink-faint: #9b9289;
+
+  /* ACCENT: single color, used sparingly. Burnt orange like FT paper ink */
+  --color-accent: #c2410c;
+  --color-accent-soft: #e8784a;
+
+  /* Semantic colors */
+  --color-positive: #4d7c0f;
+  --color-negative: #1a1614;
+
+  /* Typography */
+  --font-display: 'Fraunces', 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-body: 'Inter', system-ui, sans-serif;
+
+  /* Spacing scale is Tailwind default (4px) */
+}
+
+/* Reset + base */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  font-feature-settings: 'ss01', 'cv11';
+  background: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/*
+ * Paper grain — a very subtle noise overlay that gives the background
+ * actual texture without being "busy". Pure CSS via multiple tiny
+ * radial-gradients composited together. Fixed so it doesn't scroll.
+ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.35;
+  background-image:
+    radial-gradient(circle at 20% 30%, var(--color-paper-shadow) 0.5px, transparent 0.5px),
+    radial-gradient(circle at 80% 60%, var(--color-paper-shadow) 0.5px, transparent 0.5px),
+    radial-gradient(circle at 40% 80%, var(--color-paper-shadow) 0.5px, transparent 0.5px);
+  background-size: 3px 3px, 5px 5px, 7px 7px;
+  mix-blend-mode: multiply;
+}
+
+/*
+ * A single vertical rule running down the left margin of the content —
+ * like a margin line in a printed broadsheet. Pure decoration; hidden
+ * on narrow screens where it would crowd the content.
+ */
+.page-rule {
+  position: fixed;
+  left: 48px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--color-paper-rule);
+  pointer-events: none;
+  z-index: 1;
+}
+@media (max-width: 900px) {
+  .page-rule {
+    display: none;
+  }
+}
+
+/* Typography helpers that Tailwind's @apply can pull */
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+}
+.font-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.font-body {
+  font-family: var(--font-body);
+}
+
+.eyebrow {
+  font-family: var(--font-body);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-ink-muted);
+}
+
+/* Utility: a thin top rule in paper-ink */
+.rule-top {
+  border-top: 1px solid var(--color-paper-rule);
+}
+.rule-bottom {
+  border-bottom: 1px solid var(--color-paper-rule);
+}
+
+/* Animated underline for interactive rows (categorization inbox hover) */
+@keyframes rowReveal {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.row-reveal {
+  animation: rowReveal 0.32s ease-out both;
+}
+
+/* Focus ring — never the default blue halo */
+:where(button, [role='button'], input, select):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 1px;
+}
+
+/* Scrollbars — muted on paper */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-paper-shadow);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-faint);
+}
