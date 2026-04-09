@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
 import { api, type Category } from '../lib/api';
@@ -6,30 +7,47 @@ import { api, type Category } from '../lib/api';
 /**
  * Keyboard-driven category picker.
  *
- * Behavior:
- *  - Opens as a small overlay positioned where the trigger was clicked
- *  - Free-text input filters categories by substring (case-insensitive)
- *  - Arrow up/down + Enter for selection
- *  - If no match exists and the user presses Enter, a new category is created
- *    with the typed name (auto-assigned color) and immediately returned
- *  - Esc closes without selecting
+ * Rendered via a React portal into document.body so it escapes every
+ * stacking context from the transaction table. Without the portal, the
+ * dropdown sits inside its own row and gets covered by the rows below
+ * because each row creates a new stacking context.
  *
- * Kept self-contained: the trigger component feeds it onPick() and gets
- * called with the chosen categoryId. No context, no refs up the tree.
+ * Position is computed from the trigger's getBoundingClientRect() on
+ * open (and on scroll/resize we just close — it's simpler and the user
+ * can re-open easily). If the dropdown would overflow the right edge of
+ * the viewport, it flips to align right-edge to the trigger instead. If
+ * it would overflow the bottom, it flips above the trigger.
  */
 
-export function CategoryPicker({
-  categories,
-  onPick,
-  onClose,
-}: {
+const WIDTH = 320;
+const MAX_HEIGHT = 320; // input + list cap
+
+interface Rect {
+  top: number;
+  left: number;
+  bottom: number;
+  right: number;
+  width: number;
+  height: number;
+}
+
+interface PickerProps {
   categories: Category[];
+  triggerRect: Rect;
   onPick: (categoryId: number) => void;
   onClose: () => void;
-}) {
+}
+
+function CategoryPickerPortal({
+  categories,
+  triggerRect,
+  onPick,
+  onClose,
+}: PickerProps) {
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
   const filtered = useMemo(() => {
@@ -45,6 +63,25 @@ export function CategoryPicker({
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Close on outside-click, scroll, resize, or Escape.
+  useEffect(() => {
+    function onDocMouseDown(e: MouseEvent) {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(e.target as Node)) onClose();
+    }
+    function onScrollOrResize() {
+      onClose();
+    }
+    document.addEventListener('mousedown', onDocMouseDown);
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [onClose]);
 
   const createMut = useMutation({
     mutationFn: (name: string) => api.createCategory(name),
@@ -84,14 +121,24 @@ export function CategoryPicker({
     }
   }
 
-  return (
+  // Compute a viewport-pinned position that flips when near the edges.
+  const position = computePosition(triggerRect);
+
+  return createPortal(
     <motion.div
-      initial={{ opacity: 0, y: -4 }}
+      ref={rootRef}
+      initial={{ opacity: 0, y: position.flipUp ? 4 : -4 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -4 }}
+      exit={{ opacity: 0, y: position.flipUp ? 4 : -4 }}
       transition={{ duration: 0.14 }}
-      className="absolute left-0 top-full z-20 mt-2 w-[320px] overflow-hidden border border-[color:var(--color-ink)] bg-[color:var(--color-paper)] shadow-[4px_4px_0_0_var(--color-ink)]"
-      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: 'fixed',
+        top: position.top,
+        left: position.left,
+        width: WIDTH,
+        zIndex: 1000,
+      }}
+      className="overflow-hidden border border-[color:var(--color-ink)] bg-[color:var(--color-paper)] shadow-[4px_4px_0_0_var(--color-ink)]"
     >
       <input
         ref={inputRef}
@@ -159,13 +206,46 @@ export function CategoryPicker({
           </li>
         )}
       </ul>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }
 
 /**
- * Small convenience wrapper: renders an inline trigger button that toggles
- * the picker in place. Used by both the single-row pill and the bulk bar.
+ * Pin the dropdown to the trigger with automatic flip when near the
+ * viewport edges. Distances are in CSS pixels.
+ */
+function computePosition(trigger: Rect): {
+  top: number;
+  left: number;
+  flipUp: boolean;
+} {
+  const margin = 8;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  // Default: below the trigger, left-aligned
+  let top = trigger.bottom + margin;
+  let left = trigger.left;
+  let flipUp = false;
+
+  // Flip up if there isn't enough room below
+  if (top + MAX_HEIGHT > vh && trigger.top - MAX_HEIGHT - margin >= 0) {
+    top = trigger.top - MAX_HEIGHT - margin;
+    flipUp = true;
+  }
+
+  // Flip to right-aligned if there isn't enough room to the right
+  if (left + WIDTH > vw - margin) {
+    left = Math.max(margin, trigger.right - WIDTH);
+  }
+
+  return { top, left, flipUp };
+}
+
+/**
+ * Inline trigger button. Holds the open state and, when open, captures
+ * its own viewport rect so the portal can position the dropdown.
  */
 export function CategoryTrigger({
   label,
@@ -179,10 +259,29 @@ export function CategoryTrigger({
   onPick: (categoryId: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState<Rect | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  // When opening, capture the button's current viewport rect.
+  // useLayoutEffect so the rect is measured before paint — avoids a
+  // one-frame flash at (0,0) before the position is computed.
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const r = buttonRef.current.getBoundingClientRect();
+    setRect({
+      top: r.top,
+      left: r.left,
+      bottom: r.bottom,
+      right: r.right,
+      width: r.width,
+      height: r.height,
+    });
+  }, [open]);
 
   return (
-    <div className="relative inline-block">
+    <>
       <button
+        ref={buttonRef}
         type="button"
         onClick={(e) => {
           e.stopPropagation();
@@ -201,9 +300,10 @@ export function CategoryTrigger({
         <span className="text-[color:var(--color-ink-faint)]">▾</span>
       </button>
       <AnimatePresence>
-        {open && (
-          <CategoryPicker
+        {open && rect && (
+          <CategoryPickerPortal
             categories={categories}
+            triggerRect={rect}
             onPick={(id) => {
               onPick(id);
               setOpen(false);
@@ -212,6 +312,6 @@ export function CategoryTrigger({
           />
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 }
