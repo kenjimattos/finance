@@ -120,6 +120,16 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
           next,
           allFilter,
         ),
+        // "Todos" is rendered as the big headline, not as a card, so the
+        // frontend never reads this — but keep it present for a uniform
+        // response shape.
+        installments: installmentBreakdownWithShifts(
+          itemId,
+          current,
+          previous,
+          next,
+          allFilter,
+        ),
       },
     ];
 
@@ -139,6 +149,13 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
         next,
         filter,
       );
+      const installments = installmentBreakdownWithShifts(
+        itemId,
+        current,
+        previous,
+        next,
+        filter,
+      );
 
       // Skip groups with no categorized spending this cycle — an empty card
       // is worse than a missing one. "Todos" is never skipped because it
@@ -152,6 +169,7 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
         total: round2(total),
         previousTotal: round2(previousTotal),
         categories,
+        installments,
       });
     }
 
@@ -176,6 +194,7 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
         previousTotal: b.previousTotal,
         delta: round2(b.total - b.previousTotal),
         categories: b.categories,
+        installments: b.installments,
       })),
     });
   } catch (err) {
@@ -236,6 +255,78 @@ function sumBillTotalWithShifts(
       groupFilter.kind === 'id' ? groupFilter.id : null,
     ) as SumRow;
   return row.total ?? 0;
+}
+
+/**
+ * List the installment ("parcelada") transactions that land in the current
+ * bill window for the given card group filter, honoring bill-shift
+ * overrides. Installments are not filtered by user categorization — they
+ * surface even if the user hasn't categorized them yet, because the point
+ * of showing them is to remind the user of pre-committed spending
+ * regardless of whether it's been classified.
+ *
+ * Sorted by date descending so the eye scans newest-first, matching the
+ * transaction inbox convention.
+ */
+function installmentBreakdownWithShifts(
+  itemId: string,
+  current: BillWindow,
+  previous: BillWindow,
+  next: BillWindow,
+  groupFilter: ReturnType<typeof parseCardGroupFilter>,
+): Array<{
+  id: string;
+  date: string;
+  description: string | null;
+  amount: number;
+  installmentNumber: number;
+  totalInstallments: number;
+}> {
+  const rows = db
+    .prepare(
+      `SELECT t.id                  AS id,
+              t.date                AS date,
+              t.description         AS description,
+              t.amount              AS amount,
+              t.installment_number  AS installmentNumber,
+              t.total_installments  AS totalInstallments
+       FROM transactions t
+       LEFT JOIN card_group_members m
+         ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
+       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+       WHERE t.item_id = ?
+         AND t.installment_number IS NOT NULL
+         AND t.total_installments IS NOT NULL
+         AND (
+              (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
+           OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
+           OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+         )
+         AND (
+           ? = 'any'
+           OR (? = 'none' AND m.card_group_id IS NULL)
+           OR (? = 'id'   AND m.card_group_id = ?)
+         )
+       ORDER BY t.date DESC, t.id DESC`,
+    )
+    .all(
+      itemId,
+      current.periodStart, current.periodEnd,
+      previous.periodStart, previous.periodEnd,
+      next.periodStart, next.periodEnd,
+      groupFilter.kind,
+      groupFilter.kind,
+      groupFilter.kind,
+      groupFilter.kind === 'id' ? groupFilter.id : null,
+    ) as Array<{
+    id: string;
+    date: string;
+    description: string | null;
+    amount: number;
+    installmentNumber: number;
+    totalInstallments: number;
+  }>;
+  return rows.map((r) => ({ ...r, amount: round2(r.amount) }));
 }
 
 /**
