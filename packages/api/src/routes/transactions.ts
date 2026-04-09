@@ -13,6 +13,11 @@ const querySchema = z.object({
   to: z.string().optional(),
   refresh: z.enum(['true', 'false']).optional(),
   uncategorized: z.enum(['true', 'false']).optional(),
+  // cardGroupId filters by card group membership:
+  //   undefined → no filter (all cards)
+  //   "none"    → only transactions from cards with NO group
+  //   "<int>"   → only transactions from cards in that group
+  cardGroupId: z.string().optional(),
 });
 
 interface TransactionRow {
@@ -51,13 +56,16 @@ interface TransactionRow {
  */
 transactionsRouter.get('/transactions', async (req, res, next) => {
   try {
-    const { itemId, from, to, refresh, uncategorized } = querySchema.parse(req.query);
+    const { itemId, from, to, refresh, uncategorized, cardGroupId } =
+      querySchema.parse(req.query);
 
     if (refresh === 'true') {
       await syncItem(itemId);
     }
 
     const onlyUncategorized = uncategorized === 'true';
+    const groupFilter = parseCardGroupFilter(cardGroupId);
+
     const rows = db
       .prepare(
         `SELECT t.id, t.account_id, t.item_id, t.date, t.description, t.amount,
@@ -71,10 +79,16 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
          FROM transactions t
          LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
          LEFT JOIN user_categories       uc ON uc.id = tc.user_category_id
+         LEFT JOIN card_group_members    m  ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
          WHERE t.item_id = ?
            AND (? IS NULL OR t.date >= ?)
            AND (? IS NULL OR t.date <= ?)
            AND (? = 0 OR tc.transaction_id IS NULL)
+           AND (
+             ? = 'any'
+             OR (? = 'none' AND m.card_group_id IS NULL)
+             OR (? = 'id'   AND m.card_group_id = ?)
+           )
          ORDER BY t.date DESC, t.id DESC`,
       )
       .all(
@@ -84,6 +98,10 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
         to ?? null,
         to ?? null,
         onlyUncategorized ? 1 : 0,
+        groupFilter.kind,
+        groupFilter.kind,
+        groupFilter.kind,
+        groupFilter.kind === 'id' ? groupFilter.id : null,
       ) as TransactionRow[];
 
     res.json(rows.map(shapeRow));
@@ -91,6 +109,20 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
     next(err);
   }
 });
+
+/**
+ * Parse the cardGroupId query param into a discriminated shape so the SQL
+ * can branch cleanly. Kept as a pure function for reuse by /bills/current.
+ */
+export function parseCardGroupFilter(
+  raw: string | undefined,
+): { kind: 'any' } | { kind: 'none' } | { kind: 'id'; id: number } {
+  if (raw == null || raw === '') return { kind: 'any' };
+  if (raw === 'none') return { kind: 'none' };
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) return { kind: 'any' };
+  return { kind: 'id', id: parsed };
+}
 
 // POST /transactions/sync?itemId=... — explicit sync endpoint (mutating)
 transactionsRouter.post('/transactions/sync', async (req, res, next) => {

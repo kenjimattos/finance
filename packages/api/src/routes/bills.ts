@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db/index.js';
 import { computeOpenBillWindow, computePreviousBillWindow } from '../services/billWindow.js';
+import { parseCardGroupFilter } from './transactions.js';
 
 export const billsRouter = Router();
 
@@ -43,13 +44,24 @@ billsRouter.get('/bills', (req, res, next) => {
   }
 });
 
-// GET /bills/current?itemId=...
+const currentQuerySchema = z.object({
+  itemId: z.string().min(1),
+  cardGroupId: z.string().optional(),
+});
+
+// GET /bills/current?itemId=...&cardGroupId=...
 // Returns the *open* bill window (computed, not stored) plus its running total
 // and a comparison against the previous bill window. This is the main summary
 // card the frontend renders at the top of the screen.
+//
+// cardGroupId filter semantics:
+//   omitted → all cards (full bill)
+//   "none"  → cards with no group (unassigned)
+//   "<id>"  → cards in that group
 billsRouter.get('/bills/current', (req, res, next) => {
   try {
-    const { itemId } = z.object({ itemId: z.string().min(1) }).parse(req.query);
+    const { itemId, cardGroupId } = currentQuerySchema.parse(req.query);
+    const groupFilter = parseCardGroupFilter(cardGroupId);
 
     const settings = requireCardSettings(itemId);
     if (!settings) {
@@ -70,31 +82,8 @@ billsRouter.get('/bills/current', (req, res, next) => {
       dueDay: settings.due_day,
     });
 
-    // Transactions amounts are negative for outflows (purchases) and positive
-    // for inflows (refunds, credits). We want the total owed, which is the
-    // sum of all amounts INVERTED — a R$100 purchase contributes +100 to the
-    // bill total. We cast via -SUM() so the response is "how much you owe".
-    const currentTotal =
-      (db
-        .prepare(
-          `SELECT -COALESCE(SUM(amount), 0) AS total
-           FROM transactions
-           WHERE item_id = ?
-             AND date >= ?
-             AND date <= ?`,
-        )
-        .get(itemId, current.periodStart, current.periodEnd) as SumRow).total ?? 0;
-
-    const previousTotal =
-      (db
-        .prepare(
-          `SELECT -COALESCE(SUM(amount), 0) AS total
-           FROM transactions
-           WHERE item_id = ?
-             AND date >= ?
-             AND date <= ?`,
-        )
-        .get(itemId, previous.periodStart, previous.periodEnd) as SumRow).total ?? 0;
+    const currentTotal = sumBillTotal(itemId, current.periodStart, current.periodEnd, groupFilter);
+    const previousTotal = sumBillTotal(itemId, previous.periodStart, previous.periodEnd, groupFilter);
 
     res.json({
       itemId,
@@ -111,6 +100,44 @@ billsRouter.get('/bills/current', (req, res, next) => {
     next(err);
   }
 });
+
+/**
+ * Sum the absolute spend in a bill window, optionally filtered by card group.
+ * Returns a POSITIVE number representing "how much you owe" — amounts are
+ * stored negative for purchases (Pluggy convention), so we invert via -SUM().
+ */
+function sumBillTotal(
+  itemId: string,
+  periodStart: string,
+  periodEnd: string,
+  groupFilter: ReturnType<typeof parseCardGroupFilter>,
+): number {
+  const row = db
+    .prepare(
+      `SELECT -COALESCE(SUM(t.amount), 0) AS total
+       FROM transactions t
+       LEFT JOIN card_group_members m
+         ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
+       WHERE t.item_id = ?
+         AND t.date >= ?
+         AND t.date <= ?
+         AND (
+           ? = 'any'
+           OR (? = 'none' AND m.card_group_id IS NULL)
+           OR (? = 'id'   AND m.card_group_id = ?)
+         )`,
+    )
+    .get(
+      itemId,
+      periodStart,
+      periodEnd,
+      groupFilter.kind,
+      groupFilter.kind,
+      groupFilter.kind,
+      groupFilter.kind === 'id' ? groupFilter.id : null,
+    ) as SumRow;
+  return row.total ?? 0;
+}
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
