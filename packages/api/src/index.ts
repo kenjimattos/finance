@@ -13,6 +13,7 @@ import { cardSettingsRouter } from './routes/cardSettings.js';
 import { categoriesRouter } from './routes/categories.js';
 import { billsRouter } from './routes/bills.js';
 import { categorizeRouter } from './routes/categorize.js';
+import { cardGroupsRouter } from './routes/cardGroups.js';
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 app.use(connectRouter);
 app.use(itemsRouter);
 app.use(cardSettingsRouter);
+app.use(cardGroupsRouter);
 app.use(categoriesRouter);
 app.use(billsRouter);
 app.use(transactionsRouter);
