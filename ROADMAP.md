@@ -13,37 +13,18 @@ Small, high-leverage items that make the codebase safer to refactor.
 - [x] **Tests for pure services** — `node --test` + `tsx` loader, 28 tests covering `billWindow` and `merchantSlug`. These functions will be refactored in phase 2; tests make that safe.
 - [x] **Clean PARCxx/yy suffix globally** — stripped in `shapeRow` (API layer) so all consumers get clean descriptions.
 
-## Phase 2 — Fatura por banco (structural)
+## Phase 2 — Fatura por banco (structural) ✓
 
-The only feature that **blocks** adding a second bank. Biggest refactoring — better to do it before more code accumulates on the current structure.
+Completed. Each Pluggy item can contain multiple CREDIT accounts; each account has its own billing cycle, card groups, and bill window.
 
-`fetchAccounts(itemId)` without a type filter already returns separate accounts per bank, each with a readable `name` (e.g. "Pic Pay Mastercard Black"). Transactions already carry `account_id`, so separation by bank is automatic.
+- [x] `accounts` table populated during sync from `fetchAccounts(itemId, 'CREDIT')`
+- [x] `account_settings` replaces per-item `card_settings` (with backfill migration)
+- [x] `card_groups` / `card_group_members` gain `account_id` column (with backfill)
+- [x] `/bills/current/breakdown` accepts `accountId`, computes window per account
+- [x] Frontend: account selector tabs at the top; within each account everything works as before
+- [x] Onboarding: setup form asks closing/due per account
 
-Architecture:
-
-```
-Account CREDIT (detected from Pluggy, name = "Pic Pay Mastercard Black")
-  ├── closing_day, due_day (configured once per account by the user)
-  ├── Group "Eu"        → card_last4 belonging to this account
-  ├── Group "Esposa"    → ...
-  └── Group "Virtual"   → ...
-```
-
-Implies:
-- [ ] `card_settings` migrates from per-`itemId` to per-`accountId`
-- [ ] `card_groups` gains FK to `accountId` instead of `itemId`
-- [ ] `/bills/current/breakdown` computes one window per account
-- [ ] Frontend: account selector (tabs or picker) at the top; within each account everything works as today
-- [ ] Onboarding: setup form asks closing/due per account instead of per item
-
-Data already available in the current connection:
-
-| type | name | number |
-|---|---|---|
-| BANK | PicPay Instituição de Pagamento S.A | 00649316-5 |
-| CREDIT | Pic Pay Mastercard Black | 3021 |
-
-The BANK account is relevant for phase 4 (cash flow).
+Legacy `card_settings` and item-scoped breakdown paths remain for backward compat but are no longer used by the frontend.
 
 ## Phase 3 — Depth in the current experience
 

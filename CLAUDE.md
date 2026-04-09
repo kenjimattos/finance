@@ -8,9 +8,11 @@ A **self-hosted, single-user** credit card spending manager backed by [Pluggy](h
 
 ## Current state
 
-Functional end-to-end: connect card via `react-pluggy-connect` → configure `closing_day` / `due_day` once → sync bills and transactions from Pluggy → categorize transactions (with learning, bulk, and undo) → group physical cards (titular, adicional, virtual…) → see per-group cards with category breakdowns and installment sub-sections → manually shift individual transactions to a neighboring bill cycle when the purchase date lies about when the charge actually lands.
+Functional end-to-end: connect card via `react-pluggy-connect` → sync discovers credit accounts → configure `closing_day` / `due_day` per account → sync bills and transactions from Pluggy → categorize transactions (with learning, bulk, and undo) → group physical cards (titular, adicional, virtual…) per account → see per-group cards with category breakdowns and installment sub-sections → manually shift individual transactions to a neighboring bill cycle when the purchase date lies about when the charge actually lands.
 
-No tests yet. Cash-flow projection (checking accounts, manual entries, forward view) is a deliberate future feature and not yet built.
+Multi-account support: a single Pluggy item (bank connection) can contain multiple credit accounts (e.g. different card brands). Each account has its own billing cycle, card groups, and bill window. The frontend shows account tabs when more than one CREDIT account exists.
+
+28 tests covering `billWindow` and `merchantSlug`. Cash-flow projection (checking accounts, manual entries, forward view) is a deliberate future feature and not yet built.
 
 ## Repository layout
 
@@ -58,8 +60,8 @@ Both dev servers bind to `0.0.0.0`, so other devices on the local network can ac
 
 Three independent domains in SQLite, deliberately not merged:
 
-1. **Pluggy cache** (`items`, `transactions`, `bills`) — read-through cache of what Pluggy returns. `raw_json` on each row keeps the full payload so new fields can surface later without a backfill. Can be wiped and re-synced without losing user work.
-2. **User configuration** (`card_settings`, `card_groups`, `card_group_members`) — per-card closing/due days (Pluggy does not expose these), plus the user's grouping of physical cards by `card_last4`. One card belongs to at most one group (composite primary key enforces exclusivity).
+1. **Pluggy cache** (`items`, `accounts`, `transactions`, `bills`) — read-through cache of what Pluggy returns. `accounts` is populated during sync from `fetchAccounts(itemId, 'CREDIT')`. `raw_json` on each row keeps the full payload so new fields can surface later without a backfill. Can be wiped and re-synced without losing user work.
+2. **User configuration** (`account_settings`, `card_groups`, `card_group_members`) — per-account closing/due days (Pluggy does not expose these), plus the user's grouping of physical cards by `card_last4` scoped per account. One card belongs to at most one group (composite primary key enforces exclusivity). Legacy `card_settings` (per-item) table remains for backward compat but the frontend writes to `account_settings`.
 3. **User work** (`user_categories`, `transaction_categories`, `category_rules`, `transaction_bill_overrides`) — categorization, learned rules, and manual bill-cycle shifts. These are **separate join tables**, not columns on `transactions`, so a Pluggy re-sync never wipes them.
 
 Column-level migrations use `addColumnIfMissing()` in [db/index.ts](packages/api/src/db/index.ts) — append-only, idempotent via `PRAGMA table_info`. New tables use `CREATE TABLE IF NOT EXISTS` directly.
@@ -105,13 +107,14 @@ Deliberate choices: no regex, no priorities, no UI for rule management. Bulk cat
 1. `POST /connect-token` — short-lived JWT for the Pluggy Connect widget. Never cache; generate per session.
 2. Frontend renders `<PluggyConnect>`. Rendering mounts the modal; unmounting closes it (no `isOpen` prop). `onSuccess({ item })` gives the `item.id`.
 3. `POST /items { itemId }` — backend validates via `pluggy.fetchItem()` and persists.
-4. `GET /card-settings/:itemId` → 404 triggers the setup form in the frontend.
-5. `PUT /card-settings/:itemId { closingDay, dueDay, displayName? }` — one-time config.
-6. `POST /transactions/sync?itemId=...` — syncs bills and transactions, then runs `applyLearnedRules`.
-7. `GET /bills/current/breakdown?itemId=...` — one response with the current window dates, neighbor windows, and a `groups[]` array. First entry (`groupId: null`) is "Todos" and becomes the big headline; subsequent entries are the real card groups and become the grid of cards, each with `categories[]` and `installments[]`.
-8. `GET /transactions` — accepts `from`/`to` plus the four neighbor-window params (`previousFrom`, `previousTo`, `nextFrom`, `nextTo`) to run in shift-aware mode, returning a transaction list that matches the card totals exactly.
-9. `PUT /transactions/:id/category { categoryId }` / `POST /transactions/bulk-categorize` / `DELETE /transactions/:id/category` — the user's main interaction.
-10. `PUT /transactions/:id/bill-shift { shift: -1 | 0 | 1 }` — shift (or restore with 0) a single transaction.
+4. `POST /transactions/sync?itemId=...` — syncs accounts, bills, and transactions, then runs `applyLearnedRules`. Upserts discovered accounts into the `accounts` table.
+5. `GET /accounts?itemId=...` — list CREDIT accounts for the item. Frontend picks the first (or shows tabs if multiple).
+6. `GET /account-settings/:accountId` → 404 triggers the per-account setup form.
+7. `PUT /account-settings/:accountId { closingDay, dueDay, displayName? }` — one-time config per account.
+8. `GET /bills/current/breakdown?itemId=...&accountId=...` — one response with the current window dates, neighbor windows, and a `groups[]` array scoped to the account. First entry (`groupId: null`) is "Todos" and becomes the big headline; subsequent entries are the real card groups and become the grid of cards, each with `categories[]` and `installments[]`.
+9. `GET /transactions` — accepts `itemId`, optional `accountId`, `from`/`to` plus the four neighbor-window params to run in shift-aware mode, returning a transaction list that matches the card totals exactly.
+10. `PUT /transactions/:id/category { categoryId }` / `POST /transactions/bulk-categorize` / `DELETE /transactions/:id/category` — the user's main interaction.
+11. `PUT /transactions/:id/bill-shift { shift: -1 | 0 | 1 }` — shift (or restore with 0) a single transaction.
 
 ### Frontend design language
 
@@ -125,7 +128,7 @@ Type system:
 
 Decoration: fixed CSS-only paper-grain noise overlay, fixed vertical margin rule at `left: 48px`, focus rings in the accent color, muted scrollbars. Motion is used sparingly — entrance fades for screens, slide-up for the bulk action bar and toast, card fade-in. No micro-animations scattered.
 
-The dashboard lays out: big headline → grid of per-group cards → `CategoryTabs` (derived from the selected card's categories) → `TransactionInbox` (with bulk action bar at the bottom when rows are selected). Each card caps categories and installments at 4 with a `+ N mais` / `− recolher` toggle; stop-propagation on those toggles is essential because the card itself is a clickable filter.
+The dashboard lays out: account tabs (if multiple) → big headline → grid of per-group cards → `CategoryTabs` (derived from the selected card's categories) → `TransactionInbox` (with bulk action bar at the bottom when rows are selected). Each card caps categories and installments at 4 with a `+ N mais` / `− recolher` toggle; stop-propagation on those toggles is essential because the card itself is a clickable filter.
 
 ### Reusable UI patterns
 
