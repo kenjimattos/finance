@@ -4,5 +4,4 @@ dist
 .env
 .env.local
 .DS_Store
-data/*.sqlite
-data/*.sqlite-journal
+**/data/
