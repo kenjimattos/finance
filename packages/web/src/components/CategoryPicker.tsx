@@ -35,6 +35,7 @@ interface PickerProps {
   categories: Category[];
   triggerRect: Rect;
   onPick: (categoryId: number) => void;
+  onClear?: () => void;
   onClose: () => void;
 }
 
@@ -42,6 +43,7 @@ function CategoryPickerPortal({
   categories,
   triggerRect,
   onPick,
+  onClear,
   onClose,
 }: PickerProps) {
   const [query, setQuery] = useState('');
@@ -160,6 +162,18 @@ function CategoryPickerPortal({
       />
 
       <ul className="max-h-[240px] overflow-y-auto py-1">
+        {onClear && (
+          <li className="border-b border-[color:var(--color-paper-rule)]">
+            <button
+              type="button"
+              onClick={onClear}
+              className="flex w-full items-center gap-3 px-4 py-2 text-left font-body text-sm italic text-[color:var(--color-ink-muted)] transition-colors hover:bg-[color:var(--color-paper-tint)] hover:text-[color:var(--color-accent)]"
+            >
+              <span aria-hidden="true">×</span>
+              <span>Remover categoria</span>
+            </button>
+          </li>
+        )}
         {filtered.map((cat, i) => (
           <li key={cat.id}>
             <button
@@ -262,11 +276,14 @@ export function CategoryTrigger({
   color,
   categories,
   onPick,
+  onClear,
 }: {
   label: string;
   color?: string | null;
   categories: Category[];
   onPick: (categoryId: number) => void;
+  /** If present, renders a "Remover categoria" row at the top of the picker. */
+  onClear?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<Rect | null>(null);
@@ -318,6 +335,14 @@ export function CategoryTrigger({
               onPick(id);
               setOpen(false);
             }}
+            onClear={
+              onClear
+                ? () => {
+                    onClear();
+                    setOpen(false);
+                  }
+                : undefined
+            }
             onClose={() => setOpen(false)}
           />
         )}

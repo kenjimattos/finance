@@ -19,12 +19,14 @@ export function TransactionRow({
   selected,
   onToggleSelected,
   onAssign,
+  onClear,
 }: {
   tx: Transaction;
   categories: Category[];
   selected: boolean;
   onToggleSelected: () => void;
   onAssign: (categoryId: number) => void;
+  onClear: () => void;
 }) {
   const isOutflow = tx.amount < 0;
   const amountDisplay = formatBRL(Math.abs(tx.amount));
@@ -72,6 +74,7 @@ export function TransactionRow({
             color={tx.userCategory?.color}
             categories={categories}
             onPick={onAssign}
+            onClear={tx.userCategory ? onClear : undefined}
           />
           {tx.userCategory?.assignedBy === 'learned' && (
             <span className="font-body text-[10px] italic text-[color:var(--color-ink-faint)]">
