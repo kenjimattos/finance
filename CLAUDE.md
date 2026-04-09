@@ -36,7 +36,7 @@ npm run -w @finance/api typecheck     # just the api
 npm run -w @finance/web typecheck     # just the web
 ```
 
-Vite proxies `/api/*` → `http://localhost:3333` during dev so the frontend has no CORS dance. There are no tests yet. Before adding a test runner, ask the user which one — don't default to Jest.
+Both dev servers bind to `0.0.0.0`, so other devices on the local network can access the app via the host machine's IP (e.g. `http://192.168.1.x:5173`). Vite proxies `/api/*` → `http://localhost:3333` during dev so the frontend has no CORS dance. There are no tests yet. Before adding a test runner, ask the user which one — don't default to Jest.
 
 ## Working style in this repo
 

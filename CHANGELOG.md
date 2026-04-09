@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+
+- Dev servers (Vite + Express) now bind to `0.0.0.0`, allowing access from other devices on the local network.
+
 ## [0.1.0] - 2026-04-09
 
 First minimally functional version. End-to-end flow from connecting a card to categorizing transactions with learned rules and seeing per-group breakdowns.

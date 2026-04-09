@@ -44,6 +44,6 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
 };
 app.use(errorHandler);
 
-app.listen(config.PORT, () => {
-  console.log(`[api] listening on http://localhost:${config.PORT}`);
+app.listen(config.PORT, '0.0.0.0', () => {
+  console.log(`[api] listening on http://0.0.0.0:${config.PORT}`);
 });
