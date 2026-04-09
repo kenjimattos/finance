@@ -112,6 +112,36 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_rules_slug ON category_rules(merchant_slug);
+
+  -- User-defined groups of physical cards (e.g. "Eu + Esposa", "Virtual").
+  -- Scoped per item so two connections can have their own "Esposa" group.
+  CREATE TABLE IF NOT EXISTS card_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (item_id, name),
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+  );
+
+  -- Assignment of a physical card (identified by its last 4 digits) to a
+  -- group. The composite primary key on (item_id, card_last4) enforces
+  -- exclusivity at the schema level — a card can only be in one group.
+  -- card_last4 is not globally unique (two banks may have the same last 4),
+  -- so the item_id has to be part of the key.
+  CREATE TABLE IF NOT EXISTS card_group_members (
+    item_id TEXT NOT NULL,
+    card_last4 TEXT NOT NULL,
+    card_group_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (item_id, card_last4),
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
+    FOREIGN KEY (card_group_id) REFERENCES card_groups(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_cgm_group ON card_group_members(card_group_id);
 `);
 
 // -----------------------------------------------------------------------------
