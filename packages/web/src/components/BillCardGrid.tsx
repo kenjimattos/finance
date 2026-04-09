@@ -123,12 +123,17 @@ function BillCard({
   const deltaDirection =
     group.delta > 0.01 ? 'higher' : group.delta < -0.01 ? 'lower' : 'flat';
 
-  // The max category total for the current card, used to scale the proportional
-  // bars so the biggest category fills the bar width.
-  const maxCategoryTotal = Math.max(
-    1, // guard against divide-by-zero if list is empty
-    ...group.categories.map((c) => c.total),
-  );
+  // Bars represent each category's share of THIS card's total, not its
+  // proportion against the biggest category. "Alimentação = 40%" means
+  // "40% of everything you spent with this card went to food", which is
+  // the story the user actually wants to read off the card.
+  //
+  // Note we sum the category totals (rather than reusing group.total) to
+  // avoid a subtle off-by-one: group.total includes CREDIT reversals,
+  // while group.categories only lists POSITIVE categorized spend. Using
+  // the category sum keeps the bars adding up to 100% on the card.
+  const categoriesSum = group.categories.reduce((acc, c) => acc + Math.max(0, c.total), 0);
+  const denominator = categoriesSum > 0 ? categoriesSum : 1;
 
   return (
     <button
@@ -203,13 +208,14 @@ function BillCard({
                   {formatBRL(cat.total)}
                 </span>
               </div>
-              {/* The thin proportional bar — 2px high, category color, fades out */}
+              {/* The thin proportional bar — 2px high, category color.
+                  Width is this category's share of the card's total spend. */}
               <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
                 <div
                   className="h-full"
                   style={{
                     background: cat.color,
-                    width: `${Math.round((cat.total / maxCategoryTotal) * 100)}%`,
+                    width: `${Math.round((Math.max(0, cat.total) / denominator) * 100)}%`,
                   }}
                 />
               </div>
