@@ -51,7 +51,7 @@ export function CardGroupsManager({
     queryClient.invalidateQueries({ queryKey: ['cardGroups', itemId] });
     queryClient.invalidateQueries({ queryKey: ['cards', itemId] });
     queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-    queryClient.invalidateQueries({ queryKey: ['currentBill', itemId] });
+    queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
   }
 
   const groups = groupsQ.data ?? [];

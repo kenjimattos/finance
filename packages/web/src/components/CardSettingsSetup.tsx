@@ -22,7 +22,7 @@ export function CardSettingsSetup({ itemId }: { itemId: string }) {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cardSettings', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['currentBill', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
     },
   });
 

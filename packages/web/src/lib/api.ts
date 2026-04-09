@@ -115,18 +115,6 @@ export interface Transaction {
   userCategory: UserCategoryRef | null;
 }
 
-export interface OpenBill {
-  itemId: string;
-  displayName: string | null;
-  periodStart: string;
-  periodEnd: string;
-  closingDate: string;
-  dueDate: string;
-  total: number;
-  previousTotal: number;
-  delta: number;
-}
-
 export interface BillCategoryBreakdown {
   id: number;
   name: string;
@@ -186,12 +174,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ name }),
     }),
-
-  getCurrentBill: (itemId: string, cardGroupId?: string) => {
-    const qs = new URLSearchParams({ itemId });
-    if (cardGroupId) qs.set('cardGroupId', cardGroupId);
-    return request<OpenBill>(`/bills/current?${qs}`);
-  },
 
   getBillBreakdown: (itemId: string) =>
     request<BillBreakdown>(
