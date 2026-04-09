@@ -172,11 +172,15 @@ function assignCategoryInTransaction(
     previous.user_category_id !== categoryId &&
     slug
   ) {
-    // User is correcting a learned guess — penalize the old rule.
+    // User is correcting a learned guess — track the override for analytics
+    // but do NOT disable the rule. A rule with 50 hits and 3 overrides has
+    // a ~94% accuracy rate and should keep applying the majority category.
+    // The user corrects the minority cases manually. Disabling would throw
+    // away a good rule because of a few edge cases (e.g. same supermarket
+    // for groceries AND household items).
     db.prepare(
       `UPDATE category_rules
-         SET override_count = override_count + 1,
-             disabled = CASE WHEN override_count + 1 >= 2 THEN 1 ELSE disabled END
+         SET override_count = override_count + 1
        WHERE merchant_slug = ? AND user_category_id = ?`,
     ).run(slug, previous.user_category_id);
   }
