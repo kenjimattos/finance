@@ -258,6 +258,38 @@ db.exec(`
   }
 }
 
+// Phase 2: add account_id to card_groups and card_group_members.
+addColumnIfMissing('card_groups', 'account_id', 'TEXT');
+addColumnIfMissing('card_group_members', 'account_id', 'TEXT');
+
+// Backfill: for card_groups where account_id is NULL, look up the CREDIT
+// account for the group's item_id. If there is exactly one, assign it.
+{
+  const nullGroups = db
+    .prepare('SELECT id, item_id FROM card_groups WHERE account_id IS NULL')
+    .all() as Array<{ id: number; item_id: string }>;
+  for (const g of nullGroups) {
+    const accts = db
+      .prepare("SELECT id FROM accounts WHERE item_id = ? AND type = 'CREDIT'")
+      .all(g.item_id) as Array<{ id: string }>;
+    if (accts.length === 1) {
+      db.prepare('UPDATE card_groups SET account_id = ? WHERE id = ?').run(
+        accts[0].id,
+        g.id,
+      );
+    }
+  }
+}
+
+// Backfill card_group_members.account_id from the parent card_group.
+db.exec(`
+  UPDATE card_group_members
+  SET account_id = (
+    SELECT cg.account_id FROM card_groups cg WHERE cg.id = card_group_members.card_group_id
+  )
+  WHERE account_id IS NULL
+`);
+
 function addColumnIfMissing(table: string, column: string, decl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
     name: string;

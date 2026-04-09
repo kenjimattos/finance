@@ -80,6 +80,7 @@ export interface Category {
 export interface CardGroup {
   id: number;
   item_id: string;
+  account_id: string | null;
   name: string;
   color: string;
   memberCount: number;
@@ -253,16 +254,22 @@ export const api = {
     return request<Transaction[]>(`/transactions?${qs}`);
   },
 
-  listCards: (itemId: string) =>
-    request<Card[]>(`/cards?itemId=${encodeURIComponent(itemId)}`),
+  listCards: (itemId: string, accountId?: string) => {
+    const qs = new URLSearchParams({ itemId });
+    if (accountId) qs.set('accountId', accountId);
+    return request<Card[]>(`/cards?${qs}`);
+  },
 
-  listCardGroups: (itemId: string) =>
-    request<CardGroup[]>(`/card-groups?itemId=${encodeURIComponent(itemId)}`),
+  listCardGroups: (itemId: string, accountId?: string) => {
+    const qs = new URLSearchParams({ itemId });
+    if (accountId) qs.set('accountId', accountId);
+    return request<CardGroup[]>(`/card-groups?${qs}`);
+  },
 
-  createCardGroup: (itemId: string, name: string) =>
+  createCardGroup: (itemId: string, name: string, accountId?: string) =>
     request<CardGroup>('/card-groups', {
       method: 'POST',
-      body: JSON.stringify({ itemId, name }),
+      body: JSON.stringify({ itemId, accountId, name }),
     }),
 
   renameCardGroup: (id: number, name: string) =>
