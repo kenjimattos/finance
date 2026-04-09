@@ -24,6 +24,10 @@ npm run -w @finance/api typecheck    # tsc --noEmit, no build artifacts
 
 There are no tests yet. Before adding a test runner, ask the user which one — don't default to Jest.
 
+## Working style in this repo
+
+**Commit as you go, not at the end.** For any task with more than ~2 logical steps, commit at each natural checkpoint where the code is coherent, typechecks, and represents a standalone unit of progress. Don't batch everything into a single "big bang" commit at the end of a session — the user has explicitly asked for granular incremental commits so progress can be reviewed, reverted, or bisected. Each commit should follow the existing style: one logical change, descriptive body explaining *why*, Co-Authored-By trailer. Run `npm run -w @finance/api typecheck` before committing backend changes.
+
 ## Architecture
 
 ### Request flow (credit card transactions)
