@@ -70,6 +70,10 @@ export function BillCardGrid({
     breakdown.groups.find((g) => g.groupId == null) ?? null;
   const groupSlots = breakdown.groups.filter((g) => g.groupId != null);
 
+  const allTotal = allSlot?.total ?? 0;
+  const groupsTotal = groupSlots.reduce((acc, g) => acc + g.total, 0);
+  const ungroupedGap = Math.round((allTotal - groupsTotal) * 100) / 100;
+
   const allDelta = allSlot ? formatDelta(allSlot.delta) : null;
   const allDeltaDirection = !allSlot
     ? 'flat'
@@ -150,6 +154,25 @@ export function BillCardGrid({
           </button>
         </div>
       </div>
+
+      {Math.abs(ungroupedGap) > 0.01 && groupSlots.length > 0 && (
+        <p className="mb-4 font-body text-xs text-[color:var(--color-ink-muted)]">
+          <span className="font-mono text-[color:var(--color-accent)]">
+            {formatBRL(Math.abs(ungroupedGap))}
+          </span>{' '}
+          em cartões sem grupo —{' '}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onManageCards();
+            }}
+            className="underline decoration-[color:var(--color-accent)] underline-offset-4 hover:text-[color:var(--color-accent)]"
+          >
+            gerenciar cartões
+          </button>
+        </p>
+      )}
 
       {groupSlots.length === 0 ? (
         <p className="rule-top py-6 font-body text-sm italic text-[color:var(--color-ink-faint)]">
