@@ -6,9 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- **Test suite**: `node --test` with `tsx` loader — 28 tests covering `billWindow` (open/previous/next window math, year boundaries, day clamping, contiguity) and `merchantSlug` (prefix stripping, star/dash splitting, location removal, fuzzy collapsing, edge cases). Zero new dependencies.
+
 ### Changed
 
 - Dev servers (Vite + Express) now bind to `0.0.0.0`, allowing access from other devices on the local network.
+
+### Fixed
+
+- `PARCxx/yy` installment suffix is now stripped in the API layer (`shapeRow`) instead of only in the frontend's installment render. All consumers (dashboard, inbox, future exports) get clean descriptions.
 
 ## [0.1.0] - 2026-04-09
 
