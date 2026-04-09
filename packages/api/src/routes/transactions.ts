@@ -18,6 +18,15 @@ const querySchema = z.object({
   //   "none"    → only transactions from cards with NO group
   //   "<int>"   → only transactions from cards in that group
   cardGroupId: z.string().optional(),
+  // When all four of these are passed together with `from`/`to`, the
+  // handler switches to SHIFT-AWARE mode: transactions with manual
+  // bill-shift overrides (±1 cycle) are matched against the neighboring
+  // window instead of their raw date. Used by the dashboard so the inbox
+  // reflects the same numbers the BillCardGrid shows.
+  previousFrom: z.string().optional(),
+  previousTo: z.string().optional(),
+  nextFrom: z.string().optional(),
+  nextTo: z.string().optional(),
 });
 
 interface TransactionRow {
@@ -40,6 +49,7 @@ interface TransactionRow {
   user_category_name: string | null;
   user_category_color: string | null;
   assigned_by: string | null;
+  bill_shift: number | null;
 }
 
 /**
@@ -56,8 +66,18 @@ interface TransactionRow {
  */
 transactionsRouter.get('/transactions', async (req, res, next) => {
   try {
-    const { itemId, from, to, refresh, uncategorized, cardGroupId } =
-      querySchema.parse(req.query);
+    const {
+      itemId,
+      from,
+      to,
+      refresh,
+      uncategorized,
+      cardGroupId,
+      previousFrom,
+      previousTo,
+      nextFrom,
+      nextTo,
+    } = querySchema.parse(req.query);
 
     if (refresh === 'true') {
       await syncItem(itemId);
@@ -65,6 +85,30 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
 
     const onlyUncategorized = uncategorized === 'true';
     const groupFilter = parseCardGroupFilter(cardGroupId);
+
+    // Shift-aware mode kicks in only when the caller provides BOTH the
+    // current window (from/to) AND both neighbor windows. Otherwise we fall
+    // back to the plain date-range filter to stay backwards-compatible
+    // with any caller that only wants a raw range.
+    const shiftAware =
+      !!from && !!to && !!previousFrom && !!previousTo && !!nextFrom && !!nextTo;
+
+    const dateClause = shiftAware
+      ? `AND (
+             (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
+          OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
+          OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+        )`
+      : `AND (? IS NULL OR t.date >= ?)
+         AND (? IS NULL OR t.date <= ?)`;
+
+    const dateParams = shiftAware
+      ? [
+          from, to,
+          previousFrom, previousTo,
+          nextFrom, nextTo,
+        ]
+      : [from ?? null, from ?? null, to ?? null, to ?? null];
 
     const rows = db
       .prepare(
@@ -75,14 +119,15 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
                 uc.id    AS user_category_id,
                 uc.name  AS user_category_name,
                 uc.color AS user_category_color,
-                tc.assigned_by
+                tc.assigned_by,
+                o.shift  AS bill_shift
          FROM transactions t
          LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
          LEFT JOIN user_categories       uc ON uc.id = tc.user_category_id
          LEFT JOIN card_group_members    m  ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
+         LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
          WHERE t.item_id = ?
-           AND (? IS NULL OR t.date >= ?)
-           AND (? IS NULL OR t.date <= ?)
+           ${dateClause}
            AND (? = 0 OR tc.transaction_id IS NULL)
            AND (
              ? = 'any'
@@ -93,10 +138,7 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
       )
       .all(
         itemId,
-        from ?? null,
-        from ?? null,
-        to ?? null,
-        to ?? null,
+        ...dateParams,
         onlyUncategorized ? 1 : 0,
         groupFilter.kind,
         groupFilter.kind,
@@ -105,6 +147,45 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
       ) as TransactionRow[];
 
     res.json(rows.map(shapeRow));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /transactions/:id/bill-shift { shift: -1 | 0 | 1 }
+// shift = 0 clears the override entirely.
+const shiftSchema = z.object({
+  shift: z.number().int().min(-1).max(1),
+});
+
+transactionsRouter.put('/transactions/:id/bill-shift', (req, res, next) => {
+  try {
+    const { shift } = shiftSchema.parse(req.body);
+    const transactionId = req.params.id;
+
+    const tx = db
+      .prepare('SELECT id FROM transactions WHERE id = ?')
+      .get(transactionId);
+    if (!tx) {
+      res.status(404).json({ error: 'TransactionNotFound' });
+      return;
+    }
+
+    if (shift === 0) {
+      db.prepare(
+        'DELETE FROM transaction_bill_overrides WHERE transaction_id = ?',
+      ).run(transactionId);
+    } else {
+      db.prepare(
+        `INSERT INTO transaction_bill_overrides (transaction_id, shift)
+         VALUES (?, ?)
+         ON CONFLICT(transaction_id) DO UPDATE SET
+           shift = excluded.shift,
+           created_at = datetime('now')`,
+      ).run(transactionId, shift);
+    }
+
+    res.json({ ok: true, transactionId, shift });
   } catch (err) {
     next(err);
   }
@@ -323,6 +404,7 @@ function shapeRow(r: TransactionRow) {
     totalInstallments: r.total_installments,
     billId: r.bill_id,
     cardLast4: r.card_last4,
+    billShift: r.bill_shift,
     userCategory:
       r.user_category_id == null
         ? null
