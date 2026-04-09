@@ -124,6 +124,15 @@ export interface BillCategoryBreakdown {
   total: number;
 }
 
+export interface BillInstallmentBreakdown {
+  id: string;
+  date: string;
+  description: string | null;
+  amount: number;
+  installmentNumber: number;
+  totalInstallments: number;
+}
+
 export interface BillGroupBreakdown {
   /** null for the "all" slot; number for a concrete card group */
   groupId: number | null;
@@ -133,6 +142,7 @@ export interface BillGroupBreakdown {
   previousTotal: number;
   delta: number;
   categories: BillCategoryBreakdown[];
+  installments: BillInstallmentBreakdown[];
 }
 
 export interface BillBreakdown {
