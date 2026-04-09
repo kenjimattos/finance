@@ -5,9 +5,13 @@ import { pickNextColor } from '../services/categoryColors.js';
 
 export const cardGroupsRouter = Router();
 
-const itemIdQuery = z.object({ itemId: z.string().min(1) });
+const itemIdQuery = z.object({
+  itemId: z.string().min(1),
+  accountId: z.string().min(1).optional(),
+});
 const createSchema = z.object({
   itemId: z.string().min(1),
+  accountId: z.string().min(1).optional(),
   name: z.string().min(1).max(40).trim(),
 });
 const renameSchema = z.object({ name: z.string().min(1).max(40).trim() });
@@ -19,6 +23,7 @@ const assignSchema = z.object({
 interface CardGroupRow {
   id: number;
   item_id: string;
+  account_id: string | null;
   name: string;
   color: string;
   created_at: string;
@@ -38,7 +43,8 @@ interface CardGroupRow {
  */
 cardGroupsRouter.get('/cards', (req, res, next) => {
   try {
-    const { itemId } = itemIdQuery.parse(req.query);
+    const { itemId, accountId } = itemIdQuery.parse(req.query);
+    const filterByAccount = !!accountId;
     const rows = db
       .prepare(
         `SELECT t.card_last4  AS cardLast4,
@@ -53,10 +59,11 @@ cardGroupsRouter.get('/cards', (req, res, next) => {
          LEFT JOIN card_groups cg
            ON cg.id = m.card_group_id
          WHERE t.item_id = ? AND t.card_last4 IS NOT NULL
+           AND (? = 0 OR t.account_id = ?)
          GROUP BY t.card_last4, cg.id
          ORDER BY lastUsed DESC`,
       )
-      .all(itemId) as Array<{
+      .all(itemId, filterByAccount ? 1 : 0, accountId ?? null) as Array<{
       cardLast4: string;
       txCount: number;
       lastUsed: string;
@@ -84,16 +91,18 @@ cardGroupsRouter.get('/cards', (req, res, next) => {
 // GET /card-groups?itemId=... — list groups scoped to an item
 cardGroupsRouter.get('/card-groups', (req, res, next) => {
   try {
-    const { itemId } = itemIdQuery.parse(req.query);
+    const { itemId, accountId } = itemIdQuery.parse(req.query);
+    const filterByAccount = !!accountId;
     const rows = db
       .prepare(
-        `SELECT g.id, g.item_id, g.name, g.color, g.created_at, g.updated_at,
+        `SELECT g.id, g.item_id, g.account_id, g.name, g.color, g.created_at, g.updated_at,
                 (SELECT COUNT(*) FROM card_group_members m WHERE m.card_group_id = g.id) AS memberCount
          FROM card_groups g
          WHERE g.item_id = ?
+           AND (? = 0 OR g.account_id = ?)
          ORDER BY g.name ASC`,
       )
-      .all(itemId);
+      .all(itemId, filterByAccount ? 1 : 0, accountId ?? null);
     res.json(rows);
   } catch (err) {
     next(err);
@@ -103,7 +112,7 @@ cardGroupsRouter.get('/card-groups', (req, res, next) => {
 // POST /card-groups — create a group { itemId, name }, auto color
 cardGroupsRouter.post('/card-groups', (req, res, next) => {
   try {
-    const { itemId, name } = createSchema.parse(req.body);
+    const { itemId, accountId, name } = createSchema.parse(req.body);
 
     // Validate the item exists — clean 404 instead of FK error
     const item = db.prepare('SELECT id FROM items WHERE id = ?').get(itemId);
@@ -120,9 +129,9 @@ cardGroupsRouter.post('/card-groups', (req, res, next) => {
     try {
       const info = db
         .prepare(
-          'INSERT INTO card_groups (item_id, name, color) VALUES (?, ?, ?)',
+          'INSERT INTO card_groups (item_id, account_id, name, color) VALUES (?, ?, ?, ?)',
         )
-        .run(itemId, name, color);
+        .run(itemId, accountId ?? null, name, color);
       const row = db
         .prepare('SELECT * FROM card_groups WHERE id = ?')
         .get(info.lastInsertRowid);
