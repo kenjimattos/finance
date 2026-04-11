@@ -2,9 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db/index.js';
 import {
-  computeOpenBillWindow,
-  computePreviousBillWindow,
-  computeNextBillWindow,
+  computeBillWindowAtOffset,
   type BillWindow,
 } from '../services/billWindow.js';
 import { parseCardGroupFilter } from './transactions.js';
@@ -85,24 +83,32 @@ billsRouter.get('/bills', (req, res, next) => {
 });
 
 /**
- * GET /bills/current/breakdown?itemId=...
+ * GET /bills/current/breakdown?itemId=...&offset=N
  *
  * Returns everything the dashboard needs to render the "cards per card group"
  * layout in a single round trip:
- *   - the current bill window dates (closing/due)
+ *   - the bill window dates (closing/due) for the requested cycle
  *   - one entry for "all" (groupId: null) with overall total/delta/top categories
  *   - one entry per card group (only groups that actually have categorized
  *     transactions in the window — empty groups are skipped)
+ *
+ * `offset` selects which cycle relative to the currently open bill:
+ *   - 0  (default) = currently open bill
+ *   - -1 = the bill that just closed
+ *   - -N = N cycles in the past
+ * The "previous" delta is always vs (offset - 1), so navigation back through
+ * history keeps the same "vs prior month" framing.
  *
  * Per the design decision, the "no group" bucket is NOT returned — the user
  * asked for it not to appear as a card.
  */
 billsRouter.get('/bills/current/breakdown', (req, res, next) => {
   try {
-    const { itemId, accountId } = z
+    const { itemId, accountId, offset } = z
       .object({
         itemId: z.string().min(1),
         accountId: z.string().min(1).optional(),
+        offset: z.coerce.number().int().default(0),
       })
       .parse(req.query);
 
@@ -143,9 +149,9 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
     }
 
     const settingsT = { closingDay, dueDay };
-    const current = computeOpenBillWindow(settingsT);
-    const previous = computePreviousBillWindow(settingsT);
-    const next = computeNextBillWindow(settingsT);
+    const current = computeBillWindowAtOffset(settingsT, offset);
+    const previous = computeBillWindowAtOffset(settingsT, offset - 1);
+    const next = computeBillWindowAtOffset(settingsT, offset + 1);
 
     const { column: gCol, value: gVal } = groupScopeClause(scope);
     const groups = db
@@ -225,6 +231,7 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
       itemId,
       accountId: accountId ?? null,
       displayName,
+      offset,
       periodStart: current.periodStart,
       periodEnd: current.periodEnd,
       closingDate: current.nextClosingDate,
