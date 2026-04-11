@@ -67,11 +67,17 @@ function addDays(isoDate: string, days: number): string {
 }
 
 /**
- * Compute the currently open bill window for a given card.
+ * Compute a bill window shifted by `offset` cycles from the currently open bill.
+ * offset =  0 → currently open bill (same as computeOpenBillWindow)
+ * offset = -1 → the bill that just closed
+ * offset = -N → N cycles in the past
+ * offset = +1 → the next bill (useful for shift=-1 overrides)
+ *
  * `today` defaults to the current date; pass it explicitly for deterministic tests.
  */
-export function computeOpenBillWindow(
+export function computeBillWindowAtOffset(
   settings: CardSettings,
+  offset: number,
   today: Date = new Date(),
 ): BillWindow {
   const closingDay = clampDay(settings.closingDay);
@@ -81,23 +87,22 @@ export function computeOpenBillWindow(
   const month1 = today.getMonth() + 1;
   const day = today.getDate();
 
-  // Determine the last closing date (the day AFTER which the current open bill started).
+  // "Last closing" for the currently open bill — the day AFTER which offset=0 starts.
   let lastClosing: { year: number; month1: number };
   if (day <= closingDay) {
-    // We're still before or on this month's closing — so the last closing was last month.
     lastClosing = addMonths(year, month1, -1);
   } else {
     lastClosing = { year, month1 };
   }
 
-  const lastClosingDate = ymd(lastClosing.year, lastClosing.month1, closingDay);
-  const periodStart = addDays(lastClosingDate, 1);
+  // Shift the anchor by `offset` months to target a past/future cycle.
+  const anchor = addMonths(lastClosing.year, lastClosing.month1, offset);
 
-  // Next closing is exactly one month after last closing, same day.
-  const nextClosing = addMonths(lastClosing.year, lastClosing.month1, 1);
+  const anchorClosingDate = ymd(anchor.year, anchor.month1, closingDay);
+  const periodStart = addDays(anchorClosingDate, 1);
+
+  const nextClosing = addMonths(anchor.year, anchor.month1, 1);
   const nextClosingDate = ymd(nextClosing.year, nextClosing.month1, closingDay);
-
-  // The period ends ON the next closing day (purchases that day are still in this bill).
   const periodEnd = nextClosingDate;
 
   // Due date: next occurrence of due_day that comes AFTER the next closing.
@@ -111,6 +116,17 @@ export function computeOpenBillWindow(
 }
 
 /**
+ * Compute the currently open bill window for a given card.
+ * `today` defaults to the current date; pass it explicitly for deterministic tests.
+ */
+export function computeOpenBillWindow(
+  settings: CardSettings,
+  today: Date = new Date(),
+): BillWindow {
+  return computeBillWindowAtOffset(settings, 0, today);
+}
+
+/**
  * Same idea but for the *previous* closed bill — useful for "vs last month"
  * comparisons. Returns the window that JUST closed.
  */
@@ -118,47 +134,17 @@ export function computePreviousBillWindow(
   settings: CardSettings,
   today: Date = new Date(),
 ): BillWindow {
-  // Trick: compute the current open window, then shift everything back a month.
-  const current = computeOpenBillWindow(settings, today);
-  const prevStart = shiftMonthBack(current.periodStart);
-  const prevEnd = shiftMonthBack(current.periodEnd);
-  const prevClosing = shiftMonthBack(current.nextClosingDate);
-  const prevDue = shiftMonthBack(current.nextDueDate);
-  return {
-    periodStart: prevStart,
-    periodEnd: prevEnd,
-    nextClosingDate: prevClosing,
-    nextDueDate: prevDue,
-  };
-}
-
-function shiftMonthBack(isoDate: string): string {
-  const [y, m, d] = isoDate.split('-').map(Number);
-  const shifted = addMonths(y, m, -1);
-  return ymd(shifted.year, shifted.month1, d);
-}
-
-function shiftMonthForward(isoDate: string): string {
-  const [y, m, d] = isoDate.split('-').map(Number);
-  const shifted = addMonths(y, m, 1);
-  return ymd(shifted.year, shifted.month1, d);
+  return computeBillWindowAtOffset(settings, -1, today);
 }
 
 /**
  * The *next* bill window — useful for manual bill-shift overrides, where a
  * transaction with shift=-1 belongs to the current cycle but its raw date
- * lands in the next cycle. The start is the day AFTER the current window's
- * end, and everything else shifts forward by one month.
+ * lands in the next cycle.
  */
 export function computeNextBillWindow(
   settings: CardSettings,
   today: Date = new Date(),
 ): BillWindow {
-  const current = computeOpenBillWindow(settings, today);
-  return {
-    periodStart: shiftMonthForward(current.periodStart),
-    periodEnd: shiftMonthForward(current.periodEnd),
-    nextClosingDate: shiftMonthForward(current.nextClosingDate),
-    nextDueDate: shiftMonthForward(current.nextDueDate),
-  };
+  return computeBillWindowAtOffset(settings, 1, today);
 }
