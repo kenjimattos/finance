@@ -9,10 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 
 - **Test suite**: `node --test` with `tsx` loader — 28 tests covering `billWindow` (open/previous/next window math, year boundaries, day clamping, contiguity) and `merchantSlug` (prefix stripping, star/dash splitting, location removal, fuzzy collapsing, edge cases). Zero new dependencies.
+- **`applyLearnedRules` tests** (11 cases in `services/applyLearnedRules.test.ts`, against in-memory SQLite): happy path (auto-categorize, hit_count bump, slug miss, itemId scoping), the non-overwrite invariant (manual / bulk / prior-learned assignments survive a learned-rule pass and do not bump hit_count), and edge cases (no rules, no candidates, empty description). Locks the contract that a user's manual or bulk categorization is never touched by the auto-categorization pass.
 
 ### Changed
 
 - Dev servers (Vite + Express) now bind to `0.0.0.0`, allowing access from other devices on the local network.
+- **`applyLearnedRules` extracted** from `routes/transactions.ts` into its own service module (`services/applyLearnedRules.ts`), taking a `Database` instance as a parameter. Makes the function unit-testable against an in-memory SQLite without depending on the production singleton. Behavior is unchanged; the function docstring now explicitly documents the two-layer non-overwrite safeguard (candidates filter + `INSERT OR IGNORE`) and warns against loosening either layer.
 
 ### Fixed
 
