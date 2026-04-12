@@ -145,6 +145,26 @@ export function Overview({
     return sum;
   }, [breakdownQueries]);
 
+  // ── Aggregated category breakdown across all accounts ──
+
+  const aggregatedCategories = useMemo(() => {
+    const map = new Map<number, { id: number; name: string; color: string; total: number }>();
+    breakdownQueries.forEach((q) => {
+      if (!q.data) return;
+      const allSlot = q.data.groups.find((g) => g.groupId === null);
+      if (!allSlot) return;
+      for (const cat of allSlot.categories) {
+        const existing = map.get(cat.id);
+        if (existing) {
+          existing.total += cat.total;
+        } else {
+          map.set(cat.id, { ...cat });
+        }
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [breakdownQueries]);
+
   const loading =
     accountQueries.some((q) => q.isLoading) ||
     settingsQueries.some((q) => q.isLoading);
@@ -192,6 +212,11 @@ export function Overview({
         <p className="mt-3 font-body text-sm text-[color:var(--color-ink-muted)]">
           total de {configured.length} {configured.length === 1 ? 'fatura' : 'faturas'} com vencimento em {monthLabel(year, month)}
         </p>
+
+        {/* Category breakdown */}
+        {aggregatedCategories.length > 0 && (
+          <CategoryBreakdown categories={aggregatedCategories} grandTotal={grandTotal} />
+        )}
       </div>
 
       {/* Account cards */}
@@ -230,6 +255,58 @@ export function Overview({
         <AddBankCard />
       </div>
     </motion.section>
+  );
+}
+
+// ─── Category breakdown ─────────────────────────────────────────────
+
+const CATEGORY_COLLAPSE_LIMIT = 6;
+
+function CategoryBreakdown({
+  categories,
+  grandTotal,
+}: {
+  categories: Array<{ id: number; name: string; color: string; total: number }>;
+  grandTotal: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? categories : categories.slice(0, CATEGORY_COLLAPSE_LIMIT);
+  const hiddenCount = categories.length - CATEGORY_COLLAPSE_LIMIT;
+  const denominator = categories.reduce((acc, c) => acc + Math.max(0, c.total), 0) || 1;
+
+  return (
+    <div className="mt-8">
+      <ul className="space-y-2.5">
+        {visible.map((cat) => (
+          <li key={cat.id}>
+            <div className="flex items-baseline justify-between gap-4 font-body text-[12px]">
+              <span className="truncate text-[color:var(--color-ink-soft)]">{cat.name}</span>
+              <span className="shrink-0 font-mono tabular-nums text-[color:var(--color-ink-muted)]">
+                {formatBRL(cat.total)}
+              </span>
+            </div>
+            <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
+              <div
+                className="h-full"
+                style={{
+                  background: cat.color,
+                  width: `${Math.round((Math.max(0, cat.total) / denominator) * 100)}%`,
+                }}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-3 font-body text-[11px] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+        >
+          {expanded ? '− recolher' : `+ ${hiddenCount} mais`}
+        </button>
+      )}
+    </div>
   );
 }
 
