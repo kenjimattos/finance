@@ -30,7 +30,8 @@ Legacy `card_settings` and item-scoped breakdown paths remain for backward compa
 
 Features that become essential once there are multiple accounts and months of history.
 
-- [ ] **Navigate between bill cycles** — ← / → arrows or month picker to browse closed bills. `/bills` (closed bills from Pluggy) already exists as a local cache; the work is UI + wiring to the breakdown.
+- [x] **Navigate between bill cycles** — ← / → arrows in the eyebrow to browse past bills. `computeBillWindowAtOffset(settings, offset)` is the core primitive; the breakdown endpoint accepts `?offset=N` (0 = open bill, -N = N cycles back). Labels switch to past tense and show month/year. Delta is shift-aware on both sides.
+- [x] **Additive bill-shift model** — the ⋯ menu buttons now add ±1 to the current shift value (capped at ±1) instead of setting it absolutely. "Restaurar para esta fatura" appears naturally when undoing a shift.
 - [ ] **Smarter bulk categorization** — when categorizing, suggest "apply to all with the same merchant?" instead of requiring manual multi-select. Essential for catching up on hundreds of uncategorized historical transactions.
 - [ ] **Keyboard shortcuts in the inbox** — `j`/`k` navigate, `Space` selects, `c` opens picker, `u` undoes. Amplifies bulk categorization speed.
 - [ ] **Categorization engine improvements** — the current slug-based system is good for the majority case but has known edge cases:
