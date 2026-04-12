@@ -32,8 +32,6 @@ Features that become essential once there are multiple accounts and months of hi
 
 - [x] **Navigate between bill cycles** — ← / → arrows in the eyebrow to browse past bills. `computeBillWindowAtOffset(settings, offset)` is the core primitive; the breakdown endpoint accepts `?offset=N` (0 = open bill, -N = N cycles back). Labels switch to past tense and show month/year. Delta is shift-aware on both sides.
 - [x] **Additive bill-shift model** — the ⋯ menu buttons now add ±1 to the current shift value (capped at ±1) instead of setting it absolutely. "Restaurar para esta fatura" appears naturally when undoing a shift.
-- [ ] **Smarter bulk categorization** — when categorizing, suggest "apply to all with the same merchant?" instead of requiring manual multi-select. Essential for catching up on hundreds of uncategorized historical transactions.
-- [ ] **Keyboard shortcuts in the inbox** — `j`/`k` navigate, `Space` selects, `c` opens picker, `u` undoes. Amplifies bulk categorization speed.
 - [x] **Categorization engine improvements** — three changes landed:
   - Slug granularity: the token after `*` is now preserved when >= 3 alphabetic chars, so "UBER *EATS" → "UBER EATS" and "UBER *TRIP" → "UBER TRIP" produce different slugs. Short tokens ("IFOOD *A") still collapse. Legacy slugs are tried as fallback in `applyLearnedRules` so existing rules keep working.
   - Ambiguous merchants: `applyLearnedRules` picks the rule with the highest `hit_count` per slug (majority-wins) instead of arbitrary insertion order.
@@ -64,6 +62,8 @@ Requires: new schema (`manual_entries` or similar), new screen, discussion befor
 ## Anytime (independent, no sequencing constraint)
 
 - [x] **Visible rules UI** — delivered as part of Phase 3 categorization engine improvements
+- [ ] **Smarter bulk categorization** — when categorizing, suggest "apply to all with the same merchant?" instead of requiring manual multi-select
+- [ ] **Keyboard shortcuts in the inbox** — `j`/`k` navigate, `Space` selects, `c` opens picker, `u` undoes
 - [ ] **Category icons or emoji** — visual identifier beyond auto-assigned color
 - [ ] **Transaction search** — text filter on description within the inbox
 - [ ] **Mobile responsiveness** — cards and inbox work on small screens but aren't optimized
