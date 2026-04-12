@@ -12,6 +12,7 @@ import { BillCardGrid } from '../components/BillCardGrid';
 import { CategoryTabs, type CategoryTabFilter } from '../components/CategoryTabs';
 import { TransactionInbox } from '../components/TransactionInbox';
 import { CardGroupsManager } from '../components/CardGroupsManager';
+import { RulesManager } from '../components/RulesManager';
 
 /**
  * The main screen, once a card is linked.
@@ -28,6 +29,7 @@ export function Dashboard({ itemId }: { itemId: string }) {
   const [cardGroupFilter, setCardGroupFilter] = useState<CardGroupFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryTabFilter>('all');
   const [managerOpen, setManagerOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   // Fetch accounts. The first sync populates these.
   const accountsQ = useQuery({
@@ -81,6 +83,8 @@ export function Dashboard({ itemId }: { itemId: string }) {
         setCategoryFilter={setCategoryFilter}
         managerOpen={managerOpen}
         setManagerOpen={setManagerOpen}
+        rulesOpen={rulesOpen}
+        setRulesOpen={setRulesOpen}
       />
     </>
   );
@@ -98,6 +102,8 @@ function AccountDashboard({
   setCategoryFilter,
   managerOpen,
   setManagerOpen,
+  rulesOpen,
+  setRulesOpen,
 }: {
   itemId: string;
   accountId: string;
@@ -107,6 +113,8 @@ function AccountDashboard({
   setCategoryFilter: (f: CategoryTabFilter) => void;
   managerOpen: boolean;
   setManagerOpen: (v: boolean) => void;
+  rulesOpen: boolean;
+  setRulesOpen: (v: boolean) => void;
 }) {
   // Which bill cycle we're viewing: 0 = currently open, -N = N cycles in the past.
   // Resets when switching account so the user always lands on "today" first.
@@ -179,6 +187,7 @@ function AccountDashboard({
           setCategoryFilter('all');
         }}
         onManageCards={() => setManagerOpen(true)}
+        onManageRules={() => setRulesOpen(true)}
       />
       <CategoryTabs
         categories={selectedGroup?.categories ?? []}
@@ -203,6 +212,9 @@ function AccountDashboard({
           accountId={accountId}
           onClose={() => setManagerOpen(false)}
         />
+      )}
+      {rulesOpen && (
+        <RulesManager onClose={() => setRulesOpen(false)} />
       )}
     </>
   );

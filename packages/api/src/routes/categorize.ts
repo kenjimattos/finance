@@ -85,19 +85,63 @@ categorizeRouter.post('/transactions/bulk-categorize', (req, res, next) => {
   }
 });
 
-// GET /rules — list active auto-categorization rules (for a settings screen later)
-categorizeRouter.get('/rules', (_req, res) => {
-  const rows = db
-    .prepare(
-      `SELECT r.id, r.merchant_slug, r.hit_count, r.override_count, r.disabled,
-              r.user_category_id, uc.name AS user_category_name, uc.color AS user_category_color,
-              r.created_at
-       FROM category_rules r
-       JOIN user_categories uc ON uc.id = r.user_category_id
-       ORDER BY r.disabled ASC, r.hit_count DESC`,
-    )
-    .all();
-  res.json(rows);
+// GET /rules?q=... — list auto-categorization rules, optionally filtered by slug
+categorizeRouter.get('/rules', (req, res, next) => {
+  try {
+    const { q } = z.object({ q: z.string().optional() }).parse(req.query);
+    const rows = q
+      ? db
+          .prepare(
+            `SELECT r.id, r.merchant_slug, r.hit_count, r.override_count, r.disabled,
+                    r.user_category_id, uc.name AS user_category_name, uc.color AS user_category_color,
+                    r.created_at
+             FROM category_rules r
+             JOIN user_categories uc ON uc.id = r.user_category_id
+             WHERE r.merchant_slug LIKE '%' || ? || '%'
+             ORDER BY r.disabled ASC, r.hit_count DESC`,
+          )
+          .all(q.toUpperCase())
+      : db
+          .prepare(
+            `SELECT r.id, r.merchant_slug, r.hit_count, r.override_count, r.disabled,
+                    r.user_category_id, uc.name AS user_category_name, uc.color AS user_category_color,
+                    r.created_at
+             FROM category_rules r
+             JOIN user_categories uc ON uc.id = r.user_category_id
+             ORDER BY r.disabled ASC, r.hit_count DESC`,
+          )
+          .all();
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /rules/:id { categoryId } — reassign a rule to a different category
+categorizeRouter.patch('/rules/:id', (req, res, next) => {
+  try {
+    const { categoryId } = z.object({ categoryId: z.number().int().positive() }).parse(req.body);
+
+    const category = db
+      .prepare('SELECT id FROM user_categories WHERE id = ?')
+      .get(categoryId);
+    if (!category) {
+      res.status(404).json({ error: 'CategoryNotFound' });
+      return;
+    }
+
+    const info = db
+      .prepare('UPDATE category_rules SET user_category_id = ? WHERE id = ?')
+      .run(categoryId, req.params.id);
+    if (info.changes === 0) {
+      res.status(404).json({ error: 'RuleNotFound' });
+      return;
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // DELETE /rules/:id — forget a rule entirely

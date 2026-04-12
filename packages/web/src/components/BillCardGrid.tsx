@@ -51,6 +51,7 @@ export function BillCardGrid({
   offset,
   onChangeOffset,
   onManageCards,
+  onManageRules,
 }: {
   breakdown: BillBreakdown;
   itemId: string;
@@ -61,6 +62,7 @@ export function BillCardGrid({
   offset: number;
   onChangeOffset: (nextOffset: number) => void;
   onManageCards: () => void;
+  onManageRules: () => void;
 }) {
   const queryClient = useQueryClient();
   const sync = useMutation({
@@ -168,6 +170,13 @@ export function BillCardGrid({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-5 pt-2">
+          <button
+            type="button"
+            onClick={onManageRules}
+            className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+          >
+            regras
+          </button>
           <button
             type="button"
             onClick={onManageCards}
