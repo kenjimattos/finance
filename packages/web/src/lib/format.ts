@@ -33,7 +33,7 @@ export function formatBRLCompact(value: number): string {
 }
 
 export function formatDateShort(iso: string): string {
-  return DATE_SHORT.format(parseYmd(iso)).replace('.', '');
+  return DATE_SHORT.format(parseYmd(iso)).replace('.', '').replace(/ de /g, ' ');
 }
 
 export function formatDateLong(iso: string): string {
