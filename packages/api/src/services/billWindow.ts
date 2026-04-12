@@ -148,3 +148,40 @@ export function computeNextBillWindow(
 ): BillWindow {
   return computeBillWindowAtOffset(settings, 1, today);
 }
+
+/**
+ * Find the bill offset whose due date falls in the target year/month.
+ *
+ * Different accounts have different closing_day/due_day, so the same calendar
+ * month maps to different offsets per account. This helper bridges the gap:
+ * the Overview navigates by calendar month, and each account resolves its own
+ * offset via this function.
+ *
+ * Returns `null` if no offset within ±24 cycles matches (should never happen
+ * in practice — it's a safety bound).
+ */
+export function findOffsetForDueMonth(
+  settings: CardSettings,
+  targetYear: number,
+  targetMonth: number,
+  today: Date = new Date(),
+): number | null {
+  // Compute offset 0's due date to get a reference point.
+  const ref = computeBillWindowAtOffset(settings, 0, today);
+  const [refY, refM] = ref.nextDueDate.split('-').map(Number);
+
+  // Month difference gives us the estimated offset.
+  const estimate = (targetYear - refY) * 12 + (targetMonth - refM);
+
+  // Check the estimate and its immediate neighbors (off-by-one is possible
+  // when due_day <= closing_day causes the due date to land in the next month).
+  for (const candidate of [estimate, estimate - 1, estimate + 1]) {
+    const w = computeBillWindowAtOffset(settings, candidate, today);
+    const [y, m] = w.nextDueDate.split('-').map(Number);
+    if (y === targetYear && m === targetMonth) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
