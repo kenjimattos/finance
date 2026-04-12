@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3';
-import { extractMerchantSlug } from './merchantSlug.js';
+import { extractMerchantSlug, extractLegacySlug } from './merchantSlug.js';
 
 /**
  * For every transaction belonging to this item that has no user category yet,
@@ -80,11 +80,13 @@ export function applyLearnedRules(db: Database, itemId: string): void {
   db.transaction(() => {
     for (const tx of candidates) {
       const slug = extractMerchantSlug(tx.description);
-      if (!slug) continue;
-      const categoryId = ruleBySlug.get(slug);
-      if (!categoryId) continue;
+      const legacySlug = extractLegacySlug(tx.description);
+      const matchedSlug = (slug && ruleBySlug.has(slug) ? slug : null)
+        ?? (legacySlug && ruleBySlug.has(legacySlug) ? legacySlug : null);
+      if (!matchedSlug) continue;
+      const categoryId = ruleBySlug.get(matchedSlug)!;
       assign.run(tx.id, categoryId);
-      bumpRule.run(slug, categoryId);
+      bumpRule.run(matchedSlug, categoryId);
     }
   })();
 }
