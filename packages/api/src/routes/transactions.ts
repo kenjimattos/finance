@@ -115,7 +115,8 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
 
     const rows = db
       .prepare(
-        `SELECT t.id, t.account_id, t.item_id, t.date, t.description, t.amount,
+        `SELECT t.id, t.account_id, t.item_id, t.date, t.description,
+                COALESCE(t.amount_in_account_currency, t.amount) AS amount,
                 t.currency_code, t.pluggy_category, t.pluggy_category_id,
                 t.type, t.status, t.installment_number, t.total_installments,
                 t.bill_id, t.card_last4,
@@ -266,27 +267,28 @@ async function syncItem(itemId: string) {
 
   const insertTx = db.prepare(`
     INSERT INTO transactions
-      (id, account_id, item_id, date, description, amount, currency_code,
-       pluggy_category, pluggy_category_id, type, status, installment_number,
-       total_installments, bill_id, card_last4, raw_json, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      (id, account_id, item_id, date, description, amount, amount_in_account_currency,
+       currency_code, pluggy_category, pluggy_category_id, type, status,
+       installment_number, total_installments, bill_id, card_last4, raw_json, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
-      account_id         = excluded.account_id,
-      item_id            = excluded.item_id,
-      date               = excluded.date,
-      description        = excluded.description,
-      amount             = excluded.amount,
-      currency_code      = excluded.currency_code,
-      pluggy_category    = excluded.pluggy_category,
-      pluggy_category_id = excluded.pluggy_category_id,
-      type               = excluded.type,
-      status             = excluded.status,
-      installment_number = excluded.installment_number,
-      total_installments = excluded.total_installments,
-      bill_id            = excluded.bill_id,
-      card_last4         = excluded.card_last4,
-      raw_json           = excluded.raw_json,
-      synced_at          = datetime('now')
+      account_id                  = excluded.account_id,
+      item_id                     = excluded.item_id,
+      date                        = excluded.date,
+      description                 = excluded.description,
+      amount                      = excluded.amount,
+      amount_in_account_currency  = excluded.amount_in_account_currency,
+      currency_code               = excluded.currency_code,
+      pluggy_category             = excluded.pluggy_category,
+      pluggy_category_id          = excluded.pluggy_category_id,
+      type                        = excluded.type,
+      status                      = excluded.status,
+      installment_number          = excluded.installment_number,
+      total_installments          = excluded.total_installments,
+      bill_id                     = excluded.bill_id,
+      card_last4                  = excluded.card_last4,
+      raw_json                    = excluded.raw_json,
+      synced_at                   = datetime('now')
   `);
 
   const insertBill = db.prepare(`
@@ -315,6 +317,7 @@ async function syncItem(itemId: string) {
         toYmd(t.date),
         t.description ?? null,
         t.amount,
+        t.amountInAccountCurrency ?? null,
         t.currencyCode ?? null,
         t.category ?? null,
         t.categoryId ?? null,
