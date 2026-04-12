@@ -27,8 +27,8 @@ describe('extractMerchantSlug', () => {
 
   // ─── Star / dash splitting ───────────────────────────────────────
 
-  it('takes text before * as merchant', () => {
-    assert.equal(extractMerchantSlug('IFOOD *RESTAURANTE XYZ'), 'IFOOD');
+  it('preserves meaningful token after * (>= 3 alpha chars)', () => {
+    assert.equal(extractMerchantSlug('IFOOD *RESTAURANTE XYZ'), 'IFOOD RESTAURANTE');
   });
 
   it('takes text before " - " as merchant', () => {
@@ -60,18 +60,24 @@ describe('extractMerchantSlug', () => {
 
   // ─── Fuzzy collapsing ────────────────────────────────────────────
 
-  it('collapses IFOOD variants to same slug', () => {
+  it('collapses IFOOD variants to same slug (qualifier preserved)', () => {
     const a = extractMerchantSlug('IFOOD *RESTAURANTE A');
     const b = extractMerchantSlug('IFOOD *RESTAURANTE B');
     assert.equal(a, b);
-    assert.equal(a, 'IFOOD');
+    assert.equal(a, 'IFOOD RESTAURANTE');
   });
 
-  it('collapses UBER variants to same slug', () => {
+  it('differentiates UBER EATS from UBER TRIP', () => {
     const trip = extractMerchantSlug('UBER   *TRIP BR');
     const eats = extractMerchantSlug('UBER *EATS BR');
-    assert.equal(trip, eats);
-    assert.equal(trip, 'UBER');
+    assert.notEqual(trip, eats);
+    assert.equal(trip, 'UBER TRIP');
+    assert.equal(eats, 'UBER EATS');
+  });
+
+  it('drops short token after * (< 3 chars)', () => {
+    assert.equal(extractMerchantSlug('IFOOD *A'), 'IFOOD');
+    assert.equal(extractMerchantSlug('IFOOD *AB'), 'IFOOD');
   });
 
   // ─── Edge cases ──────────────────────────────────────────────────
