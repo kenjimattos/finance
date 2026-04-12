@@ -214,7 +214,7 @@ export function Overview({
           );
         })}
 
-        <AddBankCard items={items} />
+        <AddBankCard />
       </div>
     </motion.section>
   );
@@ -237,52 +237,81 @@ function AccountCard({
   loading: boolean;
   onClick: () => void;
 }) {
+  const queryClient = useQueryClient();
+  const deleteMut = useMutation({
+    mutationFn: () => api.deleteItem(item.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
+    },
+  });
+
   const allSlot = breakdown?.groups.find((g) => g.groupId === null);
   const total = allSlot?.total ?? 0;
   const displayName =
     settings.display_name ?? account.name ?? item.connector_name ?? 'Conta';
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group flex flex-col items-start border border-[color:var(--color-paper-rule)] px-5 py-5 text-left transition-colors hover:border-[color:var(--color-ink-muted)]"
-    >
-      <span className="eyebrow mb-3 text-[color:var(--color-ink-muted)] transition-colors group-hover:text-[color:var(--color-accent)]">
-        {displayName}
-      </span>
+    <div className="group relative flex flex-col items-start border border-[color:var(--color-paper-rule)] px-5 py-5 text-left transition-colors hover:border-[color:var(--color-ink-muted)]">
+      {/* Delete button */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (confirm(`Remover "${displayName}" e todos os seus dados?`)) {
+            deleteMut.mutate();
+          }
+        }}
+        disabled={deleteMut.isPending}
+        className="absolute top-3 right-3 font-body text-xs text-[color:var(--color-ink-faint)] opacity-0 transition-opacity hover:text-[color:var(--color-accent)] group-hover:opacity-100 disabled:opacity-50"
+        aria-label={`Remover ${displayName}`}
+      >
+        remover
+      </button>
 
-      {loading ? (
-        <span className="inline-block h-10 w-2/3 animate-pulse rounded-sm bg-[color:var(--color-paper-tint)]" />
-      ) : (
-        <span className="font-display text-[40px] leading-none tracking-[-0.02em] text-[color:var(--color-ink)]">
-          {formatBRL(total)}
+      {/* Main clickable area */}
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex w-full flex-col items-start text-left"
+      >
+        <span className="eyebrow mb-3 text-[color:var(--color-ink-muted)] transition-colors group-hover:text-[color:var(--color-accent)]">
+          {displayName}
         </span>
-      )}
 
-      {breakdown && (
-        <span className="mt-3 flex flex-wrap gap-x-5 gap-y-1 font-body text-xs text-[color:var(--color-ink-muted)]">
-          <span>
-            fecha{' '}
-            <span className="text-[color:var(--color-ink-soft)]">
-              {formatDateLong(breakdown.closingDate)}
+        {loading ? (
+          <span className="inline-block h-10 w-2/3 animate-pulse rounded-sm bg-[color:var(--color-paper-tint)]" />
+        ) : (
+          <span className="font-display text-[40px] leading-none tracking-[-0.02em] text-[color:var(--color-ink)]">
+            {formatBRL(total)}
+          </span>
+        )}
+
+        {breakdown && (
+          <span className="mt-3 flex flex-wrap gap-x-5 gap-y-1 font-body text-xs text-[color:var(--color-ink-muted)]">
+            <span>
+              fecha{' '}
+              <span className="text-[color:var(--color-ink-soft)]">
+                {formatDateLong(breakdown.closingDate)}
+              </span>
+            </span>
+            <span>
+              vence{' '}
+              <span className="text-[color:var(--color-ink-soft)]">
+                {formatDateLong(breakdown.dueDate)}
+              </span>
             </span>
           </span>
-          <span>
-            vence{' '}
-            <span className="text-[color:var(--color-ink-soft)]">
-              {formatDateLong(breakdown.dueDate)}
-            </span>
-          </span>
-        </span>
-      )}
-    </button>
+        )}
+      </button>
+    </div>
   );
 }
 
 // ─── Add bank card ──────────────────────────────────────────────────
 
-function AddBankCard({ items }: { items: Item[] }) {
+function AddBankCard() {
   const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(null);
 

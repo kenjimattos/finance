@@ -30,3 +30,16 @@ itemsRouter.post('/items', async (req, res, next) => {
     next(err);
   }
 });
+
+// DELETE /items/:id — remove a bank connection and all its data.
+// Cascades via ON DELETE CASCADE: accounts, transactions, card_groups, etc.
+// User-level data (user_categories, category_rules) is preserved.
+itemsRouter.delete('/items/:id', (req, res) => {
+  const { id } = req.params;
+  const result = db.prepare('DELETE FROM items WHERE id = ?').run(id);
+  if (result.changes === 0) {
+    res.status(404).json({ error: 'Item not found' });
+    return;
+  }
+  res.status(204).end();
+});
