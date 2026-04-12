@@ -251,6 +251,9 @@ async function syncItem(itemId: string) {
       raw_json  = excluded.raw_json,
       synced_at = datetime('now')
   `);
+  const reassignTxItemId = db.prepare(
+    `UPDATE transactions SET item_id = ? WHERE account_id = ? AND item_id != ?`,
+  );
   for (const account of accounts) {
     upsertAccount.run(
       account.id,
@@ -260,6 +263,10 @@ async function syncItem(itemId: string) {
       account.type ?? null,
       JSON.stringify(account),
     );
+    // If the account was previously synced under a different item (e.g. user
+    // deleted and re-connected in the sandbox), existing transactions still
+    // reference the old item_id. Fix them so GET /transactions?itemId=... works.
+    reassignTxItemId.run(itemId, account.id, itemId);
   }
 
   let txCount = 0;
