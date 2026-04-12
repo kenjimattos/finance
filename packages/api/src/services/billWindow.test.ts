@@ -5,6 +5,7 @@ import {
   computeOpenBillWindow,
   computePreviousBillWindow,
   computeNextBillWindow,
+  findOffsetForDueMonth,
 } from './billWindow.js';
 
 /** Helper: create a Date from yyyy-mm-dd without timezone surprises. */
@@ -181,6 +182,94 @@ function addOneDay(ymd: string): string {
 }
 
 // ─── Three windows are contiguous ────────────────────────────────────
+
+// ─── findOffsetForDueMonth ──────────────────────────────────────────
+
+describe('findOffsetForDueMonth', () => {
+  it('returns 0 when the target month matches the current open bill due', () => {
+    // closingDay=7, dueDay=15. Today 2026-04-05 (before closing).
+    // Open bill: Mar 8 – Apr 7, due Apr 15.
+    const settings = { closingDay: 7, dueDay: 15 };
+    const offset = findOffsetForDueMonth(settings, 2026, 4, date('2026-04-05'));
+    assert.equal(offset, 0);
+  });
+
+  it('returns negative offset for a past due month', () => {
+    // Same settings. Open bill due Apr 15 → offset 0.
+    // Feb due → offset -2.
+    const settings = { closingDay: 7, dueDay: 15 };
+    const offset = findOffsetForDueMonth(settings, 2026, 2, date('2026-04-05'));
+    assert.equal(offset, -2);
+    // Verify: the bill at that offset actually has due in Feb 2026.
+    const w = computeBillWindowAtOffset(settings, offset!, date('2026-04-05'));
+    assert.equal(w.nextDueDate, '2026-02-15');
+  });
+
+  it('returns positive offset for a future due month', () => {
+    const settings = { closingDay: 7, dueDay: 15 };
+    const offset = findOffsetForDueMonth(settings, 2026, 6, date('2026-04-05'));
+    assert.equal(offset, 2);
+    const w = computeBillWindowAtOffset(settings, offset!, date('2026-04-05'));
+    assert.equal(w.nextDueDate, '2026-06-15');
+  });
+
+  it('works when dueDay <= closingDay (due lands in next month)', () => {
+    // closingDay=20, dueDay=5. Today 2026-04-10 (before closing).
+    // Open bill: Mar 21 – Apr 20, due May 5.
+    // So offset 0 due is May. Asking for May → 0.
+    const settings = { closingDay: 20, dueDay: 5 };
+    const offset = findOffsetForDueMonth(settings, 2026, 5, date('2026-04-10'));
+    assert.equal(offset, 0);
+  });
+
+  it('handles year boundary — asking for January from a November today', () => {
+    const settings = { closingDay: 7, dueDay: 15 };
+    // Today 2025-11-10 (after closing). Open bill: Nov 8 – Dec 7, due Dec 15.
+    // Jan 2026 due → offset +1.
+    const offset = findOffsetForDueMonth(settings, 2026, 1, date('2025-11-10'));
+    assert.equal(offset, 1);
+    const w = computeBillWindowAtOffset(settings, offset!, date('2025-11-10'));
+    assert.equal(w.nextDueDate, '2026-01-15');
+  });
+
+  it('handles year boundary backwards — asking for December from January', () => {
+    const settings = { closingDay: 7, dueDay: 15 };
+    // Today 2026-01-05 (before closing). Open bill: Dec 8 – Jan 7, due Jan 15.
+    // Dec 2025 due → offset -1.
+    const offset = findOffsetForDueMonth(settings, 2025, 12, date('2026-01-05'));
+    assert.equal(offset, -1);
+    const w = computeBillWindowAtOffset(settings, offset!, date('2026-01-05'));
+    assert.equal(w.nextDueDate, '2025-12-15');
+  });
+
+  it('different accounts produce different offsets for the same target month', () => {
+    // Account A: closing 7, due 15. Account B: closing 20, due 5.
+    // Today 2026-04-12.
+    // A: after closing → open bill Apr 8 – May 7, due May 15. Offset 0 due = May.
+    // B: before closing → open bill Mar 21 – Apr 20, due May 5. Offset 0 due = May.
+    // For target May 2026: both return 0 (but their bill windows differ).
+    // For target Apr 2026: A = -1 (due Apr 15), B has no bill due in Apr — due
+    //   jumps from May 5 (offset 0) to Apr 5 (offset -1).
+    const today = date('2026-04-12');
+    const a = { closingDay: 7, dueDay: 15 };
+    const b = { closingDay: 20, dueDay: 5 };
+
+    // Both have a bill due in May 2026
+    assert.equal(findOffsetForDueMonth(a, 2026, 5, today), 0);
+    assert.equal(findOffsetForDueMonth(b, 2026, 5, today), 0);
+
+    // For April 2026, account A has offset -1, account B has offset -1
+    const offA = findOffsetForDueMonth(a, 2026, 4, today);
+    const offB = findOffsetForDueMonth(b, 2026, 4, today);
+    assert.equal(offA, -1);
+    assert.equal(offB, -1);
+    // But the actual due dates differ
+    const wA = computeBillWindowAtOffset(a, offA!, today);
+    const wB = computeBillWindowAtOffset(b, offB!, today);
+    assert.equal(wA.nextDueDate, '2026-04-15');
+    assert.equal(wB.nextDueDate, '2026-04-05');
+  });
+});
 
 describe('window contiguity', () => {
   it('previous.periodEnd + 1 day === current.periodStart', () => {
