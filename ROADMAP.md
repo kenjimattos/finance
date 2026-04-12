@@ -37,16 +37,16 @@ Features that become essential once there are multiple accounts and months of hi
   - Ambiguous merchants: `applyLearnedRules` picks the rule with the highest `hit_count` per slug (majority-wins) instead of arbitrary insertion order.
   - Rules management UI: full-screen overlay accessible via "regras" button — debounced search, inline category reassignment, delete with toast. Backend: `GET /rules?q=` filtering + `PATCH /rules/:id` for category reassignment.
 
-## Phase 4 — Multi-bank overview
+## Phase 4 — Multi-bank overview ✓
 
-The app supports multiple Pluggy items (bank connections) in the backend but the frontend is hardcoded to `items[0]`. Adding a second bank requires a new overview screen.
+Completed. The frontend now supports multiple Pluggy items (bank connections) with a month-based overview screen.
 
-- [ ] **Monthly overview screen** — groups all bills by due-month across all banks. ←/→ arrows navigate between months. Grand total at the top, one card per account showing total + closing/due dates. Clicking a card drills into the existing per-account Dashboard.
-- [ ] **Add bank flow in overview** — "adicionar banco" button triggers PluggyConnect from the overview screen (not just from onboarding). New item saves and appears after sync + settings config.
-- [ ] **`findOffsetForDueMonth` helper** — given card settings and a target year+month, returns the bill offset whose due date falls in that month. Different accounts have different cycles, so the same calendar month maps to different offsets per account.
-- [ ] **Dashboard back navigation** — `onBack` prop renders a "← voltar" button to return to the overview.
-
-Depends on: Phase 2 (per-account settings + billing), Phase 3 (offset-based navigation). Backend needs no new endpoints — the frontend resolves offsets per account and calls `getBillBreakdown` in parallel.
+- [x] **`findOffsetForDueMonth` helper** — given card settings and a target year+month, returns the bill offset whose due date falls in that month. Backend + frontend mirror implementations. 7 tests.
+- [x] **Monthly overview screen** — groups all bills by due-month across all banks. ←/→ arrows navigate between months. Grand total + aggregated category breakdown at the top, one card per account showing total + delta vs previous + closing/due dates. Clicking a card drills into the existing per-account Dashboard. Sync-all button fetches all items in parallel.
+- [x] **Add bank flow in overview** — "adicionar banco" card triggers PluggyConnect. "remover" button on each card (with confirmation) deletes the item via `DELETE /items/:id` with cascade cleanup.
+- [x] **Dashboard back navigation** — `onBack` prop renders a "← voltar" button. Month state is lifted to App so returning preserves the month being browsed.
+- [x] **Foreign-currency fix** — `amountInAccountCurrency` from Pluggy is now stored and used for display/sums, so USD transactions show their BRL equivalent.
+- [x] **Item reassignment fix** — when an account moves between Pluggy items (sandbox re-connection), transactions are realigned to the current item_id.
 
 ## Phase 5 — Cash flow (new feature area)
 
