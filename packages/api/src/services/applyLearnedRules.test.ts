@@ -95,10 +95,10 @@ function insertCategory(d: DB, name: string): number {
   return Number(info.lastInsertRowid);
 }
 
-function insertRule(d: DB, slug: string, categoryId: number): void {
+function insertRule(d: DB, slug: string, categoryId: number, hitCount = 1): void {
   d.prepare(
-    `INSERT INTO category_rules (merchant_slug, user_category_id) VALUES (?, ?)`,
-  ).run(slug, categoryId);
+    `INSERT INTO category_rules (merchant_slug, user_category_id, hit_count) VALUES (?, ?, ?)`,
+  ).run(slug, categoryId, hitCount);
 }
 
 function insertAssignment(
@@ -270,6 +270,21 @@ describe('applyLearnedRules', () => {
     insertRule(db, 'IFOOD', food);
     // No transactions inserted at all.
     assert.doesNotThrow(() => applyLearnedRules(db, ITEM_ID));
+  });
+
+  it('picks the majority category when a slug has multiple rules', () => {
+    // "CARREFOUR" mapped to both Alimentação (10 hits) and Casa (3 hits).
+    // The majority (Alimentação) should win.
+    const food = insertCategory(db, 'Alimentação');
+    const home = insertCategory(db, 'Casa');
+    insertRule(db, 'CARREFOUR', food, 10);
+    insertRule(db, 'CARREFOUR', home, 3);
+    insertTx(db, 'tx-1', 'CARREFOUR SP');
+
+    applyLearnedRules(db, ITEM_ID);
+
+    const a = getAssignment(db, 'tx-1');
+    assert.deepEqual(a, { user_category_id: food, assigned_by: 'learned' });
   });
 
   it('skips transactions with a description that yields no slug', () => {

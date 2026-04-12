@@ -47,14 +47,22 @@ export function applyLearnedRules(db: Database, itemId: string): void {
   // Load ALL rules — including previously "disabled" ones. The disabled flag
   // is no longer used for filtering (rules stay active regardless of override
   // count), but the column remains in the schema for historical tracking.
+  //
+  // ORDER BY hit_count DESC so the first row per slug is the majority
+  // category. When a slug maps to multiple categories (e.g. a supermarket
+  // categorized as both Alimentação and Casa), the highest-hit-count rule
+  // wins. Subsequent rows for the same slug are skipped via Map.has().
   const ruleBySlug = new Map<string, number>();
   for (const row of db
     .prepare(
       `SELECT merchant_slug, user_category_id
-       FROM category_rules`,
+       FROM category_rules
+       ORDER BY hit_count DESC`,
     )
     .all() as Array<{ merchant_slug: string; user_category_id: number }>) {
-    ruleBySlug.set(row.merchant_slug, row.user_category_id);
+    if (!ruleBySlug.has(row.merchant_slug)) {
+      ruleBySlug.set(row.merchant_slug, row.user_category_id);
+    }
   }
 
   if (ruleBySlug.size === 0) return;
