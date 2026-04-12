@@ -219,6 +219,18 @@ db.exec(`
     AND json_extract(raw_json, '$.amountInAccountCurrency') IS NOT NULL
 `);
 
+// Fix transactions whose item_id drifted when the user deleted and
+// re-connected the same bank (sandbox scenario). The account's item_id
+// is authoritative — align transactions to match.
+db.exec(`
+  UPDATE transactions
+  SET item_id = (SELECT a.item_id FROM accounts a WHERE a.id = transactions.account_id)
+  WHERE EXISTS (
+    SELECT 1 FROM accounts a
+    WHERE a.id = transactions.account_id AND a.item_id != transactions.item_id
+  )
+`);
+
 // Re-enable all category rules that were auto-disabled by the old
 // "2 overrides = disabled" logic. Rules now stay active regardless of
 // override_count — the user corrects minority cases manually.
