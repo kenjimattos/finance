@@ -92,7 +92,7 @@ A shifted row disappears from the current-bill list and appears in the neighbori
 
 ### The categorized-only rule
 
-**Only categorized transactions contribute to bill totals.** Uncategorized rows stay visible in the inbox but do not sum. This means fresh cards start at R$ 0 and grow as the user categorizes — the absence of a category is the exclusion mechanism, replacing any need for an "ignore" flag. It also means the user can leave noise like "pagamento de fatura" uncategorized and it naturally stays out.
+**Only categorized transactions contribute to bill totals.** Uncategorized rows stay visible in the inbox but do not sum. This means fresh cards start at R$ 0 and grow as the user categorizes — the absence of a category is the exclusion mechanism, replacing any need for an "ignore" flag. It also means the user can leave noise like "pagamento de fatura" or "Pagamento recebido" uncategorized and it naturally stays out.
 
 The previous-period delta is also categorized-vs-categorized for consistency.
 
@@ -165,6 +165,8 @@ The dashboard lays out: account tabs (if multiple) → big headline → grid of 
 - `creditCardMetadata.installmentNumber` / `totalInstallments` are populated for parceladas; these are already columns in the schema and surface in the per-group card breakdown.
 - `creditCardMetadata.cardNumber` comes in inconsistent shapes across connectors (`"1234"`, `"****1234"`, `"1234 **** **** 5678"`). Normalized to last-4 via `lastFourDigits()` in [transactions.ts](packages/api/src/routes/transactions.ts).
 - Pluggy embeds `PARCxx/yy` directly in `description` for installments (e.g. `MERCADO*MERCADPARC05/10`), which is redundant with the structured `installmentNumber`/`totalInstallments`. Stripped in the API layer (`shapeRow` in transactions.ts) so all consumers get clean descriptions. Not mutated in storage.
+- **"Pagamento recebido" entries are Pluggy-internal reconciliation records**, not real bill items. They have no `card_last4` and don't appear on the actual card statement. The categorized-only rule naturally excludes them when left uncategorized.
+- For installments, `transaction.date` is the **posting date** (when the installment hits the bill), not the original purchase date. The real bill statement shows the original purchase date, so dates will differ when comparing against exported statements.
 - Connect tokens are short-lived (~20 min); generate per widget session.
 - Webhooks require HTTPS; localhost is not accepted. Use manual `POST /transactions/sync` for local dev.
 
