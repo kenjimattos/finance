@@ -72,17 +72,23 @@ When the cash-flow feature arrives, it will add its own tables rather than forci
 
 **Pluggy's bills endpoint does not return open bills.** Open bills are not returned until closed or overdue; in-cycle transactions have `creditCardMetadata.billId === null`. The open bill window must be reconstructed on our side from the user-configured `closing_day` + `due_day`.
 
-[billWindow.ts](packages/api/src/services/billWindow.ts) computes three adjacent windows: `previous`, `current`, `next`. All date math uses `yyyy-mm-dd` strings via UTC — do not use local `Date` arithmetic here, it breaks around DST.
+[billWindow.ts](packages/api/src/services/billWindow.ts) computes bill windows from `closing_day` + `due_day`. The core primitive is `computeBillWindowAtOffset(settings, offset, today)` where `offset=0` is the currently open bill, `-N` walks N cycles into the past, and `+1` is the next bill. Convenience wrappers `computeOpenBillWindow` / `Previous` / `Next` delegate to it. All date math uses `yyyy-mm-dd` strings via UTC — do not use local `Date` arithmetic here, it breaks around DST.
+
+### Bill-cycle navigation
+
+The dashboard supports navigating between bill cycles via ←/→ arrows. `GET /bills/current/breakdown?offset=N` accepts an integer offset (default 0). The frontend holds `billOffset` state in `AccountDashboard`, threads it through the query key and API call, and resets to 0 on account switch. The shift-aware SQL helpers don't change — they always receive three contiguous windows computed at `offset`, `offset-1`, `offset+1`.
 
 ### Bill-cycle shifts
 
-Merchants sometimes submit transactions days after the purchase date, so a purchase made before the closing day can actually land on the next bill. The user fixes this per-transaction via `transaction_bill_overrides (transaction_id, shift)` where `shift ∈ {-1, +1}`. The SQL for the current bill sums:
+Merchants sometimes submit transactions days after the purchase date, so a purchase made before the closing day can actually land on the next bill. The user fixes this per-transaction via `transaction_bill_overrides (transaction_id, shift)` where `shift ∈ {-1, 0, +1}`. The SQL for any bill window sums:
 
 - unshifted rows whose date lies in `current`, **plus**
 - rows with `shift = +1` whose date lies in `previous` (pushed forward into current), **plus**
 - rows with `shift = -1` whose date lies in `next` (pulled back into current)
 
 A shifted row disappears from the current-bill list and appears in the neighboring window. The previous-bill delta is computed with the plain unshifted sum — we deliberately don't chase shifts across two cycles (the comparison is already approximate, and double-shifts are vanishingly rare).
+
+**UI model is additive:** the ⋯ menu buttons always add ±1 to the transaction's current `billShift` value, capped at ±1. This means "→ Próxima fatura" on an unshifted row sends `shift=+1`, but on a `shift=-1` row it sends `shift=0` ("restaurar") — the label changes accordingly. Buttons are disabled at the cap. The toast always offers undo, restoring the previous shift value.
 
 ### The categorized-only rule
 
@@ -111,7 +117,7 @@ Deliberate choices: no regex, no priorities, no UI for rule management. Bulk cat
 5. `GET /accounts?itemId=...` — list CREDIT accounts for the item. Frontend picks the first (or shows tabs if multiple).
 6. `GET /account-settings/:accountId` → 404 triggers the per-account setup form.
 7. `PUT /account-settings/:accountId { closingDay, dueDay, displayName? }` — one-time config per account.
-8. `GET /bills/current/breakdown?itemId=...&accountId=...` — one response with the current window dates, neighbor windows, and a `groups[]` array scoped to the account. First entry (`groupId: null`) is "Todos" and becomes the big headline; subsequent entries are the real card groups and become the grid of cards, each with `categories[]` and `installments[]`.
+8. `GET /bills/current/breakdown?itemId=...&accountId=...&offset=N` — one response with the bill window dates, neighbor windows, and a `groups[]` array scoped to the account. `offset` (default 0) selects the cycle: 0 = currently open, -N = N cycles in the past. First entry (`groupId: null`) is "Todos" and becomes the big headline; subsequent entries are the real card groups and become the grid of cards, each with `categories[]` and `installments[]`.
 9. `GET /transactions` — accepts `itemId`, optional `accountId`, `from`/`to` plus the four neighbor-window params to run in shift-aware mode, returning a transaction list that matches the card totals exactly.
 10. `PUT /transactions/:id/category { categoryId }` / `POST /transactions/bulk-categorize` / `DELETE /transactions/:id/category` — the user's main interaction.
 11. `PUT /transactions/:id/bill-shift { shift: -1 | 0 | 1 }` — shift (or restore with 0) a single transaction.
