@@ -72,16 +72,20 @@ export function Overview({
     })),
   });
 
-  // Only accounts with configured settings participate in the overview.
-  const configured = useMemo(() => {
-    const result: AccountWithSettings[] = [];
+  // Separate accounts into configured (have settings) and unconfigured (need setup).
+  const { configured, unconfigured } = useMemo(() => {
+    const configured: AccountWithSettings[] = [];
+    const unconfigured: { item: Item; account: Account }[] = [];
     allAccounts.forEach(({ item, account }, i) => {
       const sq = settingsQueries[i];
       if (sq?.data) {
-        result.push({ item, account, settings: sq.data });
+        configured.push({ item, account, settings: sq.data });
+      } else if (sq?.isError) {
+        // 404 = no settings yet → needs setup
+        unconfigured.push({ item, account });
       }
     });
-    return result;
+    return { configured, unconfigured };
   }, [allAccounts, settingsQueries]);
 
   // ── Target month (initialized from the first account's current due month) ──
@@ -214,6 +218,15 @@ export function Overview({
           );
         })}
 
+        {unconfigured.map(({ item, account }) => (
+          <UnconfiguredCard
+            key={account.id}
+            item={item}
+            account={account}
+            onClick={() => onSelectAccount(item.id, account.id, 0)}
+          />
+        ))}
+
         <AddBankCard />
       </div>
     </motion.section>
@@ -309,41 +322,103 @@ function AccountCard({
   );
 }
 
+// ─── Unconfigured account card ──────────────────────────────────────
+
+function UnconfiguredCard({
+  item,
+  account,
+  onClick,
+}: {
+  item: Item;
+  account: Account;
+  onClick: () => void;
+}) {
+  const displayName = account.name ?? item.connector_name ?? 'Conta';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex flex-col items-start border border-dashed border-[color:var(--color-accent-soft)] px-5 py-5 text-left transition-colors hover:border-[color:var(--color-accent)]"
+    >
+      <span className="eyebrow mb-3 text-[color:var(--color-accent)]">
+        {displayName}
+      </span>
+      <span className="font-body text-sm text-[color:var(--color-ink-muted)]">
+        Configurar dia de fechamento e vencimento para incluir na visão geral.
+      </span>
+      <span className="mt-3 eyebrow text-[color:var(--color-accent)] transition-colors group-hover:text-[color:var(--color-ink)]">
+        Configurar →
+      </span>
+    </button>
+  );
+}
+
 // ─── Add bank card ──────────────────────────────────────────────────
 
 function AddBankCard() {
   const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(null);
+  const [status, setStatus] = useState<'idle' | 'saving' | 'syncing' | 'error'>('idle');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const tokenMut = useMutation({
     mutationFn: api.connectToken,
     onSuccess: ({ accessToken }) => setToken(accessToken),
   });
 
-  const saveMut = useMutation({
-    mutationFn: (itemId: string) => api.saveItem(itemId),
-    onSuccess: (_data, itemId) => {
-      setToken(null);
-      // Sync the new item so accounts are populated
-      api.syncTransactions(itemId).then(() => {
-        queryClient.invalidateQueries({ queryKey: ['items'] });
-        queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      });
-    },
-  });
+  async function handleConnect(itemId: string) {
+    setToken(null);
+    setErrorMsg(null);
+    try {
+      setStatus('saving');
+      await api.saveItem(itemId);
+
+      setStatus('syncing');
+      await api.syncTransactions(itemId);
+
+      // Refresh everything so the new account appears.
+      queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['accountSettings'] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
+      setStatus('idle');
+    } catch (err) {
+      console.error('[AddBank] failed:', err);
+      setStatus('error');
+      setErrorMsg(err instanceof Error ? err.message : 'Erro desconhecido');
+      // Still refresh — the item may have been saved even if sync failed.
+      queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    }
+  }
 
   return (
     <>
       <button
         type="button"
-        onClick={() => tokenMut.mutate()}
-        disabled={tokenMut.isPending}
+        onClick={() => {
+          setErrorMsg(null);
+          tokenMut.mutate();
+        }}
+        disabled={tokenMut.isPending || status === 'saving' || status === 'syncing'}
         className="flex flex-col items-center justify-center gap-2 border border-dashed border-[color:var(--color-paper-rule)] px-5 py-8 text-center transition-colors hover:border-[color:var(--color-ink-muted)] disabled:opacity-50"
       >
         <span className="font-display text-2xl text-[color:var(--color-ink-faint)]">+</span>
         <span className="eyebrow text-[color:var(--color-ink-muted)]">
-          {tokenMut.isPending ? 'Abrindo…' : 'Adicionar banco'}
+          {tokenMut.isPending
+            ? 'Abrindo…'
+            : status === 'saving'
+              ? 'Salvando…'
+              : status === 'syncing'
+                ? 'Sincronizando…'
+                : 'Adicionar banco'}
         </span>
+        {(status === 'error' || tokenMut.isError) && (
+          <span className="mt-1 font-body text-xs text-[color:var(--color-accent)]">
+            {errorMsg ?? 'Falha ao abrir o widget. Tente novamente.'}
+          </span>
+        )}
       </button>
 
       {token && (
@@ -352,7 +427,7 @@ function AddBankCard() {
           includeSandbox={true}
           language="pt"
           theme="light"
-          onSuccess={({ item }) => saveMut.mutate(item.id)}
+          onSuccess={({ item }) => handleConnect(item.id)}
           onClose={() => setToken(null)}
           onError={() => setToken(null)}
         />
