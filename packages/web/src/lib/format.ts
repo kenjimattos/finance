@@ -24,6 +24,11 @@ const DATE_LONG = new Intl.DateTimeFormat('pt-BR', {
   month: 'long',
 });
 
+const MONTH_YEAR = new Intl.DateTimeFormat('pt-BR', {
+  month: 'long',
+  year: 'numeric',
+});
+
 export function formatBRL(value: number): string {
   return CURRENCY.format(value);
 }
@@ -38,6 +43,11 @@ export function formatDateShort(iso: string): string {
 
 export function formatDateLong(iso: string): string {
   return DATE_LONG.format(parseYmd(iso));
+}
+
+/** "março 2026" — month + year, no day. */
+export function formatMonthYear(iso: string): string {
+  return MONTH_YEAR.format(parseYmd(iso)).replace(/ de /g, ' ');
 }
 
 function parseYmd(iso: string): Date {

@@ -8,7 +8,7 @@ import {
   type BillInstallmentBreakdown,
   type CardGroupFilter,
 } from '../lib/api';
-import { formatBRL, formatDateLong, formatDateShort, formatDelta } from '../lib/format';
+import { formatBRL, formatDateLong, formatDateShort, formatDelta, formatMonthYear } from '../lib/format';
 
 const CATEGORY_COLLAPSE_LIMIT = 4;
 const INSTALLMENT_COLLAPSE_LIMIT = 4;
@@ -112,8 +112,11 @@ export function BillCardGrid({
               ←
             </button>
             <span>
-              {breakdown.displayName ??
-                (offset === 0 ? 'Fatura em aberto' : 'Fatura fechada')}
+              {offset === 0
+                ? (breakdown.displayName ?? 'Fatura em aberto')
+                : breakdown.displayName
+                  ? `${breakdown.displayName} · ${formatMonthYear(breakdown.closingDate)}`
+                  : `Fatura ${formatMonthYear(breakdown.closingDate)}`}
             </span>
             <button
               type="button"
@@ -130,13 +133,13 @@ export function BillCardGrid({
           </div>
           <div className="mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-1 font-body text-sm text-[color:var(--color-ink-muted)]">
             <span>
-              fecha em{' '}
+              {offset === 0 ? 'fecha em' : 'fechou em'}{' '}
               <span className="text-[color:var(--color-ink-soft)]">
                 {formatDateLong(breakdown.closingDate)}
               </span>
             </span>
             <span>
-              vence em{' '}
+              {offset === 0 ? 'vence em' : 'venceu em'}{' '}
               <span className="text-[color:var(--color-ink-soft)]">
                 {formatDateLong(breakdown.dueDate)}
               </span>
