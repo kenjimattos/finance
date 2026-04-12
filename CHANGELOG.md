@@ -8,17 +8,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
-- **Test suite**: `node --test` with `tsx` loader — 28 tests covering `billWindow` (open/previous/next window math, year boundaries, day clamping, contiguity) and `merchantSlug` (prefix stripping, star/dash splitting, location removal, fuzzy collapsing, edge cases). Zero new dependencies.
-- **`applyLearnedRules` tests** (11 cases in `services/applyLearnedRules.test.ts`, against in-memory SQLite): happy path (auto-categorize, hit_count bump, slug miss, itemId scoping), the non-overwrite invariant (manual / bulk / prior-learned assignments survive a learned-rule pass and do not bump hit_count), and edge cases (no rules, no candidates, empty description). Locks the contract that a user's manual or bulk categorization is never touched by the auto-categorization pass.
+#### Phase 4 — Multi-bank overview
+
+- **Overview screen** (`Overview.tsx`): groups all credit card bills by due-month across all banks. ←/→ arrows navigate between months. Grand total with delta vs previous period at the top, aggregated category breakdown with proportional bars, one card per account showing total + delta + closing/due dates.
+- **`findOffsetForDueMonth` helper**: given card settings and a target year+month, returns the bill offset whose due date falls in that month. Backend + lightweight frontend mirror. 7 new tests (55 total).
+- **Add/remove bank in Overview**: "Adicionar banco" card opens PluggyConnect to connect a new item. "remover" button on each card with confirmation deletes the item via `DELETE /items/:id` with cascade cleanup. Unconfigured accounts render as "Configurar →" cards that drill into the setup form.
+- **Dashboard back navigation**: `onBack` prop renders a "← voltar" button. Month state lifted to App so returning preserves the month being browsed.
+- **Sync-all button** in Overview: fetches all items in parallel, then invalidates all queries.
+- **Foreign-currency support**: `amountInAccountCurrency` from Pluggy is now stored and used for display and sums, so USD transactions show their BRL equivalent instead of raw dollar amounts.
+
+#### Phase 3 — Depth in the current experience
+
+- **Bill-cycle navigation**: ← / → arrows browse past bills. `computeBillWindowAtOffset(settings, offset)` is the core primitive; breakdown endpoint accepts `?offset=N`. Labels switch to past tense with month/year.
+- **Rules management UI**: full-screen overlay via "regras" button — debounced search, inline category reassignment, delete with toast. Backend: `GET /rules?q=` filtering + `PATCH /rules/:id`.
+- **Slug granularity improvement**: token after `*` preserved when ≥ 3 alphabetic chars ("UBER *EATS" → "UBER EATS" vs "UBER *TRIP" → "UBER TRIP"). Legacy slugs tried as fallback.
+- **Majority-wins rule resolution**: `applyLearnedRules` picks the rule with the highest `hit_count` per slug instead of arbitrary insertion order.
+
+#### Phase 2 — Per-account billing
+
+- **`accounts` table**: populated during sync from `fetchAccounts(itemId, 'CREDIT')`.
+- **`account_settings`**: per-account `closing_day` / `due_day`, replacing per-item `card_settings` (with backfill migration).
+- **Account selector tabs**: shown when a single item has multiple CREDIT accounts.
+- **Per-account breakdown and transactions**: all queries scoped by `accountId`.
+
+#### Phase 1 — Stability
+
+- **Test suite**: 28 tests covering `billWindow` and `merchantSlug`. Zero new dependencies.
+- **`applyLearnedRules` tests**: 11 cases against in-memory SQLite. Locks the non-overwrite invariant.
 
 ### Changed
 
 - Dev servers (Vite + Express) now bind to `0.0.0.0`, allowing access from other devices on the local network.
-- **`applyLearnedRules` extracted** from `routes/transactions.ts` into its own service module (`services/applyLearnedRules.ts`), taking a `Database` instance as a parameter. Makes the function unit-testable against an in-memory SQLite without depending on the production singleton. Behavior is unchanged; the function docstring now explicitly documents the two-layer non-overwrite safeguard (candidates filter + `INSERT OR IGNORE`) and warns against loosening either layer.
+- **`applyLearnedRules` extracted** into its own service module, taking a `Database` parameter for testability.
+- **Additive bill-shift model**: ⋯ menu buttons add ±1 to the current shift (capped at ±1) instead of setting absolutely. "Restaurar para esta fatura" appears naturally when undoing.
+- `previousTotal` in breakdown is now shift-aware on both sides.
+- App routing: Onboarding → Overview → Dashboard drill-down (was Onboarding → Dashboard).
 
 ### Fixed
 
-- `PARCxx/yy` installment suffix is now stripped in the API layer (`shapeRow`) instead of only in the frontend's installment render. All consumers (dashboard, inbox, future exports) get clean descriptions.
+- `PARCxx/yy` installment suffix stripped in `shapeRow` (API layer) instead of only in the frontend.
+- `INSERT OR REPLACE` replaced with `ON CONFLICT UPDATE` in sync to avoid cascade-deleting user work.
+- Foreign-currency transactions (USD) now display and sum in BRL via `COALESCE(amount_in_account_currency, amount)`.
+- Transaction `item_id` realigned when an account moves between Pluggy items (sandbox re-connection scenario).
 
 ## [0.1.0] - 2026-04-09
 
