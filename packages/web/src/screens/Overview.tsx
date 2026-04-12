@@ -3,7 +3,7 @@ import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PluggyConnect } from 'react-pluggy-connect';
 import { motion } from 'motion/react';
 import { api, type Item, type Account, type AccountSettings, type BillBreakdown } from '../lib/api';
-import { formatBRL, formatDateLong } from '../lib/format';
+import { formatBRL, formatDateLong, formatDelta } from '../lib/format';
 import { findOffsetForDueMonth, currentDueMonth } from '../lib/billWindow';
 
 // ─── Month label ────────────────────────────────────────────────────
@@ -136,14 +136,18 @@ export function Overview({
 
   // ── Grand total (categorized only — matches per-account totals) ──
 
-  const grandTotal = useMemo(() => {
-    let sum = 0;
+  const { grandTotal, grandDelta } = useMemo(() => {
+    let total = 0;
+    let delta = 0;
     breakdownQueries.forEach((q) => {
       if (!q.data) return;
       const allSlot = q.data.groups.find((g) => g.groupId === null);
-      if (allSlot) sum += allSlot.total;
+      if (allSlot) {
+        total += allSlot.total;
+        delta += allSlot.delta;
+      }
     });
-    return sum;
+    return { grandTotal: total, grandDelta: delta };
   }, [breakdownQueries]);
 
   // ── Aggregated category breakdown across all accounts ──
@@ -210,6 +214,29 @@ export function Overview({
           )}
         </div>
 
+        {!loading && (() => {
+          const d = formatDelta(grandDelta);
+          const dir = grandDelta > 0.01 ? 'higher' : grandDelta < -0.01 ? 'lower' : 'flat';
+          return (
+            <div className="mt-4 flex items-center gap-2 font-body text-sm text-[color:var(--color-ink-muted)]">
+              <span
+                className="font-mono"
+                style={{
+                  color: dir === 'higher' ? 'var(--color-accent)'
+                    : dir === 'lower' ? 'var(--color-positive)'
+                    : 'var(--color-ink-faint)',
+                }}
+              >
+                {d.symbol}
+              </span>
+              <span>
+                {d.text}{' '}
+                <span className="text-[color:var(--color-ink-faint)]">vs anterior</span>
+              </span>
+            </div>
+          );
+        })()}
+
         <div className="mt-3 flex items-baseline justify-between gap-4">
           <p className="font-body text-sm text-[color:var(--color-ink-muted)]">
             total de {configured.length} {configured.length === 1 ? 'fatura' : 'faturas'} com vencimento em {monthLabel(year, month)}
@@ -219,7 +246,7 @@ export function Overview({
 
         {/* Category breakdown */}
         {aggregatedCategories.length > 0 && (
-          <CategoryBreakdown categories={aggregatedCategories} grandTotal={grandTotal} />
+          <CategoryBreakdown categories={aggregatedCategories} />
         )}
       </div>
 
@@ -302,10 +329,8 @@ const CATEGORY_COLLAPSE_LIMIT = 6;
 
 function CategoryBreakdown({
   categories,
-  grandTotal,
 }: {
   categories: Array<{ id: number; name: string; color: string; total: number }>;
-  grandTotal: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? categories : categories.slice(0, CATEGORY_COLLAPSE_LIMIT);
@@ -415,6 +440,26 @@ function AccountCard({
             {formatBRL(total)}
           </span>
         )}
+
+        {allSlot && (() => {
+          const d = formatDelta(allSlot.delta);
+          const dir = allSlot.delta > 0.01 ? 'higher' : allSlot.delta < -0.01 ? 'lower' : 'flat';
+          return (
+            <span className="mt-2 flex items-center gap-1.5 font-body text-xs text-[color:var(--color-ink-muted)]">
+              <span
+                className="font-mono"
+                style={{
+                  color: dir === 'higher' ? 'var(--color-accent)'
+                    : dir === 'lower' ? 'var(--color-positive)'
+                    : 'var(--color-ink-faint)',
+                }}
+              >
+                {d.symbol}
+              </span>
+              <span>{d.text} <span className="text-[color:var(--color-ink-faint)]">vs ant.</span></span>
+            </span>
+          );
+        })()}
 
         {breakdown && (
           <span className="mt-3 flex flex-wrap gap-x-5 gap-y-1 font-body text-xs text-[color:var(--color-ink-muted)]">
