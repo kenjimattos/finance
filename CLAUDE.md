@@ -10,16 +10,16 @@ A **self-hosted, single-user** credit card spending manager backed by [Pluggy](h
 
 Functional end-to-end: connect card via `react-pluggy-connect` → sync discovers credit accounts → configure `closing_day` / `due_day` per account → sync bills and transactions from Pluggy → categorize transactions (with learning, bulk, and undo) → group physical cards (titular, adicional, virtual…) per account → see per-group cards with category breakdowns and installment sub-sections → manually shift individual transactions to a neighboring bill cycle when the purchase date lies about when the charge actually lands → navigate between historical bill cycles via ←/→ arrows.
 
-Multi-account support: a single Pluggy item (bank connection) can contain multiple credit accounts (e.g. different card brands). Each account has its own billing cycle, card groups, and bill window. The frontend shows account tabs when more than one CREDIT account exists. The backend supports multiple items (bank connections) but the frontend currently shows only the first item — a multi-bank overview screen is the next planned feature.
+Multi-bank support: multiple Pluggy items (bank connections) are fully supported. The Overview screen groups all credit accounts by due-month with ←/→ navigation, shows a grand total with aggregated category breakdown and delta vs previous period, and lets the user drill into any account's Dashboard. New banks are added via "Adicionar banco" (PluggyConnect) and removed via "remover" (with cascade delete). A single Pluggy item can also contain multiple credit accounts (e.g. different card brands); each account has its own billing cycle, card groups, and bill window.
 
-48 tests covering `billWindow`, `merchantSlug`, and `applyLearnedRules`. Cash-flow projection (checking accounts, manual entries, forward view) is a deliberate future feature and not yet built.
+55 tests covering `billWindow` (including `findOffsetForDueMonth`), `merchantSlug`, and `applyLearnedRules`. Cash-flow projection (checking accounts, manual entries, forward view) is a deliberate future feature and not yet built.
 
 ## Repository layout
 
 npm workspaces monorepo:
 
 - [packages/api](packages/api/) — Express + TypeScript + `pluggy-sdk` + `better-sqlite3`. All Pluggy communication and the SQLite cache.
-- [packages/web](packages/web/) — Vite + React + TypeScript + Tailwind v4 + TanStack Query + Motion + `react-pluggy-connect`. Single-screen UI.
+- [packages/web](packages/web/) — Vite + React + TypeScript + Tailwind v4 + TanStack Query + Motion + `react-pluggy-connect`. Two screens: Overview (multi-bank month view) and Dashboard (per-account bill view).
 
 Frontend-facing types live in [packages/web/src/lib/api.ts](packages/web/src/lib/api.ts) and are redeclared there to mirror the backend response shape. No shared package; extract one only when a second consumer appears.
 
@@ -72,7 +72,7 @@ When the cash-flow feature arrives, it will add its own tables rather than forci
 
 **Pluggy's bills endpoint does not return open bills.** Open bills are not returned until closed or overdue; in-cycle transactions have `creditCardMetadata.billId === null`. The open bill window must be reconstructed on our side from the user-configured `closing_day` + `due_day`.
 
-[billWindow.ts](packages/api/src/services/billWindow.ts) computes bill windows from `closing_day` + `due_day`. The core primitive is `computeBillWindowAtOffset(settings, offset, today)` where `offset=0` is the currently open bill, `-N` walks N cycles into the past, and `+1` is the next bill. Convenience wrappers `computeOpenBillWindow` / `Previous` / `Next` delegate to it. All date math uses `yyyy-mm-dd` strings via UTC — do not use local `Date` arithmetic here, it breaks around DST.
+[billWindow.ts](packages/api/src/services/billWindow.ts) computes bill windows from `closing_day` + `due_day`. The core primitive is `computeBillWindowAtOffset(settings, offset, today)` where `offset=0` is the currently open bill, `-N` walks N cycles into the past, and `+1` is the next bill. Convenience wrappers `computeOpenBillWindow` / `Previous` / `Next` delegate to it. `findOffsetForDueMonth(settings, targetYear, targetMonth, today)` resolves which offset produces a due date in a given calendar month — used by the Overview to map a single target month to per-account offsets. A lightweight frontend mirror lives in [packages/web/src/lib/billWindow.ts](packages/web/src/lib/billWindow.ts). All date math uses `yyyy-mm-dd` strings via UTC — do not use local `Date` arithmetic here, it breaks around DST.
 
 ### Bill-cycle navigation
 
@@ -113,14 +113,15 @@ Bulk categorize feeds the same engine — selecting 15 Uber Eats rows once train
 1. `POST /connect-token` — short-lived JWT for the Pluggy Connect widget. Never cache; generate per session.
 2. Frontend renders `<PluggyConnect>`. Rendering mounts the modal; unmounting closes it (no `isOpen` prop). `onSuccess({ item })` gives the `item.id`.
 3. `POST /items { itemId }` — backend validates via `pluggy.fetchItem()` and persists.
-4. `POST /transactions/sync?itemId=...` — syncs accounts, bills, and transactions, then runs `applyLearnedRules`. Upserts discovered accounts into the `accounts` table.
-5. `GET /accounts?itemId=...` — list CREDIT accounts for the item. Frontend picks the first (or shows tabs if multiple).
-6. `GET /account-settings/:accountId` → 404 triggers the per-account setup form.
-7. `PUT /account-settings/:accountId { closingDay, dueDay, displayName? }` — one-time config per account.
-8. `GET /bills/current/breakdown?itemId=...&accountId=...&offset=N` — one response with the bill window dates, neighbor windows, and a `groups[]` array scoped to the account. `offset` (default 0) selects the cycle: 0 = currently open, -N = N cycles in the past. First entry (`groupId: null`) is "Todos" and becomes the big headline; subsequent entries are the real card groups and become the grid of cards, each with `categories[]` and `installments[]`.
-9. `GET /transactions` — accepts `itemId`, optional `accountId`, `from`/`to` plus the four neighbor-window params to run in shift-aware mode, returning a transaction list that matches the card totals exactly.
-10. `PUT /transactions/:id/category { categoryId }` / `POST /transactions/bulk-categorize` / `DELETE /transactions/:id/category` — the user's main interaction.
-11. `PUT /transactions/:id/bill-shift { shift: -1 | 0 | 1 }` — shift (or restore with 0) a single transaction.
+4. `DELETE /items/:id` — removes a bank connection and all its data via cascade. Categories and rules are preserved.
+5. `POST /transactions/sync?itemId=...` — syncs accounts, bills, and transactions, then runs `applyLearnedRules`. Upserts discovered accounts into the `accounts` table. Also realigns `item_id` on existing transactions if the account moved between items (sandbox re-connection).
+6. `GET /accounts?itemId=...` — list CREDIT accounts for the item. Frontend picks the first (or shows tabs if multiple).
+7. `GET /account-settings/:accountId` → 404 triggers the per-account setup form. In the Overview, unconfigured accounts render as "Configurar" cards.
+8. `PUT /account-settings/:accountId { closingDay, dueDay, displayName? }` — one-time config per account.
+9. `GET /bills/current/breakdown?itemId=...&accountId=...&offset=N` — one response with the bill window dates, neighbor windows, and a `groups[]` array scoped to the account. `offset` (default 0) selects the cycle: 0 = currently open, -N = N cycles in the past. First entry (`groupId: null`) is "Todos" and becomes the big headline; subsequent entries are the real card groups and become the grid of cards, each with `categories[]` and `installments[]`. The Overview fetches this in parallel for every account, resolving each account's offset via `findOffsetForDueMonth`.
+10. `GET /transactions` — accepts `itemId`, optional `accountId`, `from`/`to` plus the four neighbor-window params to run in shift-aware mode, returning a transaction list that matches the card totals exactly.
+11. `PUT /transactions/:id/category { categoryId }` / `POST /transactions/bulk-categorize` / `DELETE /transactions/:id/category` — the user's main interaction.
+12. `PUT /transactions/:id/bill-shift { shift: -1 | 0 | 1 }` — shift (or restore with 0) a single transaction.
 
 ### Frontend design language
 
@@ -134,7 +135,7 @@ Type system:
 
 Decoration: fixed CSS-only paper-grain noise overlay, fixed vertical margin rule at `left: 48px`, focus rings in the accent color, muted scrollbars. Motion is used sparingly — entrance fades for screens, slide-up for the bulk action bar and toast, card fade-in. No micro-animations scattered.
 
-The dashboard lays out: account tabs (if multiple) → big headline → grid of per-group cards → `CategoryTabs` (derived from the selected card's categories) → `TransactionInbox` (with bulk action bar at the bottom when rows are selected). Each card caps categories and installments at 4 with a `+ N mais` / `− recolher` toggle; stop-propagation on those toggles is essential because the card itself is a clickable filter.
+The app has two screens. **Overview** (`Overview.tsx`): ←/→ month navigation → grand total with delta → aggregated category breakdown → grid of account cards (one per CREDIT account across all items) + "adicionar banco" card. **Dashboard** (`Dashboard.tsx`): "← voltar" to Overview → account tabs (if multiple) → big headline → grid of per-group cards → `CategoryTabs` → `TransactionInbox`. Each card caps categories and installments at 4 with a `+ N mais` / `− recolher` toggle; stop-propagation on those toggles is essential because the card itself is a clickable filter. App.tsx manages drill-down state (itemId, accountId, offset) and lifts the Overview's target month so it persists across Overview ↔ Dashboard transitions.
 
 ### Reusable UI patterns
 
@@ -161,6 +162,7 @@ The dashboard lays out: account tabs (if multiple) → big headline → grid of 
 - `fetchAccounts(itemId, 'CREDIT')` — positional second argument, not an options object.
 - The bills method is `fetchCreditCardBills(accountId, options?)`, not `fetchBills`. It returns only **closed** bills; there is no `status` field and no "open bill" entity.
 - `Transaction.amount` sign convention varies by connector. For Meu Pluggy credit accounts: `DEBIT` (purchases) = positive, `CREDIT` (refunds) = negative. Verify with a SQL query against the cache when in doubt; don't trust the SDK type doc comments.
+- `Transaction.amountInAccountCurrency` contains the BRL equivalent for foreign-currency transactions (e.g. USD purchases). Stored in `amount_in_account_currency` column; all SUM queries and the GET /transactions endpoint use `COALESCE(amount_in_account_currency, amount)` so foreign transactions display and sum in BRL.
 - `creditCardMetadata.billId` links a transaction to its closed bill, populated only after the bill closes.
 - `creditCardMetadata.installmentNumber` / `totalInstallments` are populated for parceladas; these are already columns in the schema and surface in the per-group card breakdown.
 - `creditCardMetadata.cardNumber` comes in inconsistent shapes across connectors (`"1234"`, `"****1234"`, `"1234 **** **** 5678"`). Normalized to last-4 via `lastFourDigits()` in [transactions.ts](packages/api/src/routes/transactions.ts).
