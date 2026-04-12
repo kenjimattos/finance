@@ -238,9 +238,16 @@ async function syncItem(itemId: string) {
   // Upsert discovered accounts so downstream code (settings, groups, bill
   // windows) can reference them by account_id.
   const upsertAccount = db.prepare(`
-    INSERT OR REPLACE INTO accounts
+    INSERT INTO accounts
       (id, item_id, name, number, type, raw_json, synced_at)
     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      item_id   = excluded.item_id,
+      name      = excluded.name,
+      number    = excluded.number,
+      type      = excluded.type,
+      raw_json  = excluded.raw_json,
+      synced_at = datetime('now')
   `);
   for (const account of accounts) {
     upsertAccount.run(
@@ -257,18 +264,44 @@ async function syncItem(itemId: string) {
   let billCount = 0;
 
   const insertTx = db.prepare(`
-    INSERT OR REPLACE INTO transactions
+    INSERT INTO transactions
       (id, account_id, item_id, date, description, amount, currency_code,
        pluggy_category, pluggy_category_id, type, status, installment_number,
        total_installments, bill_id, card_last4, raw_json, synced_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      account_id         = excluded.account_id,
+      item_id            = excluded.item_id,
+      date               = excluded.date,
+      description        = excluded.description,
+      amount             = excluded.amount,
+      currency_code      = excluded.currency_code,
+      pluggy_category    = excluded.pluggy_category,
+      pluggy_category_id = excluded.pluggy_category_id,
+      type               = excluded.type,
+      status             = excluded.status,
+      installment_number = excluded.installment_number,
+      total_installments = excluded.total_installments,
+      bill_id            = excluded.bill_id,
+      card_last4         = excluded.card_last4,
+      raw_json           = excluded.raw_json,
+      synced_at          = datetime('now')
   `);
 
   const insertBill = db.prepare(`
-    INSERT OR REPLACE INTO bills
+    INSERT INTO bills
       (id, account_id, item_id, due_date, total_amount, currency_code,
        minimum_payment, raw_json, synced_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      account_id      = excluded.account_id,
+      item_id         = excluded.item_id,
+      due_date        = excluded.due_date,
+      total_amount    = excluded.total_amount,
+      currency_code   = excluded.currency_code,
+      minimum_payment = excluded.minimum_payment,
+      raw_json        = excluded.raw_json,
+      synced_at       = datetime('now')
   `);
 
   const upsertTxBatch = db.transaction((txs: Transaction[], accountId: string) => {
