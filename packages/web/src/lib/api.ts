@@ -168,6 +168,8 @@ export interface BillBreakdown {
   itemId: string;
   accountId: string | null;
   displayName: string | null;
+  /** 0 = currently open bill, -N = N cycles in the past. Echoed back from the request. */
+  offset: number;
   periodStart: string;
   periodEnd: string;
   closingDate: string;
@@ -226,9 +228,10 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
-  getBillBreakdown: (itemId: string, accountId?: string) => {
+  getBillBreakdown: (itemId: string, accountId?: string, offset?: number) => {
     const qs = new URLSearchParams({ itemId });
     if (accountId) qs.set('accountId', accountId);
+    if (offset !== undefined && offset !== 0) qs.set('offset', String(offset));
     return request<BillBreakdown>(`/bills/current/breakdown?${qs}`);
   },
 

@@ -48,6 +48,8 @@ export function BillCardGrid({
   accountId,
   selected,
   onSelect,
+  offset,
+  onChangeOffset,
   onManageCards,
 }: {
   breakdown: BillBreakdown;
@@ -55,6 +57,9 @@ export function BillCardGrid({
   accountId: string;
   selected: CardGroupFilter;
   onSelect: (filter: CardGroupFilter) => void;
+  /** 0 = currently open bill, -N = N cycles in the past. */
+  offset: number;
+  onChangeOffset: (nextOffset: number) => void;
   onManageCards: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -97,8 +102,28 @@ export function BillCardGrid({
           action links on the other. */}
       <div className="mb-10 flex items-start justify-between gap-6">
         <div>
-          <div className="eyebrow">
-            {breakdown.displayName ?? 'Fatura em aberto'}
+          <div className="eyebrow flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => onChangeOffset(offset - 1)}
+              aria-label="fatura anterior"
+              className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none"
+            >
+              ←
+            </button>
+            <span>
+              {breakdown.displayName ??
+                (offset === 0 ? 'Fatura em aberto' : 'Fatura fechada')}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChangeOffset(offset + 1)}
+              disabled={offset >= 0}
+              aria-label="próxima fatura"
+              className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:text-[color:var(--color-ink-faint)] disabled:opacity-40"
+            >
+              →
+            </button>
           </div>
           <div className="mt-3 font-display text-[72px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[96px]">
             {formatBRL(allSlot?.total ?? 0)}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   api,
@@ -108,6 +108,13 @@ function AccountDashboard({
   managerOpen: boolean;
   setManagerOpen: (v: boolean) => void;
 }) {
+  // Which bill cycle we're viewing: 0 = currently open, -N = N cycles in the past.
+  // Resets when switching account so the user always lands on "today" first.
+  const [billOffset, setBillOffset] = useState(0);
+  useEffect(() => {
+    setBillOffset(0);
+  }, [accountId]);
+
   const settingsQ = useQuery({
     queryKey: ['accountSettings', accountId],
     queryFn: () => api.getAccountSettings(accountId),
@@ -120,8 +127,8 @@ function AccountDashboard({
     settingsQ.error.status === 404;
 
   const breakdownQ = useQuery({
-    queryKey: ['billBreakdown', itemId, accountId],
-    queryFn: () => api.getBillBreakdown(itemId, accountId),
+    queryKey: ['billBreakdown', itemId, accountId, billOffset],
+    queryFn: () => api.getBillBreakdown(itemId, accountId, billOffset),
     enabled: !!settingsQ.data,
   });
 
@@ -160,6 +167,15 @@ function AccountDashboard({
         selected={cardGroupFilter}
         onSelect={(f) => {
           setCardGroupFilter(f);
+          setCategoryFilter('all');
+        }}
+        offset={billOffset}
+        onChangeOffset={(next) => {
+          // Right arrow is forward in time → cap at 0 (the open bill).
+          // Left arrow is unbounded back into history.
+          if (next > 0) return;
+          setBillOffset(next);
+          setCardGroupFilter('all');
           setCategoryFilter('all');
         }}
         onManageCards={() => setManagerOpen(true)}
