@@ -20,6 +20,7 @@ itemsRouter.post('/items', async (req, res, next) => {
 
     // Validate with Pluggy and grab the connector name for display
     const item = await pluggy.fetchItem(itemId);
+    console.log('[items] POST /items — itemId:', item.id, 'connector:', item.connector?.name, 'status:', item.status);
 
     db.prepare(
       'INSERT OR REPLACE INTO items (id, connector_name) VALUES (?, ?)',

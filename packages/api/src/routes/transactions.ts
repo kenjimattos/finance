@@ -234,6 +234,7 @@ transactionsRouter.post('/transactions/sync', async (req, res, next) => {
  */
 async function syncItem(itemId: string) {
   const { results: accounts } = await pluggy.fetchAccounts(itemId, 'CREDIT');
+  console.log(`[sync] itemId=${itemId} found ${accounts.length} CREDIT account(s):`, accounts.map(a => ({ id: a.id, name: a.name, number: a.number })));
 
   // Upsert discovered accounts so downstream code (settings, groups, bill
   // windows) can reference them by account_id.
