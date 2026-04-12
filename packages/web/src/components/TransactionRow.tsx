@@ -41,14 +41,20 @@ export function TransactionRow({
   const isOutflow = tx.type === 'DEBIT';
   const amountDisplay = formatBRL(Math.abs(tx.amount));
 
+  // Additive shift: buttons increment/decrement the current shift value,
+  // capped at ±1. This means clicking "anterior" on a shift=+1 transaction
+  // naturally restores it to 0 instead of jumping to -1.
+  const currentShift = tx.billShift ?? 0;
   const actions: RowAction[] = [
     {
-      label: '→ Mover para próxima fatura',
-      onClick: () => onShift(1),
+      label: currentShift === -1 ? '→ Restaurar para esta fatura' : '→ Próxima fatura',
+      onClick: () => onShift((currentShift + 1) as -1 | 0 | 1),
+      disabled: currentShift >= 1,
     },
     {
-      label: '← Mover para fatura anterior',
-      onClick: () => onShift(-1),
+      label: currentShift === 1 ? '← Restaurar para esta fatura' : '← Fatura anterior',
+      onClick: () => onShift((currentShift - 1) as -1 | 0 | 1),
+      disabled: currentShift <= -1,
     },
   ];
 

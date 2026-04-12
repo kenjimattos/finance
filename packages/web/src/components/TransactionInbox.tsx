@@ -101,26 +101,30 @@ export function TransactionInbox({
   });
 
   /**
-   * Shift a transaction's bill cycle AND surface an undo toast. After a
-   * successful shift, the row drops out of the current list (the backend
-   * query no longer returns it), so without undo there'd be no way to
-   * recover from a mistaken click — we don't have historical bill
-   * navigation yet. The toast holds that recovery window open for 6s.
+   * Shift a transaction's bill cycle AND surface an undo toast. The shift
+   * value is the NEW absolute shift (computed additively by TransactionRow
+   * from the current tx.billShift). Undo restores the previous value.
    */
   function runShift(txId: string, shift: -1 | 0 | 1) {
+    // Find the transaction so we know its previous shift for undo.
+    const allTxs = [...uncategorized, ...categorized];
+    const tx = allTxs.find((t) => t.id === txId);
+    const previousShift = (tx?.billShift ?? 0) as -1 | 0 | 1;
+
     shiftMut.mutate(
       { txId, shift },
       {
         onSuccess: () => {
-          if (shift === 0) return; // no toast needed for a restore
           const message =
-            shift === 1
-              ? 'Movida para a próxima fatura'
-              : 'Movida para a fatura anterior';
+            shift === 0
+              ? 'Restaurada para a fatura original'
+              : shift === 1
+                ? 'Movida para a próxima fatura'
+                : 'Movida para a fatura anterior';
           toast.show({
             message,
             undo: () => {
-              shiftMut.mutate({ txId, shift: 0 });
+              shiftMut.mutate({ txId, shift: previousShift });
             },
           });
         },
