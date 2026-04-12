@@ -21,6 +21,13 @@ export function App() {
     offset: number;
   } | null>(null);
 
+  // Persisted across Overview ↔ Dashboard transitions so "voltar"
+  // returns to the same month the user was browsing.
+  const [overviewMonth, setOverviewMonth] = useState<{
+    year: number;
+    month: number;
+  } | null>(null);
+
   return (
     <>
       <div className="page-rule" aria-hidden="true" />
@@ -44,6 +51,8 @@ export function App() {
           ) : (
             <Overview
               items={itemsQ.data}
+              targetMonth={overviewMonth}
+              onMonthChange={setOverviewMonth}
               onSelectAccount={(itemId, accountId, offset) =>
                 setDrillDown({ itemId, accountId, offset })
               }

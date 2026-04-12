@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
-import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PluggyConnect } from 'react-pluggy-connect';
 import { motion } from 'motion/react';
-import { api, type Item, type Account, type AccountSettings, type BillBreakdown, ApiError } from '../lib/api';
+import { api, type Item, type Account, type AccountSettings, type BillBreakdown } from '../lib/api';
 import { formatBRL, formatDateLong } from '../lib/format';
 import { findOffsetForDueMonth, currentDueMonth } from '../lib/billWindow';
 
@@ -36,9 +36,14 @@ interface AccountWithSettings {
 
 export function Overview({
   items,
+  targetMonth: controlledMonth,
+  onMonthChange,
   onSelectAccount,
 }: {
   items: Item[];
+  /** Controlled month state — persisted in App so "voltar" restores it. */
+  targetMonth: { year: number; month: number } | null;
+  onMonthChange: (m: { year: number; month: number }) => void;
   onSelectAccount: (itemId: string, accountId: string, offset: number) => void;
 }) {
   const today = useMemo(() => new Date(), []);
@@ -96,19 +101,15 @@ export function Overview({
     return currentDueMonth({ closingDay: s.closing_day, dueDay: s.due_day }, today);
   }, [configured, today]);
 
-  const [targetYear, setTargetYear] = useState<number | null>(null);
-  const [targetMonth, setTargetMonth] = useState<number | null>(null);
-
-  const year = targetYear ?? defaultMonth.year;
-  const month = targetMonth ?? defaultMonth.month;
+  const year = controlledMonth?.year ?? defaultMonth.year;
+  const month = controlledMonth?.month ?? defaultMonth.month;
 
   const isCurrentMonth =
     year === defaultMonth.year && month === defaultMonth.month;
 
   function navigateMonth(delta: number) {
     const next = addMonth(year, month, delta);
-    setTargetYear(next.year);
-    setTargetMonth(next.month);
+    onMonthChange(next);
   }
 
   // ── Resolve offset per account and fetch breakdowns in parallel ──
