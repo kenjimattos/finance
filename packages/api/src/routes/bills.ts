@@ -284,7 +284,7 @@ function sumBillTotalWithShifts(
   const { column, value } = scopeClause(scope);
   const row = db
     .prepare(
-      `SELECT COALESCE(SUM(t.amount), 0) AS total
+      `SELECT COALESCE(SUM(COALESCE(t.amount_in_account_currency, t.amount)), 0) AS total
        FROM transactions t
        INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
        LEFT JOIN card_group_members m
@@ -346,7 +346,7 @@ function installmentBreakdownWithShifts(
       `SELECT t.id                  AS id,
               t.date                AS date,
               t.description         AS description,
-              t.amount              AS amount,
+              COALESCE(t.amount_in_account_currency, t.amount) AS amount,
               t.installment_number  AS installmentNumber,
               t.total_installments  AS totalInstallments
        FROM transactions t
@@ -405,7 +405,7 @@ function categoryBreakdownWithShifts(
       `SELECT uc.id        AS id,
               uc.name      AS name,
               uc.color     AS color,
-              SUM(t.amount) AS total
+              SUM(COALESCE(t.amount_in_account_currency, t.amount)) AS total
        FROM transactions t
        INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
        INNER JOIN user_categories uc        ON uc.id = tc.user_category_id

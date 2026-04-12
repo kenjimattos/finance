@@ -207,6 +207,17 @@ db.exec(`
 // append-only — never delete or edit past migrations, because someone's
 // DB out there has already run them.
 addColumnIfMissing('transactions', 'card_last4', 'TEXT');
+addColumnIfMissing('transactions', 'amount_in_account_currency', 'REAL');
+
+// Backfill amount_in_account_currency from raw_json for existing rows.
+// Pluggy provides this field for foreign-currency transactions (e.g. USD
+// purchases on a BRL account). Without it, USD amounts display as BRL.
+db.exec(`
+  UPDATE transactions
+  SET amount_in_account_currency = json_extract(raw_json, '$.amountInAccountCurrency')
+  WHERE amount_in_account_currency IS NULL
+    AND json_extract(raw_json, '$.amountInAccountCurrency') IS NOT NULL
+`);
 
 // Re-enable all category rules that were auto-disabled by the old
 // "2 overrides = disabled" logic. Rules now stay active regardless of
