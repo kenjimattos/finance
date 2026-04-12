@@ -1,7 +1,7 @@
 {
   "name": "finance",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-hosted API to fetch personal credit card transactions via Pluggy",
   "workspaces": [
     "packages/*"
