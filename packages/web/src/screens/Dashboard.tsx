@@ -24,8 +24,23 @@ import { RulesManager } from '../components/RulesManager';
  *  4. Check account settings → show setup if missing
  *  5. Show bill breakdown + transaction inbox scoped to that account
  */
-export function Dashboard({ itemId }: { itemId: string }) {
-  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+export function Dashboard({
+  itemId,
+  accountId: accountIdFromOverview,
+  initialOffset,
+  onBack,
+}: {
+  itemId: string;
+  /** When coming from Overview, the specific account to show. */
+  accountId?: string;
+  /** When coming from Overview, the bill offset for the target month. */
+  initialOffset?: number;
+  /** When set, renders a back button to return to the Overview. */
+  onBack?: () => void;
+}) {
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
+    accountIdFromOverview ?? null,
+  );
   const [cardGroupFilter, setCardGroupFilter] = useState<CardGroupFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryTabFilter>('all');
   const [managerOpen, setManagerOpen] = useState(false);
@@ -63,6 +78,15 @@ export function Dashboard({ itemId }: { itemId: string }) {
 
   return (
     <>
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="eyebrow mb-6 flex items-center gap-2 transition-colors hover:text-[color:var(--color-accent)]"
+        >
+          ← voltar
+        </button>
+      )}
       {creditAccounts.length > 1 && (
         <AccountSelector
           accounts={creditAccounts}
@@ -77,6 +101,7 @@ export function Dashboard({ itemId }: { itemId: string }) {
       <AccountDashboard
         itemId={itemId}
         accountId={accountId}
+        initialOffset={initialOffset}
         cardGroupFilter={cardGroupFilter}
         setCardGroupFilter={setCardGroupFilter}
         categoryFilter={categoryFilter}
@@ -96,6 +121,7 @@ export function Dashboard({ itemId }: { itemId: string }) {
 function AccountDashboard({
   itemId,
   accountId,
+  initialOffset,
   cardGroupFilter,
   setCardGroupFilter,
   categoryFilter,
@@ -107,6 +133,8 @@ function AccountDashboard({
 }: {
   itemId: string;
   accountId: string;
+  /** Starting bill offset — set when drilling in from the Overview. */
+  initialOffset?: number;
   cardGroupFilter: CardGroupFilter;
   setCardGroupFilter: (f: CardGroupFilter) => void;
   categoryFilter: CategoryTabFilter;
@@ -117,11 +145,12 @@ function AccountDashboard({
   setRulesOpen: (v: boolean) => void;
 }) {
   // Which bill cycle we're viewing: 0 = currently open, -N = N cycles in the past.
+  // When coming from Overview, start at the offset for the target month.
   // Resets when switching account so the user always lands on "today" first.
-  const [billOffset, setBillOffset] = useState(0);
+  const [billOffset, setBillOffset] = useState(initialOffset ?? 0);
   useEffect(() => {
-    setBillOffset(0);
-  }, [accountId]);
+    setBillOffset(initialOffset ?? 0);
+  }, [accountId, initialOffset]);
 
   const settingsQ = useQuery({
     queryKey: ['accountSettings', accountId],
