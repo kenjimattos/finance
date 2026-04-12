@@ -136,6 +136,18 @@ export interface Transaction {
   userCategory: UserCategoryRef | null;
 }
 
+export interface Rule {
+  id: number;
+  merchant_slug: string;
+  hit_count: number;
+  override_count: number;
+  disabled: number;
+  user_category_id: number;
+  user_category_name: string;
+  user_category_color: string;
+  created_at: string;
+}
+
 export interface BillCategoryBreakdown {
   id: number;
   name: string;
@@ -219,6 +231,18 @@ export const api = {
     request<CardSettings>(`/card-settings/${itemId}`, {
       method: 'PUT',
       body: JSON.stringify(body),
+    }),
+
+  listRules: (q?: string) => {
+    const qs = q ? `?q=${encodeURIComponent(q)}` : '';
+    return request<Rule[]>(`/rules${qs}`);
+  },
+  deleteRule: (id: number) =>
+    request<unknown>(`/rules/${id}`, { method: 'DELETE' }),
+  updateRule: (id: number, categoryId: number) =>
+    request<{ ok: true }>(`/rules/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ categoryId }),
     }),
 
   listCategories: () => request<Category[]>('/categories'),
