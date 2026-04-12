@@ -8,11 +8,11 @@ A **self-hosted, single-user** credit card spending manager backed by [Pluggy](h
 
 ## Current state
 
-Functional end-to-end: connect card via `react-pluggy-connect` → sync discovers credit accounts → configure `closing_day` / `due_day` per account → sync bills and transactions from Pluggy → categorize transactions (with learning, bulk, and undo) → group physical cards (titular, adicional, virtual…) per account → see per-group cards with category breakdowns and installment sub-sections → manually shift individual transactions to a neighboring bill cycle when the purchase date lies about when the charge actually lands.
+Functional end-to-end: connect card via `react-pluggy-connect` → sync discovers credit accounts → configure `closing_day` / `due_day` per account → sync bills and transactions from Pluggy → categorize transactions (with learning, bulk, and undo) → group physical cards (titular, adicional, virtual…) per account → see per-group cards with category breakdowns and installment sub-sections → manually shift individual transactions to a neighboring bill cycle when the purchase date lies about when the charge actually lands → navigate between historical bill cycles via ←/→ arrows.
 
-Multi-account support: a single Pluggy item (bank connection) can contain multiple credit accounts (e.g. different card brands). Each account has its own billing cycle, card groups, and bill window. The frontend shows account tabs when more than one CREDIT account exists.
+Multi-account support: a single Pluggy item (bank connection) can contain multiple credit accounts (e.g. different card brands). Each account has its own billing cycle, card groups, and bill window. The frontend shows account tabs when more than one CREDIT account exists. The backend supports multiple items (bank connections) but the frontend currently shows only the first item — a multi-bank overview screen is the next planned feature.
 
-28 tests covering `billWindow` and `merchantSlug`. Cash-flow projection (checking accounts, manual entries, forward view) is a deliberate future feature and not yet built.
+48 tests covering `billWindow`, `merchantSlug`, and `applyLearnedRules`. Cash-flow projection (checking accounts, manual entries, forward view) is a deliberate future feature and not yet built.
 
 ## Repository layout
 
@@ -101,12 +101,12 @@ The previous-period delta is also categorized-vs-categorized for consistency.
 Every manual categorization feeds a rules engine in [categorize.ts](packages/api/src/routes/categorize.ts) + [merchantSlug.ts](packages/api/src/services/merchantSlug.ts):
 
 1. User assigns category Y to a transaction with description "IFOOD *RESTAURANTE XYZ".
-2. `extractMerchantSlug()` normalizes the description to "IFOOD" — strips processor prefixes (`PAG*`, `EC*`, `DL*`), cuts at `*`/`-`, drops trailing location tokens (BR, SAO PAULO…), takes the first few tokens. Intentionally fuzzy so `IFOOD *A` and `IFOOD *B` collapse to the same slug.
+2. `extractMerchantSlug()` normalizes the description — strips processor prefixes (`PAG*`, `EC*`, `DL*`), then handles the star separator: the first token after `*` is preserved when it's a meaningful qualifier (>= 3 alphabetic chars), otherwise discarded. This differentiates "UBER *EATS" → "UBER EATS" from "UBER *TRIP" → "UBER TRIP", while still collapsing "IFOOD *A" and "IFOOD *B" to "IFOOD". Finally drops trailing location tokens (BR, SAO PAULO…) and takes the first 3 tokens.
 3. A row is upserted into `category_rules (merchant_slug, user_category_id)`.
-4. On the next sync, `applyLearnedRules(itemId)` in [transactions.ts](packages/api/src/routes/transactions.ts) walks every uncategorized transaction, derives its slug, and applies the rule silently with `assigned_by = 'learned'`.
-5. If the user corrects a learned assignment by picking a different category, `override_count` on the offending rule is bumped; at `override_count >= 2` the rule flips to `disabled = 1` and stops firing.
+4. On the next sync, `applyLearnedRules(itemId)` in [applyLearnedRules.ts](packages/api/src/services/applyLearnedRules.ts) walks every uncategorized transaction, derives its slug, and applies the rule silently with `assigned_by = 'learned'`. When a slug maps to multiple categories, the rule with the highest `hit_count` wins (majority-wins resolution). A legacy slug fallback ensures old rules (keyed on pre-improvement slugs) keep matching.
+5. If the user corrects a learned assignment by picking a different category, `override_count` on the offending rule is bumped.
 
-Deliberate choices: no regex, no priorities, no UI for rule management. Bulk categorize feeds the same engine — selecting 15 Uber rows once trains 15 hits on the `UBER → Transporte` rule. The frontend surfaces only a small italic "auto" label next to learned assignments.
+Bulk categorize feeds the same engine — selecting 15 Uber Eats rows once trains 15 hits on the `UBER EATS → Delivery` rule. The frontend surfaces a small italic "auto" label next to learned assignments. A rules management overlay (`GET /rules?q=`, `PATCH /rules/:id`, `DELETE /rules/:id`) lets the user view, search, reassign, or delete learned rules explicitly.
 
 ### Request flow
 
