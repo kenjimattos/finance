@@ -211,6 +211,9 @@ export const api = {
       body: JSON.stringify({ itemId }),
     }),
 
+  deleteItem: (itemId: string) =>
+    request<void>(`/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
+
   getAccountSettings: (accountId: string) =>
     request<AccountSettings>(`/account-settings/${accountId}`),
   putAccountSettings: (
