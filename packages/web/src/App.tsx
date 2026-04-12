@@ -1,18 +1,25 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from './lib/api';
 import { Onboarding } from './screens/Onboarding';
+import { Overview } from './screens/Overview';
 import { Dashboard } from './screens/Dashboard';
 
 /**
- * App is a thin router between two mutually-exclusive states:
- *  - No item linked yet                       → Onboarding screen
- *  - At least one item (we only use the first) → Dashboard screen
- *
- * Single-user by design: the first item wins. If the user ever connects
- * multiple cards, a picker can be added here without touching anything else.
+ * App is a thin router between three mutually-exclusive states:
+ *  - No item linked yet → Onboarding screen
+ *  - Items exist, no account selected → Overview (all bills by month)
+ *  - Drilled into a specific account → Dashboard for that account
  */
 export function App() {
   const itemsQ = useQuery({ queryKey: ['items'], queryFn: api.listItems });
+
+  // Drill-down state: when set, show Dashboard for that account.
+  const [drillDown, setDrillDown] = useState<{
+    itemId: string;
+    accountId: string;
+    offset: number;
+  } | null>(null);
 
   return (
     <>
@@ -27,8 +34,20 @@ export function App() {
         {itemsQ.data &&
           (itemsQ.data.length === 0 ? (
             <Onboarding />
+          ) : drillDown ? (
+            <Dashboard
+              itemId={drillDown.itemId}
+              accountId={drillDown.accountId}
+              initialOffset={drillDown.offset}
+              onBack={() => setDrillDown(null)}
+            />
           ) : (
-            <Dashboard itemId={itemsQ.data[0].id} />
+            <Overview
+              items={itemsQ.data}
+              onSelectAccount={(itemId, accountId, offset) =>
+                setDrillDown({ itemId, accountId, offset })
+              }
+            />
           ))}
       </main>
     </>
