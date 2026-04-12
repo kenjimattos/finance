@@ -210,9 +210,12 @@ export function Overview({
           )}
         </div>
 
-        <p className="mt-3 font-body text-sm text-[color:var(--color-ink-muted)]">
-          total de {configured.length} {configured.length === 1 ? 'fatura' : 'faturas'} com vencimento em {monthLabel(year, month)}
-        </p>
+        <div className="mt-3 flex items-baseline justify-between gap-4">
+          <p className="font-body text-sm text-[color:var(--color-ink-muted)]">
+            total de {configured.length} {configured.length === 1 ? 'fatura' : 'faturas'} com vencimento em {monthLabel(year, month)}
+          </p>
+          <SyncAllButton items={items} />
+        </div>
 
         {/* Category breakdown */}
         {aggregatedCategories.length > 0 && (
@@ -256,6 +259,40 @@ export function Overview({
         <AddBankCard />
       </div>
     </motion.section>
+  );
+}
+
+// ─── Sync all button ────────────────────────────────────────────────
+
+function SyncAllButton({ items }: { items: Item[] }) {
+  const queryClient = useQueryClient();
+  const [syncing, setSyncing] = useState(false);
+
+  async function handleSync() {
+    setSyncing(true);
+    try {
+      await Promise.all(items.map((item) => api.syncTransactions(item.id)));
+      queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['accountSettings'] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    } catch (err) {
+      console.error('[SyncAll] failed:', err);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleSync}
+      disabled={syncing}
+      className="shrink-0 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
+    >
+      {syncing ? 'sincronizando…' : 'sincronizar ↻'}
+    </button>
   );
 }
 
