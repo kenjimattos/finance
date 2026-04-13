@@ -109,6 +109,12 @@ export function Overview({
   const isCurrentMonth =
     year === defaultMonth.year && month === defaultMonth.month;
 
+  const nextMonth = addMonth(defaultMonth.year, defaultMonth.month, 1);
+  const isNextMonth =
+    year === nextMonth.year && month === nextMonth.month;
+  const isFutureMonth =
+    year > defaultMonth.year || (year === defaultMonth.year && month > defaultMonth.month);
+
   function navigateMonth(delta: number) {
     const next = addMonth(year, month, delta);
     onMonthChange(next);
@@ -163,22 +169,22 @@ export function Overview({
       }
     }
 
-    // Saldo = opening + realized only (past days)
-    let realizedSum = 0;
+    // Saldo: for current/past months use realized only; for future months use all entries.
+    let balanceSum = 0;
     for (const day of data.days) {
-      if (!day.isPast) break;
-      for (const e of day.entries) realizedSum += e.amount;
+      if (!isFutureMonth && !day.isPast) continue;
+      for (const e of day.entries) balanceSum += e.amount;
     }
-    const currentBalance = Math.round((openingBalance + realizedSum) * 100) / 100;
+    const currentBalance = Math.round((openingBalance + balanceSum) * 100) / 100;
 
     return {
       openingBalance: Math.round(openingBalance * 100) / 100,
       currentBalance,
       income: Math.round(income * 100) / 100,
-      expenses: Math.round((expenses - cardBills) * 100) / 100, // saídas sem faturas
+      expenses: Math.round((expenses - cardBills) * 100) / 100,
       cardBills: Math.round(cardBills * 100) / 100,
     };
-  }, [cashflowQ.data]);
+  }, [cashflowQ.data, isFutureMonth]);
 
   const prevCashSummary = useMemo(() => {
     const data = prevCashflowQ.data;
@@ -299,7 +305,7 @@ export function Overview({
             <button
               type="button"
               onClick={() => navigateMonth(1)}
-              disabled={isCurrentMonth}
+              disabled={isNextMonth}
               aria-label="próximo mês"
               className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:text-[color:var(--color-ink-faint)] disabled:opacity-40"
             >
@@ -324,7 +330,7 @@ export function Overview({
             </div>
             <div className="mt-2 flex items-baseline gap-4">
               <p className="font-body text-sm text-[color:var(--color-ink-muted)]">
-                saldo {isCurrentMonth ? 'atual' : 'final'}
+                saldo {isFutureMonth ? 'projetado' : isCurrentMonth ? 'atual' : 'final'}
               </p>
               <button
                 type="button"
