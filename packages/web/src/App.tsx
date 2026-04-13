@@ -4,29 +4,30 @@ import { api } from './lib/api';
 import { Onboarding } from './screens/Onboarding';
 import { Overview } from './screens/Overview';
 import { Dashboard } from './screens/Dashboard';
+import { CashFlow } from './screens/CashFlow';
 
 /**
- * App is a thin router between drill-down levels:
- *  - No item linked yet → Onboarding screen
- *  - Items exist → Overview (landing page: Caixa + Cartões)
- *  - Clicked an account card → Dashboard (per-account detail)
+ * App routes between four screens:
+ *  - No item linked → Onboarding
+ *  - Items exist → Overview (landing: Caixa + Cartões)
+ *  - "ver extrato" in Overview → CashFlow (detailed ledger)
+ *  - Click account card → Dashboard (per-account detail)
  */
 export function App() {
   const itemsQ = useQuery({ queryKey: ['items'], queryFn: api.listItems });
 
-  // Persisted across Overview ↔ Dashboard transitions so "voltar"
-  // returns to the same month the user was browsing.
   const [overviewMonth, setOverviewMonth] = useState<{
     year: number;
     month: number;
   } | null>(null);
 
-  // Drill into Dashboard for a specific account.
   const [drillDown, setDrillDown] = useState<{
     itemId: string;
     accountId: string;
     offset: number;
   } | null>(null);
+
+  const [cashflowOpen, setCashflowOpen] = useState(false);
 
   return (
     <>
@@ -48,6 +49,14 @@ export function App() {
               initialOffset={drillDown.offset}
               onBack={() => setDrillDown(null)}
             />
+          ) : cashflowOpen ? (
+            <CashFlow
+              onSelectBill={(year, month) => {
+                setCashflowOpen(false);
+                setOverviewMonth({ year, month });
+              }}
+              onBack={() => setCashflowOpen(false)}
+            />
           ) : (
             <Overview
               items={itemsQ.data}
@@ -56,6 +65,7 @@ export function App() {
               onSelectAccount={(itemId, accountId, offset) =>
                 setDrillDown({ itemId, accountId, offset })
               }
+              onOpenCashFlow={() => setCashflowOpen(true)}
             />
           ))}
       </main>

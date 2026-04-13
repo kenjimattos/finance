@@ -39,12 +39,14 @@ export function Overview({
   targetMonth: controlledMonth,
   onMonthChange,
   onSelectAccount,
+  onOpenCashFlow,
 }: {
   items: Item[];
   /** Controlled month state — persisted in App so "voltar" restores it. */
   targetMonth: { year: number; month: number } | null;
   onMonthChange: (m: { year: number; month: number }) => void;
   onSelectAccount: (itemId: string, accountId: string, offset: number) => void;
+  onOpenCashFlow: () => void;
 }) {
   const today = useMemo(() => new Date(), []);
 
@@ -283,9 +285,18 @@ export function Overview({
             <div className="font-display text-[72px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[96px]">
               {formatBRL(cashSummary.closingBalance)}
             </div>
-            <p className="mt-2 font-body text-sm text-[color:var(--color-ink-muted)]">
-              saldo {isCurrentMonth ? 'atual' : 'final'}
-            </p>
+            <div className="mt-2 flex items-baseline gap-4">
+              <p className="font-body text-sm text-[color:var(--color-ink-muted)]">
+                saldo {isCurrentMonth ? 'atual' : 'final'}
+              </p>
+              <button
+                type="button"
+                onClick={onOpenCashFlow}
+                className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+              >
+                ver extrato →
+              </button>
+            </div>
 
             {/* Entradas / Saídas / Faturas */}
             <div className="mt-8 grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
