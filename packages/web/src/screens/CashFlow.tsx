@@ -360,7 +360,7 @@ function DayGroup({
 
             {/* Debit column */}
             <div className="text-right font-mono text-[13px] tabular-nums text-[color:var(--color-ink)]">
-              {isDebit ? formatBRL(Math.abs(entry.amount)) : ''}
+              {isDebit ? formatBRL(entry.amount) : ''}
             </div>
 
             {/* Credit column */}
