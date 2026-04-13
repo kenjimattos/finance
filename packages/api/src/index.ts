@@ -15,6 +15,7 @@ import { billsRouter } from './routes/bills.js';
 import { categorizeRouter } from './routes/categorize.js';
 import { cardGroupsRouter } from './routes/cardGroups.js';
 import { accountsRouter } from './routes/accounts.js';
+import { manualEntriesRouter } from './routes/manualEntries.js';
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use(categoriesRouter);
 app.use(billsRouter);
 app.use(transactionsRouter);
 app.use(categorizeRouter);
+app.use(manualEntriesRouter);
 
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof ZodError) {
