@@ -74,10 +74,13 @@ export function CashFlow({
   // Current month is always visible; up to 5 previous months are behind a toggle.
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  const { currentMonth, historyMonths, allVisibleMonths } = useMemo(() => {
-    if (!rangeQ.data?.lastMonth) return { currentMonth: null, historyMonths: [], allVisibleMonths: [] };
+  const [projectionOpen, setProjectionOpen] = useState(false);
+
+  const { currentMonth, historyMonths, projectionMonth, allVisibleMonths } = useMemo(() => {
+    if (!rangeQ.data?.lastMonth) return { currentMonth: null, historyMonths: [], projectionMonth: null, allVisibleMonths: [] };
     const [ey, em] = rangeQ.data.lastMonth.split('-').map(Number);
     const current = { year: ey, month: em };
+    const projection = addMonth(ey, em, 1);
 
     // Up to 5 months before the current, capped by firstMonth.
     const history: Array<{ year: number; month: number }> = [];
@@ -85,20 +88,22 @@ export function CashFlow({
     if (first) {
       const [fy, fm] = first.split('-').map(Number);
       const sixBack = addMonth(ey, em, -5);
-      // Start from whichever is later: 6 months ago or first available.
       const startY = sixBack.year > fy || (sixBack.year === fy && sixBack.month > fm) ? sixBack.year : fy;
       const startM = sixBack.year > fy || (sixBack.year === fy && sixBack.month > fm) ? sixBack.month : fm;
       const range = monthRange(startY, startM, ey, em);
-      // Everything except the last entry (which is the current month).
       for (let i = 0; i < range.length - 1; i++) history.push(range[i]);
     }
+
+    const visible = historyOpen ? [...history, current] : [current];
+    if (projectionOpen) visible.push(projection);
 
     return {
       currentMonth: current,
       historyMonths: history,
-      allVisibleMonths: historyOpen ? [...history, current] : [current],
+      projectionMonth: projection,
+      allVisibleMonths: visible,
     };
-  }, [rangeQ.data, historyOpen]);
+  }, [rangeQ.data, historyOpen, projectionOpen]);
 
   // Only fetch months that are visible — avoids 12 parallel requests on load.
   const queries = useQueries({
@@ -263,6 +268,8 @@ export function CashFlow({
         const data = q?.data;
         const ms = monthStr(m.year, m.month);
         const endBal = monthEndBalances.get(ms) ?? null;
+        const isProjection = projectionMonth
+          && m.year === projectionMonth.year && m.month === projectionMonth.month;
 
         return (
           <MonthSection
@@ -276,6 +283,7 @@ export function CashFlow({
             endBalance={endBal}
             bankColorMap={bankColorMap}
             bankNames={bankNames}
+            readOnly={!!isProjection}
             onSelectBill={onSelectBill}
             onDeleteManual={(id) => deleteMut.mutate(id)}
             onEditDesc={(entry, desc) => {
@@ -298,6 +306,19 @@ export function CashFlow({
           />
         );
       })}
+
+      {/* Projection toggle */}
+      {projectionMonth && (
+        <button
+          type="button"
+          onClick={() => setProjectionOpen((o) => !o)}
+          className="mb-8 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+        >
+          {projectionOpen
+            ? '− ocultar projeção'
+            : `+ projeção ${monthLabel(projectionMonth.year, projectionMonth.month)}`}
+        </button>
+      )}
 
       {/* New entry row (global — applies to all months via day_of_month) */}
       <NewEntryRow
@@ -323,6 +344,7 @@ function MonthSection({
   endBalance,
   bankColorMap,
   bankNames,
+  readOnly = false,
   onSelectBill,
   onDeleteManual,
   onEditDesc,
@@ -338,6 +360,8 @@ function MonthSection({
   endBalance: number | null;
   bankColorMap: Map<string, string>;
   bankNames: Map<string, string>;
+  /** When true, entries are not editable (projection month). */
+  readOnly?: boolean;
   onSelectBill: (year: number, month: number) => void;
   onDeleteManual: (id: number) => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
@@ -394,6 +418,7 @@ function MonthSection({
             balance={dayBalances.get(day.date) ?? null}
             bankColors={bankColorMap}
             bankNames={bankNames}
+            readOnly={readOnly}
             onSelectBill={() => onSelectBill(year, month)}
             onDeleteManual={onDeleteManual}
             onEditDesc={onEditDesc}
@@ -419,6 +444,7 @@ function DayGroup({
   balance,
   bankColors,
   bankNames,
+  readOnly = false,
   onSelectBill,
   onDeleteManual,
   onEditDesc,
@@ -431,6 +457,7 @@ function DayGroup({
   balance: number | null;
   bankColors: Map<string, string>;
   bankNames: Map<string, string>;
+  readOnly?: boolean;
   onSelectBill: () => void;
   onDeleteManual: (id: number) => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
@@ -492,7 +519,7 @@ function DayGroup({
                 <>
                   <DayCell
                     date={day.date}
-                    editable={entry.type === 'manual_entry'}
+                    editable={!readOnly && entry.type === 'manual_entry'}
                     onSubmit={(d) => onEditDay(entry, d)}
                   />
                   {i === 0 && isToday && (
@@ -508,7 +535,8 @@ function DayGroup({
             {/* Description */}
             <DescriptionCell
               entry={entry}
-              manualId={manualId}
+              manualId={readOnly ? null : manualId}
+              readOnly={readOnly}
               onSelectBill={entry.type === 'credit_card_bill' ? onSelectBill : undefined}
               onEditDesc={onEditDesc}
               onDeleteManual={onDeleteManual}
@@ -518,7 +546,7 @@ function DayGroup({
             <AmountCell
               amount={isDebit ? entry.amount : null}
               color="var(--color-ink)"
-              editable={entry.type === 'manual_entry'}
+              editable={!readOnly && entry.type === 'manual_entry'}
               onSubmit={(val) => onEditAmount(entry, val)}
             />
 
@@ -526,7 +554,7 @@ function DayGroup({
             <AmountCell
               amount={!isDebit ? entry.amount : null}
               color="var(--color-positive)"
-              editable={entry.type === 'manual_entry'}
+              editable={!readOnly && entry.type === 'manual_entry'}
               onSubmit={(val) => onEditAmount(entry, val)}
             />
 
@@ -548,12 +576,14 @@ function DayGroup({
 function DescriptionCell({
   entry,
   manualId,
+  readOnly = false,
   onSelectBill,
   onEditDesc,
   onDeleteManual,
 }: {
   entry: CashFlowEntry;
   manualId: number | null;
+  readOnly?: boolean;
   onSelectBill?: () => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onDeleteManual: (id: number) => void;
@@ -561,7 +591,7 @@ function DescriptionCell({
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const editable = entry.type === 'bank_transaction' || entry.type === 'manual_entry';
+  const editable = !readOnly && (entry.type === 'bank_transaction' || entry.type === 'manual_entry');
 
   const handleSubmit = () => {
     const val = inputRef.current?.value.trim();
