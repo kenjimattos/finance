@@ -195,6 +195,37 @@ export interface BillBreakdown {
   groups: BillGroupBreakdown[];
 }
 
+// ---------- Cash Flow ----------
+
+export interface ManualEntry {
+  id: number;
+  description: string;
+  amount: number;
+  dayOfMonth: number;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface CashFlowEntry {
+  id: string;
+  description: string;
+  amount: number;
+  type: 'bank_transaction' | 'manual_entry' | 'credit_card_bill';
+  accountId?: string;
+}
+
+export interface CashFlowDay {
+  date: string;
+  isPast: boolean;
+  entries: CashFlowEntry[];
+}
+
+export interface CashFlowResponse {
+  month: string;
+  bankAccount: { id: string; name: string | null; balance: number | null } | null;
+  days: CashFlowDay[];
+}
+
 // ---------- Endpoints ----------
 
 export const api = {
@@ -358,5 +389,53 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ transactionIds, categoryId }),
       },
+    ),
+
+  // ── Cash Flow ──
+
+  getCashFlow: () => request<CashFlowResponse>('/cashflow'),
+
+  listManualEntries: () => request<ManualEntry[]>('/manual-entries'),
+
+  createManualEntry: (body: {
+    description: string;
+    amount: number;
+    dayOfMonth: number;
+  }) =>
+    request<ManualEntry>('/manual-entries', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateManualEntry: (
+    id: number,
+    body: Partial<{
+      description: string;
+      amount: number;
+      dayOfMonth: number;
+      active: boolean;
+    }>,
+  ) =>
+    request<ManualEntry>(`/manual-entries/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deleteManualEntry: (id: number) =>
+    request<void>(`/manual-entries/${id}`, { method: 'DELETE' }),
+
+  updateTransactionDescription: (transactionId: string, description: string) =>
+    request<{ ok: true }>(
+      `/transactions/${encodeURIComponent(transactionId)}/description`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ description }),
+      },
+    ),
+
+  deleteTransactionDescription: (transactionId: string) =>
+    request<void>(
+      `/transactions/${encodeURIComponent(transactionId)}/description`,
+      { method: 'DELETE' },
     ),
 };
