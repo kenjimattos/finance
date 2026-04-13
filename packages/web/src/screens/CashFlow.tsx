@@ -346,19 +346,21 @@ function DayGroup({
             }}
           >
             {/* Source / bank column */}
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span
-                className="inline-block h-[5px] w-[5px] shrink-0 rounded-full"
-                style={{ backgroundColor: bulletColor }}
-              />
-              <span className="truncate font-body text-[10px] text-[color:var(--color-ink-faint)]">
-                {entry.type === 'bank_transaction' && entry.bankAccountId
-                  ? (bankNames?.get(entry.bankAccountId) ?? '')
-                  : entry.type === 'credit_card_bill'
-                    ? 'fatura'
-                    : ''}
-              </span>
-            </div>
+            {entry.type === 'manual_entry' ? <span /> : (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span
+                  className="inline-block h-[5px] w-[5px] shrink-0 rounded-full"
+                  style={{ backgroundColor: bulletColor }}
+                />
+                <span className="truncate font-body text-[10px] text-[color:var(--color-ink-faint)]">
+                  {entry.type === 'bank_transaction' && entry.bankAccountId
+                    ? (bankNames?.get(entry.bankAccountId) ?? '')
+                    : entry.type === 'credit_card_bill'
+                      ? 'fatura'
+                      : ''}
+                </span>
+              </div>
+            )}
 
             {/* Date */}
             <div className={`flex items-center gap-1 ${i > 0 && entry.type === 'manual_entry' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>
