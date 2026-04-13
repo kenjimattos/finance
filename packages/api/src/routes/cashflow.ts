@@ -59,6 +59,22 @@ function round2(n: number): number {
 }
 
 /**
+ * Descriptions to exclude from BANK transaction listings and sums.
+ * These are internal bookkeeping entries from certain connectors
+ * (e.g. PicPay's "Retirada de saldo por lastro") that duplicate
+ * real movements and break balance calculations.
+ */
+const BANK_TX_EXCLUDE_DESCRIPTIONS = [
+  'Retirada de saldo por lastro',
+];
+
+const BANK_TX_EXCLUDE_SQL = BANK_TX_EXCLUDE_DESCRIPTIONS
+  .map(() => "t.description NOT LIKE ?")
+  .join(' AND ');
+
+const BANK_TX_EXCLUDE_PARAMS = BANK_TX_EXCLUDE_DESCRIPTIONS.map((d) => `%${d}%`);
+
+/**
  * GET /cashflow — day-by-day cash-flow view for the current month.
  *
  * Past days (up to yesterday): actual BANK transactions from Pluggy.
@@ -98,11 +114,12 @@ cashflowRouter.get('/cashflow', (_req, res, next) => {
     for (const ba of bankAccounts) {
       const row = db
         .prepare(
-          `SELECT COALESCE(SUM(amount), 0) AS total
-           FROM transactions
-           WHERE account_id = ? AND date >= ? AND date <= ?`,
+          `SELECT COALESCE(SUM(t.amount), 0) AS total
+           FROM transactions t
+           WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
+             AND ${BANK_TX_EXCLUDE_SQL}`,
         )
-        .get(ba.id, firstDay, today) as { total: number };
+        .get(ba.id, firstDay, today, ...BANK_TX_EXCLUDE_PARAMS) as { total: number };
       openingBalances.set(ba.id, round2((ba.balance ?? 0) - row.total));
     }
 
@@ -120,9 +137,10 @@ cashflowRouter.get('/cashflow', (_req, res, next) => {
            LEFT JOIN transaction_description_overrides o ON o.transaction_id = t.id
            WHERE t.account_id IN (${placeholders})
              AND t.date >= ? AND t.date <= ?
+             AND ${BANK_TX_EXCLUDE_SQL}
            ORDER BY t.date ASC, t.id ASC`,
         )
-        .all(...bankAccountIds, firstDay, yesterday) as BankTxRow[];
+        .all(...bankAccountIds, firstDay, yesterday, ...BANK_TX_EXCLUDE_PARAMS) as BankTxRow[];
     }
 
     // ── Future days: manual entries ──
