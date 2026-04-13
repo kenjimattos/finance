@@ -114,6 +114,11 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
       api.updateManualEntry(id, { amount }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
   });
+  const dayManualMut = useMutation({
+    mutationFn: ({ id, dayOfMonth }: { id: number; dayOfMonth: number }) =>
+      api.updateManualEntry(id, { dayOfMonth }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
+  });
 
   const loading = cashflowQ.isLoading;
   const multiBanks = (data?.bankAccounts?.length ?? 0) > 1;
@@ -236,6 +241,12 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
                   amountManualMut.mutate({ id: numId, amount });
                 }
               }}
+              onEditDay={(entry, dayOfMonth) => {
+                if (entry.type === 'manual_entry') {
+                  const numId = Number(entry.id.replace('manual-', ''));
+                  dayManualMut.mutate({ id: numId, dayOfMonth });
+                }
+              }}
               staggerIndex={di}
             />
           ))}
@@ -298,6 +309,7 @@ function DayGroup({
   onDeleteManual,
   onEditDesc,
   onEditAmount,
+  onEditDay,
   staggerIndex,
 }: {
   day: CashFlowDay;
@@ -308,10 +320,14 @@ function DayGroup({
   onDeleteManual: (id: number) => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onEditAmount: (entry: CashFlowEntry, amount: number) => void;
+  onEditDay: (entry: CashFlowEntry, day: number) => void;
   staggerIndex: number;
 }) {
   const isToday = day.date === today;
   const isFuture = !day.isPast && !isToday;
+
+  // All entries in this day group that are manual (for date editing).
+  const hasManualOnly = day.entries.length > 0 && day.entries.every((e) => e.type === 'manual_entry');
 
   return (
     <motion.div
@@ -344,9 +360,11 @@ function DayGroup({
             <div className="flex items-center gap-1">
               {i === 0 ? (
                 <>
-                  <span className="font-mono text-[11px] text-[color:var(--color-ink-muted)]">
-                    {formatDateShort(day.date)}
-                  </span>
+                  <DayCell
+                    date={day.date}
+                    editable={hasManualOnly && entry.type === 'manual_entry'}
+                    onSubmit={(d) => onEditDay(entry, d)}
+                  />
                   {isToday && (
                     <span
                       className="inline-block h-[5px] w-[5px] rounded-full"
@@ -471,6 +489,58 @@ function DescriptionCell({
         </button>
       )}
     </div>
+  );
+}
+
+// ── Day cell (click-to-edit day of month for manual entries) ──
+
+function DayCell({
+  date,
+  editable,
+  onSubmit,
+}: {
+  date: string;
+  editable: boolean;
+  onSubmit: (day: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const currentDay = Number(date.split('-')[2]);
+
+  const handleSubmit = () => {
+    const val = Number(inputRef.current?.value);
+    if (val >= 1 && val <= 31 && val !== currentDay) onSubmit(val);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        min={1}
+        max={31}
+        defaultValue={currentDay}
+        className="w-[36px] border-b border-[color:var(--color-accent)] bg-transparent font-mono text-[11px] text-[color:var(--color-ink)] outline-none"
+        onBlur={handleSubmit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSubmit();
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        autoFocus
+      />
+    );
+  }
+
+  return (
+    <span
+      className={`font-mono text-[11px] text-[color:var(--color-ink-muted)] ${editable ? 'cursor-pointer hover:text-[color:var(--color-accent)]' : ''}`}
+      onClick={() => { if (editable) setEditing(true); }}
+      title={editable ? 'Editar dia' : undefined}
+    >
+      {formatDateShort(date)}
+    </span>
   );
 }
 
