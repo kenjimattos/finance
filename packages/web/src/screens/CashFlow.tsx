@@ -44,7 +44,7 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
 
   const cashflowQ = useQuery({
     queryKey: ['cashflow'],
-    queryFn: api.getCashFlow,
+    queryFn: () => api.getCashFlow(),
   });
 
   const today = todayYmd();
