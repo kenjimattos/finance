@@ -12,14 +12,16 @@ Functional end-to-end: connect card via `react-pluggy-connect` → sync discover
 
 Multi-bank support: multiple Pluggy items (bank connections) are fully supported. The Overview screen groups all credit accounts by due-month with ←/→ navigation, shows a grand total with aggregated category breakdown and delta vs previous period, and lets the user drill into any account's Dashboard. New banks are added via "Adicionar banco" (PluggyConnect) and removed via "remover" (with cascade delete). A single Pluggy item can also contain multiple credit accounts (e.g. different card brands); each account has its own billing cycle, card groups, and bill window.
 
-55 tests covering `billWindow` (including `findOffsetForDueMonth`), `merchantSlug`, and `applyLearnedRules`. Cash-flow projection (checking accounts, manual entries, forward view) is a deliberate future feature and not yet built.
+Cash flow: the CashFlow screen shows a day-by-day view of the current month. Past days display actual BANK transactions from Pluggy (editable descriptions). Future days show manual recurring entries (salary, rent) and credit card bill outflows on their due dates. Running balance tracks the cumulative position starting from the Pluggy checking account balance.
+
+55 tests covering `billWindow` (including `findOffsetForDueMonth`), `merchantSlug`, and `applyLearnedRules`.
 
 ## Repository layout
 
 npm workspaces monorepo:
 
 - [packages/api](packages/api/) — Express + TypeScript + `pluggy-sdk` + `better-sqlite3`. All Pluggy communication and the SQLite cache.
-- [packages/web](packages/web/) — Vite + React + TypeScript + Tailwind v4 + TanStack Query + Motion + `react-pluggy-connect`. Two screens: Overview (multi-bank month view) and Dashboard (per-account bill view).
+- [packages/web](packages/web/) — Vite + React + TypeScript + Tailwind v4 + TanStack Query + Motion + `react-pluggy-connect`. Three screens: Overview (multi-bank month view), Dashboard (per-account bill view), and CashFlow (day-by-day checking account view).
 
 Frontend-facing types live in [packages/web/src/lib/api.ts](packages/web/src/lib/api.ts) and are redeclared there to mirror the backend response shape. No shared package; extract one only when a second consumer appears.
 
@@ -60,13 +62,12 @@ Both dev servers bind to `0.0.0.0`, so other devices on the local network can ac
 
 Three independent domains in SQLite, deliberately not merged:
 
-1. **Pluggy cache** (`items`, `accounts`, `transactions`, `bills`) — read-through cache of what Pluggy returns. `accounts` is populated during sync from `fetchAccounts(itemId, 'CREDIT')`. `raw_json` on each row keeps the full payload so new fields can surface later without a backfill. Can be wiped and re-synced without losing user work.
+1. **Pluggy cache** (`items`, `accounts`, `transactions`, `bills`) — read-through cache of what Pluggy returns. `accounts` is populated during sync from `fetchAccounts(itemId, 'CREDIT')` and `fetchAccounts(itemId, 'BANK')`. BANK accounts carry `balance` and `subtype` (e.g. `CHECKING_ACCOUNT`). `raw_json` on each row keeps the full payload so new fields can surface later without a backfill. Can be wiped and re-synced without losing user work.
 2. **User configuration** (`account_settings`, `card_groups`, `card_group_members`) — per-account closing/due days (Pluggy does not expose these), plus the user's grouping of physical cards by `card_last4` scoped per account. One card belongs to at most one group (composite primary key enforces exclusivity). Legacy `card_settings` (per-item) table remains for backward compat but the frontend writes to `account_settings`.
-3. **User work** (`user_categories`, `transaction_categories`, `category_rules`, `transaction_bill_overrides`) — categorization, learned rules, and manual bill-cycle shifts. These are **separate join tables**, not columns on `transactions`, so a Pluggy re-sync never wipes them.
+3. **User work** (`user_categories`, `transaction_categories`, `category_rules`, `transaction_bill_overrides`, `transaction_description_overrides`) — categorization, learned rules, manual bill-cycle shifts, and description overrides. These are **separate join tables**, not columns on `transactions`, so a Pluggy re-sync never wipes them.
+4. **Cash flow** (`manual_entries`) — monthly recurring entries (salary, rent, etc.) with `day_of_month` for placement. These are independent of Pluggy data and persist across re-syncs.
 
 Column-level migrations use `addColumnIfMissing()` in [db/index.ts](packages/api/src/db/index.ts) — append-only, idempotent via `PRAGMA table_info`. New tables use `CREATE TABLE IF NOT EXISTS` directly.
-
-When the cash-flow feature arrives, it will add its own tables rather than forcing itself into the existing ones. Resist the urge to introduce a generic `events` abstraction now.
 
 ### The open bill problem
 
@@ -114,14 +115,17 @@ Bulk categorize feeds the same engine — selecting 15 Uber Eats rows once train
 2. Frontend renders `<PluggyConnect>`. Rendering mounts the modal; unmounting closes it (no `isOpen` prop). `onSuccess({ item })` gives the `item.id`.
 3. `POST /items { itemId }` — backend validates via `pluggy.fetchItem()` and persists.
 4. `DELETE /items/:id` — removes a bank connection and all its data via cascade. Categories and rules are preserved.
-5. `POST /transactions/sync?itemId=...` — syncs accounts, bills, and transactions, then runs `applyLearnedRules`. Upserts discovered accounts into the `accounts` table. Also realigns `item_id` on existing transactions if the account moved between items (sandbox re-connection).
-6. `GET /accounts?itemId=...` — list CREDIT accounts for the item. Frontend picks the first (or shows tabs if multiple).
+5. `POST /transactions/sync?itemId=...` — syncs CREDIT and BANK accounts, bills (CREDIT only), and transactions (both types), then runs `applyLearnedRules`. Upserts discovered accounts into the `accounts` table with `balance` and `subtype`. Also realigns `item_id` on existing transactions if the account moved between items (sandbox re-connection).
+6. `GET /accounts?itemId=...` — list accounts for the item. Frontend uses CREDIT accounts for billing and BANK accounts for cash flow.
 7. `GET /account-settings/:accountId` → 404 triggers the per-account setup form. In the Overview, unconfigured accounts render as "Configurar" cards.
 8. `PUT /account-settings/:accountId { closingDay, dueDay, displayName? }` — one-time config per account.
 9. `GET /bills/current/breakdown?itemId=...&accountId=...&offset=N` — one response with the bill window dates, neighbor windows, and a `groups[]` array scoped to the account. `offset` (default 0) selects the cycle: 0 = currently open, -N = N cycles in the past. First entry (`groupId: null`) is "Todos" and becomes the big headline; subsequent entries are the real card groups and become the grid of cards, each with `categories[]` and `installments[]`. The Overview fetches this in parallel for every account, resolving each account's offset via `findOffsetForDueMonth`.
 10. `GET /transactions` — accepts `itemId`, optional `accountId`, `from`/`to` plus the four neighbor-window params to run in shift-aware mode, returning a transaction list that matches the card totals exactly.
 11. `PUT /transactions/:id/category { categoryId }` / `POST /transactions/bulk-categorize` / `DELETE /transactions/:id/category` — the user's main interaction.
 12. `PUT /transactions/:id/bill-shift { shift: -1 | 0 | 1 }` — shift (or restore with 0) a single transaction.
+13. `PUT /transactions/:id/description { description }` / `DELETE /transactions/:id/description` — override or restore a bank transaction's display description.
+14. `GET /manual-entries` / `POST /manual-entries` / `PUT /manual-entries/:id` / `DELETE /manual-entries/:id` — CRUD for monthly recurring cash-flow entries.
+15. `GET /cashflow` — day-by-day timeline for the current month. Past days: actual BANK transactions. Future days: manual entries + credit card bill outflows on due dates.
 
 ### Frontend design language
 
@@ -135,7 +139,7 @@ Type system:
 
 Decoration: fixed CSS-only paper-grain noise overlay, fixed vertical margin rule at `left: 48px`, focus rings in the accent color, muted scrollbars. Motion is used sparingly — entrance fades for screens, slide-up for the bulk action bar and toast, card fade-in. No micro-animations scattered.
 
-The app has two screens. **Overview** (`Overview.tsx`): ←/→ month navigation → grand total with delta → aggregated category breakdown → grid of account cards (one per CREDIT account across all items) + "adicionar banco" card. **Dashboard** (`Dashboard.tsx`): "← voltar" to Overview → account tabs (if multiple) → big headline → grid of per-group cards → `CategoryTabs` → `TransactionInbox`. Each card caps categories and installments at 4 with a `+ N mais` / `− recolher` toggle; stop-propagation on those toggles is essential because the card itself is a clickable filter. App.tsx manages drill-down state (itemId, accountId, offset) and lifts the Overview's target month so it persists across Overview ↔ Dashboard transitions.
+The app has three screens. **Overview** (`Overview.tsx`): ←/→ month navigation → grand total with delta → aggregated category breakdown → grid of account cards (one per CREDIT account across all items) + "adicionar banco" card + "Fluxo de caixa" link. **Dashboard** (`Dashboard.tsx`): "← voltar" to Overview → account tabs (if multiple) → big headline → grid of per-group cards → `CategoryTabs` → `TransactionInbox`. Each card caps categories and installments at 4 with a `+ N mais` / `− recolher` toggle; stop-propagation on those toggles is essential because the card itself is a clickable filter. **CashFlow** (`CashFlow.tsx`): "← voltar" to Overview → month headline → checking balance → day-by-day timeline (past = actual bank transactions with editable descriptions, future = manual entries + card bill outflows) → running balance → projected end-of-month balance → form to add monthly entries. App.tsx manages drill-down state (itemId, accountId, offset), showCashFlow toggle, and lifts the Overview's target month so it persists across transitions.
 
 ### Reusable UI patterns
 

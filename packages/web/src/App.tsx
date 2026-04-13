@@ -4,6 +4,7 @@ import { api } from './lib/api';
 import { Onboarding } from './screens/Onboarding';
 import { Overview } from './screens/Overview';
 import { Dashboard } from './screens/Dashboard';
+import { CashFlow } from './screens/CashFlow';
 
 /**
  * App is a thin router between three mutually-exclusive states:
@@ -20,6 +21,9 @@ export function App() {
     accountId: string;
     offset: number;
   } | null>(null);
+
+  // Cash flow screen toggle.
+  const [showCashFlow, setShowCashFlow] = useState(false);
 
   // Persisted across Overview ↔ Dashboard transitions so "voltar"
   // returns to the same month the user was browsing.
@@ -41,6 +45,8 @@ export function App() {
         {itemsQ.data &&
           (itemsQ.data.length === 0 ? (
             <Onboarding />
+          ) : showCashFlow ? (
+            <CashFlow onBack={() => setShowCashFlow(false)} />
           ) : drillDown ? (
             <Dashboard
               itemId={drillDown.itemId}
@@ -56,6 +62,7 @@ export function App() {
               onSelectAccount={(itemId, accountId, offset) =>
                 setDrillDown({ itemId, accountId, offset })
               }
+              onOpenCashFlow={() => setShowCashFlow(true)}
             />
           ))}
       </main>
