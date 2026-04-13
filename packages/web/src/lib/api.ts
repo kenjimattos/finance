@@ -212,6 +212,7 @@ export interface CashFlowEntry {
   amount: number;
   type: 'bank_transaction' | 'manual_entry' | 'credit_card_bill';
   accountId?: string;
+  bankAccountId?: string;
 }
 
 export interface CashFlowDay {
@@ -220,9 +221,16 @@ export interface CashFlowDay {
   entries: CashFlowEntry[];
 }
 
+export interface CashFlowBankAccount {
+  id: string;
+  name: string | null;
+  balance: number | null;
+  openingBalance: number | null;
+}
+
 export interface CashFlowResponse {
   month: string;
-  bankAccount: { id: string; name: string | null; balance: number | null } | null;
+  bankAccounts: CashFlowBankAccount[];
   days: CashFlowDay[];
 }
 
