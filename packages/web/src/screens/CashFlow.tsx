@@ -48,10 +48,16 @@ export function CashFlow({ onBack }: CashFlowProps) {
     : [new Date().getFullYear(), new Date().getMonth() + 1];
 
   // ── Running balance ──
-  const { dayBalances, endBalance } = useMemo(() => {
-    if (!data?.bankAccount?.balance) return { dayBalances: new Map<string, number>(), endBalance: null };
+  // Sum opening balances across all bank accounts as the starting point.
+  const { dayBalances, endBalance, totalOpeningBalance } = useMemo(() => {
+    if (!data?.bankAccounts?.length) {
+      return { dayBalances: new Map<string, number>(), endBalance: null, totalOpeningBalance: null };
+    }
 
-    const startBalance = data.bankAccount.balance;
+    const startBalance = data.bankAccounts.reduce(
+      (sum, ba) => sum + (ba.openingBalance ?? 0),
+      0,
+    );
     let running = startBalance;
     const balances = new Map<string, number>();
 
@@ -62,7 +68,22 @@ export function CashFlow({ onBack }: CashFlowProps) {
       balances.set(day.date, Math.round(running * 100) / 100);
     }
 
-    return { dayBalances: balances, endBalance: Math.round(running * 100) / 100 };
+    return {
+      dayBalances: balances,
+      endBalance: Math.round(running * 100) / 100,
+      totalOpeningBalance: Math.round(startBalance * 100) / 100,
+    };
+  }, [data]);
+
+  // Map bank account id → name for labeling transactions.
+  const bankAccountNames = useMemo(() => {
+    const map = new Map<string, string>();
+    if (data?.bankAccounts) {
+      for (const ba of data.bankAccounts) {
+        map.set(ba.id, ba.name ?? 'Conta');
+      }
+    }
+    return map;
   }, [data]);
 
   // ── Manual entry form ──
@@ -88,6 +109,7 @@ export function CashFlow({ onBack }: CashFlowProps) {
   });
 
   const loading = cashflowQ.isLoading;
+  const hasMultipleBanks = (data?.bankAccounts?.length ?? 0) > 1;
 
   return (
     <motion.section
@@ -117,19 +139,31 @@ export function CashFlow({ onBack }: CashFlowProps) {
           )}
         </div>
 
-        {data?.bankAccount && (
-          <div className="mt-4 font-body text-sm text-[color:var(--color-ink-muted)]">
-            <span className="font-mono text-base text-[color:var(--color-ink)]">
-              {formatBRL(data.bankAccount.balance ?? 0)}
-            </span>
-            {' '}
-            <span>
-              saldo atual · {data.bankAccount.name ?? 'Conta corrente'}
-            </span>
+        {/* Bank accounts summary */}
+        {data?.bankAccounts && data.bankAccounts.length > 0 && (
+          <div className="mt-4 space-y-1">
+            {data.bankAccounts.map((ba) => (
+              <div key={ba.id} className="flex items-baseline gap-2 font-body text-sm text-[color:var(--color-ink-muted)]">
+                <span className="font-mono text-base text-[color:var(--color-ink)]">
+                  {formatBRL(ba.openingBalance ?? 0)}
+                </span>
+                <span>
+                  saldo início do mês · {ba.name ?? 'Conta corrente'}
+                </span>
+              </div>
+            ))}
+            {data.bankAccounts.length > 1 && totalOpeningBalance !== null && (
+              <div className="flex items-baseline gap-2 pt-1 font-body text-sm text-[color:var(--color-ink-muted)]">
+                <span className="font-mono text-base font-semibold text-[color:var(--color-ink)]">
+                  {formatBRL(totalOpeningBalance)}
+                </span>
+                <span>total consolidado</span>
+              </div>
+            )}
           </div>
         )}
 
-        {!data?.bankAccount && !loading && (
+        {data?.bankAccounts?.length === 0 && !loading && (
           <p className="mt-4 font-body text-sm text-[color:var(--color-ink-faint)]">
             Nenhuma conta corrente sincronizada. Execute o sync para buscar contas BANK do Pluggy.
           </p>
@@ -147,6 +181,7 @@ export function CashFlow({ onBack }: CashFlowProps) {
               day={day}
               today={today}
               runningBalance={dayBalances.get(day.date) ?? null}
+              bankAccountNames={hasMultipleBanks ? bankAccountNames : null}
               onDeleteManual={(id) => deleteMut.mutate(id)}
               onEditDescription={(txId, desc) =>
                 descMut.mutate({ id: txId, desc })
@@ -202,12 +237,14 @@ function DaySection({
   day,
   today,
   runningBalance,
+  bankAccountNames,
   onDeleteManual,
   onEditDescription,
 }: {
   day: CashFlowDay;
   today: string;
   runningBalance: number | null;
+  bankAccountNames: Map<string, string> | null;
   onDeleteManual: (id: number) => void;
   onEditDescription: (txId: string, desc: string) => void;
 }) {
@@ -246,6 +283,11 @@ function DaySection({
             key={entry.id}
             entry={entry}
             isPast={day.isPast}
+            bankAccountName={
+              bankAccountNames && entry.bankAccountId
+                ? bankAccountNames.get(entry.bankAccountId) ?? null
+                : null
+            }
             onDeleteManual={onDeleteManual}
             onEditDescription={onEditDescription}
           />
@@ -260,11 +302,13 @@ function DaySection({
 function EntryRow({
   entry,
   isPast,
+  bankAccountName,
   onDeleteManual,
   onEditDescription,
 }: {
   entry: CashFlowEntry;
   isPast: boolean;
+  bankAccountName: string | null;
   onDeleteManual: (id: number) => void;
   onEditDescription: (txId: string, desc: string) => void;
 }) {
@@ -274,7 +318,7 @@ function EntryRow({
   const isIncome = entry.amount > 0;
   const typeLabel =
     entry.type === 'bank_transaction'
-      ? null
+      ? bankAccountName // show bank name when multiple banks
       : entry.type === 'manual_entry'
         ? 'mensal'
         : 'fatura';

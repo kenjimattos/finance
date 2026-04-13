@@ -15,15 +15,9 @@ interface AccountRow {
   subtype: string | null;
 }
 
-interface AccountSettingsRow {
-  account_id: string;
-  display_name: string | null;
-  closing_day: number;
-  due_day: number;
-}
-
 interface BankTxRow {
   id: string;
+  account_id: string;
   date: string;
   description: string | null;
   amount: number;
@@ -43,6 +37,7 @@ interface CashFlowEntry {
   amount: number;
   type: 'bank_transaction' | 'manual_entry' | 'credit_card_bill';
   accountId?: string;
+  bankAccountId?: string;
 }
 
 interface CashFlowDay {
@@ -68,6 +63,10 @@ function round2(n: number): number {
  *
  * Past days (up to yesterday): actual BANK transactions from Pluggy.
  * Future days (today onward): manual entries + credit card bill outflows.
+ *
+ * Opening balance = Pluggy's current balance minus all transactions in
+ * the current month up to today. This gives us the end-of-previous-month
+ * position, which is the correct starting point for the timeline.
  */
 cashflowRouter.get('/cashflow', (_req, res, next) => {
   try {
@@ -82,29 +81,48 @@ cashflowRouter.get('/cashflow', (_req, res, next) => {
     const lastDay = `${monthStr}-${pad(monthDays)}`;
     const today = `${monthStr}-${pad(todayDay)}`;
 
-    // ── Find BANK account ──
-    const bankAccount = db
+    // ── Find ALL BANK accounts ──
+    const bankAccounts = db
       .prepare(
-        "SELECT id, item_id, name, balance, subtype FROM accounts WHERE type = 'BANK' LIMIT 1",
+        "SELECT id, item_id, name, balance, subtype FROM accounts WHERE type = 'BANK'",
       )
-      .get() as AccountRow | undefined;
+      .all() as AccountRow[];
 
-    // ── Past days: actual bank transactions ──
+    const bankAccountIds = bankAccounts.map((a) => a.id);
+
+    // ── Compute opening balance per bank account ──
+    // Opening balance = current Pluggy balance − sum of all transactions
+    // from the 1st of the month through today. This reconstructs the
+    // end-of-previous-month position.
+    const openingBalances = new Map<string, number>();
+    for (const ba of bankAccounts) {
+      const row = db
+        .prepare(
+          `SELECT COALESCE(SUM(amount), 0) AS total
+           FROM transactions
+           WHERE account_id = ? AND date >= ? AND date <= ?`,
+        )
+        .get(ba.id, firstDay, today) as { total: number };
+      openingBalances.set(ba.id, round2((ba.balance ?? 0) - row.total));
+    }
+
+    // ── Past days: actual bank transactions (all bank accounts) ──
     let pastTxRows: BankTxRow[] = [];
-    if (bankAccount && todayDay > 1) {
+    if (bankAccountIds.length > 0 && todayDay > 1) {
       const yesterday = `${monthStr}-${pad(todayDay - 1)}`;
+      const placeholders = bankAccountIds.map(() => '?').join(',');
       pastTxRows = db
         .prepare(
-          `SELECT t.id, t.date,
+          `SELECT t.id, t.account_id,  t.date,
                   COALESCE(o.description, t.description) AS description,
                   t.amount, t.type
            FROM transactions t
            LEFT JOIN transaction_description_overrides o ON o.transaction_id = t.id
-           WHERE t.account_id = ?
+           WHERE t.account_id IN (${placeholders})
              AND t.date >= ? AND t.date <= ?
            ORDER BY t.date ASC, t.id ASC`,
         )
-        .all(bankAccount.id, firstDay, yesterday) as BankTxRow[];
+        .all(...bankAccountIds, firstDay, yesterday) as BankTxRow[];
     }
 
     // ── Future days: manual entries ──
@@ -190,7 +208,7 @@ cashflowRouter.get('/cashflow', (_req, res, next) => {
       const entries: CashFlowEntry[] = [];
 
       if (isPast) {
-        // Actual bank transactions for this day.
+        // Actual bank transactions for this day (all bank accounts).
         for (const tx of pastTxRows) {
           if (tx.date === date) {
             entries.push({
@@ -198,6 +216,7 @@ cashflowRouter.get('/cashflow', (_req, res, next) => {
               description: tx.description ?? '',
               amount: round2(tx.amount),
               type: 'bank_transaction',
+              bankAccountId: tx.account_id,
             });
           }
         }
@@ -231,9 +250,12 @@ cashflowRouter.get('/cashflow', (_req, res, next) => {
 
     res.json({
       month: monthStr,
-      bankAccount: bankAccount
-        ? { id: bankAccount.id, name: bankAccount.name, balance: bankAccount.balance }
-        : null,
+      bankAccounts: bankAccounts.map((ba) => ({
+        id: ba.id,
+        name: ba.name,
+        balance: ba.balance,
+        openingBalance: openingBalances.get(ba.id) ?? null,
+      })),
       days,
     });
   } catch (err) {
