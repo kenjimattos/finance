@@ -356,9 +356,7 @@ function DayGroup({
                   ? (bankNames?.get(entry.bankAccountId) ?? '')
                   : entry.type === 'credit_card_bill'
                     ? 'fatura'
-                    : entry.type === 'manual_entry'
-                      ? 'mensal'
-                      : ''}
+                    : ''}
               </span>
             </div>
 
@@ -630,10 +628,7 @@ function NewEntryRow({
         style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
         onClick={onActivate}
       >
-        <div className="flex items-center gap-1.5">
-          <span className="inline-block h-[5px] w-[5px] rounded-full bg-[color:var(--color-ink-faint)]" />
-          <span className="font-body text-[10px] text-[color:var(--color-ink-faint)]">mensal</span>
-        </div>
+        <span />
         <span className="font-mono text-[11px] text-[color:var(--color-ink-faint)]">dia</span>
         <span className="font-body text-[13px] text-[color:var(--color-ink-faint)]">+ nova entrada</span>
         <span className="text-right font-mono text-[13px] text-[color:var(--color-ink-faint)]">valor</span>
@@ -648,11 +643,8 @@ function NewEntryRow({
       className="rule-top grid items-center gap-x-6 py-[7px]"
       style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
     >
-      {/* Source */}
-      <div className="flex items-center gap-1.5">
-        <span className="inline-block h-[5px] w-[5px] rounded-full bg-[color:var(--color-ink-faint)]" />
-        <span className="font-body text-[10px] text-[color:var(--color-ink-faint)]">mensal</span>
-      </div>
+      {/* Source — empty for manual */}
+      <span />
 
       {/* Day */}
       <input
