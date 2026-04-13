@@ -25,6 +25,15 @@ function todayYmd(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** Stable, distinct colors for bank accounts. */
+const BANK_COLORS = [
+  '#2563eb', // blue
+  '#7c3aed', // violet
+  '#0891b2', // cyan
+  '#059669', // emerald
+  '#d97706', // amber
+];
+
 // ── Main Component ──
 
 interface CashFlowProps {
@@ -47,8 +56,18 @@ export function CashFlow({ onBack }: CashFlowProps) {
     ? data.month.split('-').map(Number)
     : [new Date().getFullYear(), new Date().getMonth() + 1];
 
-  // ── Running balance ──
-  // Sum opening balances across all bank accounts as the starting point.
+  // ── Bank account colors ──
+  const bankColorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (data?.bankAccounts) {
+      data.bankAccounts.forEach((ba, i) => {
+        map.set(ba.id, BANK_COLORS[i % BANK_COLORS.length]);
+      });
+    }
+    return map;
+  }, [data]);
+
+  // ���─ Running balance ──
   const { dayBalances, endBalance, totalOpeningBalance } = useMemo(() => {
     if (!data?.bankAccounts?.length) {
       return { dayBalances: new Map<string, number>(), endBalance: null, totalOpeningBalance: null };
@@ -143,7 +162,11 @@ export function CashFlow({ onBack }: CashFlowProps) {
         {data?.bankAccounts && data.bankAccounts.length > 0 && (
           <div className="mt-4 space-y-1">
             {data.bankAccounts.map((ba) => (
-              <div key={ba.id} className="flex items-baseline gap-2 font-body text-sm text-[color:var(--color-ink-muted)]">
+              <div key={ba.id} className="flex items-center gap-2 font-body text-sm text-[color:var(--color-ink-muted)]">
+                <span
+                  className="inline-block h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: bankColorMap.get(ba.id) }}
+                />
                 <span className="font-mono text-base text-[color:var(--color-ink)]">
                   {formatBRL(ba.openingBalance ?? 0)}
                 </span>
@@ -153,7 +176,7 @@ export function CashFlow({ onBack }: CashFlowProps) {
               </div>
             ))}
             {data.bankAccounts.length > 1 && totalOpeningBalance !== null && (
-              <div className="flex items-baseline gap-2 pt-1 font-body text-sm text-[color:var(--color-ink-muted)]">
+              <div className="flex items-baseline gap-2 pl-4 pt-1 font-body text-sm text-[color:var(--color-ink-muted)]">
                 <span className="font-mono text-base font-semibold text-[color:var(--color-ink)]">
                   {formatBRL(totalOpeningBalance)}
                 </span>
@@ -170,6 +193,24 @@ export function CashFlow({ onBack }: CashFlowProps) {
         )}
       </div>
 
+      {/* Column headers */}
+      {!loading && data && data.days.length > 0 && (
+        <div className="rule-bottom flex items-baseline pb-2">
+          <span className="w-[80px] shrink-0 font-body text-[10px] uppercase tracking-wider text-[color:var(--color-ink-faint)]">
+            dia
+          </span>
+          <span className="flex-1 font-body text-[10px] uppercase tracking-wider text-[color:var(--color-positive)]">
+            entradas
+          </span>
+          <span className="flex-1 font-body text-[10px] uppercase tracking-wider text-[color:var(--color-ink-muted)]">
+            saídas
+          </span>
+          <span className="w-[100px] shrink-0 text-right font-body text-[10px] uppercase tracking-wider text-[color:var(--color-ink-faint)]">
+            saldo
+          </span>
+        </div>
+      )}
+
       {/* Day-by-day timeline */}
       {loading ? (
         <TimelineSkeleton />
@@ -182,6 +223,7 @@ export function CashFlow({ onBack }: CashFlowProps) {
               today={today}
               runningBalance={dayBalances.get(day.date) ?? null}
               bankAccountNames={hasMultipleBanks ? bankAccountNames : null}
+              bankColorMap={bankColorMap}
               onDeleteManual={(id) => deleteMut.mutate(id)}
               onEditDescription={(txId, desc) =>
                 descMut.mutate({ id: txId, desc })
@@ -238,6 +280,7 @@ function DaySection({
   today,
   runningBalance,
   bankAccountNames,
+  bankColorMap,
   onDeleteManual,
   onEditDescription,
 }: {
@@ -245,80 +288,139 @@ function DaySection({
   today: string;
   runningBalance: number | null;
   bankAccountNames: Map<string, string> | null;
+  bankColorMap: Map<string, string>;
   onDeleteManual: (id: number) => void;
   onEditDescription: (txId: string, desc: string) => void;
 }) {
   const isToday = day.date === today;
 
+  // Separate entries into income and expense columns.
+  const income = day.entries.filter((e) => e.amount > 0);
+  const expense = day.entries.filter((e) => e.amount <= 0);
+  const maxRows = Math.max(income.length, expense.length);
+
   return (
     <div
-      className={`rule-top py-4 ${isToday ? 'bg-[color:var(--color-paper-tint)]' : ''}`}
+      className={`rule-top py-3 ${
+        day.isPast && !isToday
+          ? 'bg-[color:var(--color-paper-tint)]'
+          : isToday
+            ? 'bg-[color:var(--color-paper-shadow)]/20'
+            : ''
+      }`}
     >
-      <div className="flex items-baseline justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-xs text-[color:var(--color-ink-muted)]">
-            {formatDateShort(day.date)}
-          </span>
-          {isToday && (
-            <span className="font-body text-[10px] uppercase tracking-wider text-[color:var(--color-accent)]">
-              hoje
-            </span>
-          )}
-          {day.isPast && !isToday && (
-            <span className="font-body text-[10px] uppercase tracking-wider text-[color:var(--color-ink-faint)]">
-              realizado
-            </span>
-          )}
-        </div>
-        {runningBalance !== null && (
-          <span className="font-mono text-xs text-[color:var(--color-ink-faint)]">
-            {formatBRL(runningBalance)}
-          </span>
-        )}
-      </div>
+      {/* One row per max(income, expense) entry */}
+      {Array.from({ length: maxRows }, (_, i) => {
+        const inc = income[i] ?? null;
+        const exp = expense[i] ?? null;
+        return (
+          <div key={i} className="flex items-center py-0.5">
+            {/* Date column — only show on first row */}
+            <div className="w-[80px] shrink-0">
+              {i === 0 && (
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-xs text-[color:var(--color-ink-muted)]">
+                    {formatDateShort(day.date)}
+                  </span>
+                  {isToday && (
+                    <span className="font-body text-[9px] uppercase tracking-wider text-[color:var(--color-accent)]">
+                      hoje
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
 
-      <div className="mt-2 space-y-1">
-        {day.entries.map((entry) => (
-          <EntryRow
-            key={entry.id}
-            entry={entry}
-            isPast={day.isPast}
-            bankAccountName={
-              bankAccountNames && entry.bankAccountId
-                ? bankAccountNames.get(entry.bankAccountId) ?? null
-                : null
-            }
-            onDeleteManual={onDeleteManual}
-            onEditDescription={onEditDescription}
-          />
-        ))}
-      </div>
+            {/* Income column */}
+            <div className="flex-1 pr-2">
+              {inc && (
+                <EntryCell
+                  entry={inc}
+                  isPast={day.isPast}
+                  bankAccountName={
+                    bankAccountNames && inc.bankAccountId
+                      ? bankAccountNames.get(inc.bankAccountId) ?? null
+                      : null
+                  }
+                  bulletColor={
+                    inc.bankAccountId
+                      ? bankColorMap.get(inc.bankAccountId) ?? 'var(--color-positive)'
+                      : inc.type === 'manual_entry'
+                        ? 'var(--color-ink-faint)'
+                        : 'var(--color-positive)'
+                  }
+                  amountColor="var(--color-positive)"
+                  onDeleteManual={onDeleteManual}
+                  onEditDescription={onEditDescription}
+                />
+              )}
+            </div>
+
+            {/* Expense column */}
+            <div className="flex-1 pr-2">
+              {exp && (
+                <EntryCell
+                  entry={exp}
+                  isPast={day.isPast}
+                  bankAccountName={
+                    bankAccountNames && exp.bankAccountId
+                      ? bankAccountNames.get(exp.bankAccountId) ?? null
+                      : null
+                  }
+                  bulletColor={
+                    exp.bankAccountId
+                      ? bankColorMap.get(exp.bankAccountId) ?? 'var(--color-ink-muted)'
+                      : exp.type === 'credit_card_bill'
+                        ? 'var(--color-accent)'
+                        : 'var(--color-ink-faint)'
+                  }
+                  amountColor="var(--color-ink)"
+                  onDeleteManual={onDeleteManual}
+                  onEditDescription={onEditDescription}
+                />
+              )}
+            </div>
+
+            {/* Running balance — only show on first row */}
+            <div className="w-[100px] shrink-0 text-right">
+              {i === 0 && runningBalance !== null && (
+                <span className="font-mono text-xs text-[color:var(--color-ink-faint)]">
+                  {formatBRL(runningBalance)}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-// ── Entry Row ──
+// ── Entry Cell (single entry in a column) ──
 
-function EntryRow({
+function EntryCell({
   entry,
   isPast,
   bankAccountName,
+  bulletColor,
+  amountColor,
   onDeleteManual,
   onEditDescription,
 }: {
   entry: CashFlowEntry;
   isPast: boolean;
   bankAccountName: string | null;
+  bulletColor: string;
+  amountColor: string;
   onDeleteManual: (id: number) => void;
   onEditDescription: (txId: string, desc: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const isIncome = entry.amount > 0;
   const typeLabel =
     entry.type === 'bank_transaction'
-      ? bankAccountName // show bank name when multiple banks
+      ? bankAccountName
       : entry.type === 'manual_entry'
         ? 'mensal'
         : 'fatura';
@@ -331,35 +433,27 @@ function EntryRow({
     setEditing(false);
   };
 
-  // Extract numeric id from "manual-123" for delete.
   const manualId =
     entry.type === 'manual_entry'
       ? Number(entry.id.replace('manual-', ''))
       : null;
 
   return (
-    <div className="group flex items-center gap-3 py-0.5">
-      {/* Type indicator */}
+    <div className="group flex items-center gap-2">
+      {/* Bullet with bank color */}
       <span
         className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-        style={{
-          backgroundColor:
-            entry.type === 'credit_card_bill'
-              ? 'var(--color-accent)'
-              : entry.type === 'manual_entry'
-                ? 'var(--color-ink-faint)'
-                : 'var(--color-ink-muted)',
-        }}
+        style={{ backgroundColor: bulletColor }}
       />
 
       {/* Description */}
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
         {editing ? (
           <input
             ref={inputRef}
             type="text"
             defaultValue={entry.description}
-            className="min-w-0 flex-1 border-b border-[color:var(--color-ink-faint)] bg-transparent font-body text-sm text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
+            className="min-w-0 flex-1 border-b border-[color:var(--color-ink-faint)] bg-transparent font-body text-xs text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
             onBlur={handleDescSubmit}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleDescSubmit();
@@ -369,7 +463,7 @@ function EntryRow({
           />
         ) : (
           <span
-            className={`truncate font-body text-sm ${
+            className={`truncate font-body text-xs ${
               isPast && entry.type === 'bank_transaction'
                 ? 'cursor-pointer text-[color:var(--color-ink)] hover:text-[color:var(--color-accent)]'
                 : 'text-[color:var(--color-ink)]'
@@ -388,7 +482,7 @@ function EntryRow({
         )}
 
         {typeLabel && (
-          <span className="shrink-0 font-body text-[10px] italic text-[color:var(--color-ink-faint)]">
+          <span className="shrink-0 font-body text-[9px] italic text-[color:var(--color-ink-faint)]">
             {typeLabel}
           </span>
         )}
@@ -396,13 +490,10 @@ function EntryRow({
 
       {/* Amount */}
       <span
-        className="shrink-0 font-mono text-sm tabular-nums"
-        style={{
-          color: isIncome ? 'var(--color-positive)' : 'var(--color-ink)',
-        }}
+        className="shrink-0 font-mono text-xs tabular-nums"
+        style={{ color: amountColor }}
       >
-        {isIncome ? '+' : ''}
-        {formatBRL(entry.amount)}
+        {formatBRL(Math.abs(entry.amount))}
       </span>
 
       {/* Delete button for manual entries */}
