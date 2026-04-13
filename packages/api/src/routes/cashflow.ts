@@ -66,6 +66,8 @@ function round2(n: number): number {
  */
 const BANK_TX_EXCLUDE_DESCRIPTIONS = [
   'Retirada de saldo por lastro',
+  'Recarga em carteira via Cartão de Crédito',
+  'COM CARTAO',
 ];
 
 const BANK_TX_EXCLUDE_SQL = BANK_TX_EXCLUDE_DESCRIPTIONS
