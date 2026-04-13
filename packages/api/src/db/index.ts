@@ -217,6 +217,19 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
   );
+
+  -- Balance snapshots: record the Pluggy-reported balance at each sync so
+  -- historical opening-balance calculations remain stable even after Pluggy
+  -- ages out old transactions. One row per (account, date) — the most recent
+  -- snapshot before a target month is the anchor for that month's opening.
+  CREATE TABLE IF NOT EXISTS balance_snapshots (
+    account_id TEXT NOT NULL,
+    date TEXT NOT NULL,              -- yyyy-mm-dd of the sync
+    balance REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (account_id, date),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+  );
 `);
 
 // -----------------------------------------------------------------------------

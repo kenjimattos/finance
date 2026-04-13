@@ -326,6 +326,23 @@ async function syncItem(itemId: string) {
     reassignTxItemId.run(itemId, account.id, itemId);
   }
 
+  // Snapshot BANK account balances so historical cashflow calculations
+  // remain accurate even after Pluggy ages out old transactions.
+  const today = new Date();
+  const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const snapshotBalance = db.prepare(`
+    INSERT INTO balance_snapshots (account_id, date, balance)
+    VALUES (?, ?, ?)
+    ON CONFLICT(account_id, date) DO UPDATE SET
+      balance = excluded.balance,
+      created_at = datetime('now')
+  `);
+  for (const account of bankAccounts) {
+    if (account.balance != null) {
+      snapshotBalance.run(account.id, todayYmd, account.balance);
+    }
+  }
+
   let txCount = 0;
   let billCount = 0;
 
