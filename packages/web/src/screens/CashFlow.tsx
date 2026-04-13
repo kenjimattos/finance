@@ -354,7 +354,7 @@ function DayGroup({
             }}
           >
             {/* Date */}
-            <div className="flex items-center gap-1">
+            <div className={`flex items-center gap-1 ${i > 0 && entry.type === 'manual_entry' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>
               {i === 0 || entry.type === 'manual_entry' ? (
                 <>
                   <DayCell
