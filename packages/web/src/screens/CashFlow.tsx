@@ -181,8 +181,8 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
         <>
           {/* Column headers */}
           <div
-            className="rule-bottom grid items-baseline gap-x-4 pb-2"
-            style={{ gridTemplateColumns: '64px 80px 1fr 90px 90px 100px' }}
+            className="rule-bottom grid items-baseline gap-x-6 pb-2"
+            style={{ gridTemplateColumns: '64px 80px 1fr 110px 110px 120px' }}
           >
             <span />
             <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
@@ -220,8 +220,8 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
           {/* End-of-month projected balance */}
           {endBalance !== null && (
             <div
-              className="grid items-baseline gap-x-4 border-t-2 border-[color:var(--color-ink)] py-3"
-              style={{ gridTemplateColumns: '64px 80px 1fr 90px 90px 100px' }}
+              className="grid items-baseline gap-x-6 border-t-2 border-[color:var(--color-ink)] py-3"
+              style={{ gridTemplateColumns: '64px 80px 1fr 110px 110px 120px' }}
             >
               <span />
               <span />
@@ -310,9 +310,9 @@ function DayGroup({
         return (
           <div
             key={entry.id}
-            className="group grid items-center gap-x-4 py-[7px]"
+            className="group grid items-center gap-x-6 py-[7px]"
             style={{
-              gridTemplateColumns: '64px 80px 1fr 90px 90px 100px',
+              gridTemplateColumns: '64px 80px 1fr 110px 110px 120px',
               opacity: isFuture ? 0.55 : 1,
             }}
           >
@@ -554,8 +554,8 @@ function LedgerSkeleton() {
       {Array.from({ length: 6 }, (_, i) => (
         <div
           key={i}
-          className="rule-top grid items-center gap-x-4 py-3"
-          style={{ gridTemplateColumns: '64px 80px 1fr 90px 90px 100px' }}
+          className="rule-top grid items-center gap-x-6 py-3"
+          style={{ gridTemplateColumns: '64px 80px 1fr 110px 110px 120px' }}
         >
           <div className="h-3 w-10 rounded-sm bg-[color:var(--color-paper-tint)]" />
           <div className="h-3 rounded-sm bg-[color:var(--color-paper-tint)]" style={{ width: `${40 + i * 8}%` }} />
