@@ -1,16 +1,13 @@
 import { useState, useRef, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { api } from '../lib/api';
-import type { CashFlowEntry, CashFlowDay } from '../lib/api';
+import type { CashFlowEntry, CashFlowDay, CashFlowResponse } from '../lib/api';
 import { formatBRL, formatDateShort } from '../lib/format';
 
 // ── Helpers ──
 
-const MONTH_FMT = new Intl.DateTimeFormat('pt-BR', {
-  month: 'long',
-  year: 'numeric',
-});
+const MONTH_FMT = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
 
 function monthLabel(year: number, month: number): string {
   return MONTH_FMT.format(new Date(year, month - 1, 1));
@@ -25,103 +22,147 @@ function todayYmd(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/**
- * Stable muted colors for bank account identification.
- * Chosen to sit well on warm paper without competing with the accent.
- */
+function monthStr(y: number, m: number): string {
+  return `${y}-${pad(m)}`;
+}
+
+function addMonth(y: number, m: number, delta: number): { year: number; month: number } {
+  const zb = m - 1 + delta;
+  return { year: y + Math.floor(zb / 12), month: ((zb % 12) + 12) % 12 + 1 };
+}
+
+/** Generate array of {year, month} from start to end (inclusive). */
+function monthRange(
+  startY: number, startM: number,
+  endY: number, endM: number,
+): Array<{ year: number; month: number }> {
+  const result: Array<{ year: number; month: number }> = [];
+  let y = startY, m = startM;
+  while (y < endY || (y === endY && m <= endM)) {
+    result.push({ year: y, month: m });
+    const next = addMonth(y, m, 1);
+    y = next.year;
+    m = next.month;
+  }
+  return result;
+}
+
 const BANK_COLORS = [
-  '#5b7fa6', // slate blue
-  '#8b6fa6', // muted violet
-  '#5b9e8f', // sage
-  '#b08d57', // aged gold
-  '#a0756a', // clay
+  '#5b7fa6', '#8b6fa6', '#5b9e8f', '#b08d57', '#a0756a',
 ];
+
+const GRID_COLS = '80px 64px 1fr 110px 110px 120px';
 
 // ── Main Component ──
 
-export function CashFlow({ onBack }: { onBack: () => void }) {
+export function CashFlow({
+  onSelectBill,
+}: {
+  onSelectBill: (year: number, month: number) => void;
+}) {
   const qc = useQueryClient();
+  const today = todayYmd();
 
-  const cashflowQ = useQuery({
-    queryKey: ['cashflow'],
-    queryFn: () => api.getCashFlow(),
+  // Month range: April 2026 through current month + 2.
+  const now = new Date();
+  const months = useMemo(() => {
+    const end = addMonth(now.getFullYear(), now.getMonth() + 1, 2);
+    return monthRange(2026, 4, end.year, end.month);
+  }, []);
+
+  // Parallel queries — one per month.
+  const queries = useQueries({
+    queries: months.map((m) => ({
+      queryKey: ['cashflow', monthStr(m.year, m.month)],
+      queryFn: () => api.getCashFlow(monthStr(m.year, m.month)),
+    })),
   });
 
-  const today = todayYmd();
-  const data = cashflowQ.data;
-
-  const [year, month] = data
-    ? data.month.split('-').map(Number)
-    : [new Date().getFullYear(), new Date().getMonth() + 1];
-
-  // ── Bank colors ──
+  // Bank colors (stable across months — use first loaded response).
   const bankColorMap = useMemo(() => {
     const map = new Map<string, string>();
-    data?.bankAccounts?.forEach((ba, i) => {
-      map.set(ba.id, BANK_COLORS[i % BANK_COLORS.length]);
-    });
+    for (const q of queries) {
+      if (q.data?.bankAccounts) {
+        q.data.bankAccounts.forEach((ba, i) => {
+          if (!map.has(ba.id)) map.set(ba.id, BANK_COLORS[i % BANK_COLORS.length]);
+        });
+      }
+    }
     return map;
-  }, [data]);
-
-  // ── Running balance ──
-  const { dayBalances, endBalance, totalOpeningBalance } = useMemo(() => {
-    if (!data?.bankAccounts?.length) {
-      return { dayBalances: new Map<string, number>(), endBalance: null, totalOpeningBalance: null };
-    }
-    const start = data.bankAccounts.reduce((s, ba) => s + (ba.openingBalance ?? 0), 0);
-    let running = start;
-    const balances = new Map<string, number>();
-    for (const day of data.days) {
-      for (const e of day.entries) running += e.amount;
-      balances.set(day.date, Math.round(running * 100) / 100);
-    }
-    return {
-      dayBalances: balances,
-      endBalance: Math.round(running * 100) / 100,
-      totalOpeningBalance: Math.round(start * 100) / 100,
-    };
-  }, [data]);
+  }, [queries]);
 
   const bankNames = useMemo(() => {
     const map = new Map<string, string>();
-    data?.bankAccounts?.forEach((ba) => map.set(ba.id, ba.name ?? 'Conta'));
+    for (const q of queries) {
+      q.data?.bankAccounts?.forEach((ba) => {
+        if (!map.has(ba.id)) map.set(ba.id, ba.name ?? 'Conta');
+      });
+    }
     return map;
-  }, [data]);
+  }, [queries]);
+
+  // ── Running balance across all months ──
+  // Compute per-day balances across all months sequentially.
+  const { dayBalances, monthEndBalances } = useMemo(() => {
+    const balances = new Map<string, number>();
+    const monthEnds = new Map<string, number>();
+
+    // Find opening balance from the first month that has data.
+    let running: number | null = null;
+    for (const q of queries) {
+      if (q.data?.bankAccounts?.length) {
+        running = q.data.bankAccounts.reduce((s, ba) => s + (ba.openingBalance ?? 0), 0);
+        break;
+      }
+    }
+    if (running === null) return { dayBalances: balances, monthEndBalances: monthEnds };
+
+    for (let mi = 0; mi < queries.length; mi++) {
+      const data = queries[mi].data;
+      if (!data) continue;
+      for (const day of data.days) {
+        for (const e of day.entries) running += e.amount;
+        balances.set(day.date, Math.round(running * 100) / 100);
+      }
+      monthEnds.set(data.month, Math.round(running * 100) / 100);
+    }
+
+    return { dayBalances: balances, monthEndBalances: monthEnds };
+  }, [queries]);
 
   // ── Mutations ──
   const [addingEntry, setAddingEntry] = useState(false);
 
+  const invalidateAll = () => qc.invalidateQueries({ queryKey: ['cashflow'] });
+
   const createMut = useMutation({
     mutationFn: api.createManualEntry,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); setAddingEntry(false); },
+    onSuccess: () => { invalidateAll(); setAddingEntry(false); },
   });
-  const deleteMut = useMutation({
-    mutationFn: api.deleteManualEntry,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
-  });
+  const deleteMut = useMutation({ mutationFn: api.deleteManualEntry, onSuccess: invalidateAll });
   const descTxMut = useMutation({
     mutationFn: ({ id, desc }: { id: string; desc: string }) =>
       api.updateTransactionDescription(id, desc),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
+    onSuccess: invalidateAll,
   });
   const descManualMut = useMutation({
     mutationFn: ({ id, desc }: { id: number; desc: string }) =>
       api.updateManualEntry(id, { description: desc }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
+    onSuccess: invalidateAll,
   });
   const amountManualMut = useMutation({
     mutationFn: ({ id, amount }: { id: number; amount: number }) =>
       api.updateManualEntry(id, { amount }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
+    onSuccess: invalidateAll,
   });
   const dayManualMut = useMutation({
     mutationFn: ({ id, dayOfMonth }: { id: number; dayOfMonth: number }) =>
       api.updateManualEntry(id, { dayOfMonth }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
+    onSuccess: invalidateAll,
   });
 
-  const loading = cashflowQ.isLoading;
-  const multiBanks = (data?.bankAccounts?.length ?? 0) > 1;
+  const anyLoading = queries.some((q) => q.isLoading);
+  const firstData = queries.find((q) => q.data)?.data;
 
   return (
     <motion.section
@@ -130,163 +171,187 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
       transition={{ duration: 0.4, ease: [0.2, 0.65, 0.3, 0.9] }}
       className="pt-2"
     >
-      {/* Navigation */}
-      <button
-        type="button"
-        onClick={onBack}
-        className="eyebrow mb-6 inline-flex items-center gap-1 transition-colors hover:text-[color:var(--color-accent)]"
-      >
-        ← voltar
-      </button>
-
       {/* Masthead */}
       <div className="mb-12">
         <div className="eyebrow uppercase">fluxo de caixa</div>
 
         <h1 className="mt-3 font-display text-[72px] leading-[0.9] tracking-[-0.03em] text-[color:var(--color-ink)] md:text-[96px]">
-          {loading ? (
+          {anyLoading && !firstData ? (
             <span className="inline-block h-[72px] w-2/3 animate-pulse rounded-sm bg-[color:var(--color-paper-tint)] md:h-[96px]" />
           ) : (
-            monthLabel(year, month)
+            `${monthLabel(months[0].year, months[0].month).split(' ')[0]} — ${monthLabel(months[months.length - 1].year, months[months.length - 1].month)}`
           )}
         </h1>
 
-        {/* Bank positions */}
-        {data?.bankAccounts && data.bankAccounts.length > 0 && (
-          <div className="mt-6 space-y-2">
-            {data.bankAccounts.map((ba) => (
-              <div key={ba.id} className="flex items-baseline gap-3">
+        {/* Bank accounts legend */}
+        {firstData?.bankAccounts && firstData.bankAccounts.length > 0 && (
+          <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2">
+            {firstData.bankAccounts.map((ba) => (
+              <div key={ba.id} className="flex items-center gap-2">
                 <span
-                  className="mt-[3px] inline-block h-[6px] w-[6px] shrink-0 rounded-full"
+                  className="inline-block h-[6px] w-[6px] shrink-0 rounded-full"
                   style={{ backgroundColor: bankColorMap.get(ba.id) }}
                 />
                 <span className="font-body text-[12px] uppercase tracking-[0.1em] text-[color:var(--color-ink-muted)]">
                   {ba.name ?? 'Conta corrente'}
                 </span>
-                <span className="font-mono text-sm text-[color:var(--color-ink)]">
-                  {formatBRL(ba.openingBalance ?? 0)}
-                </span>
               </div>
             ))}
-            {multiBanks && totalOpeningBalance !== null && (
-              <div className="flex items-baseline gap-3 pt-1">
-                <span className="inline-block h-[6px] w-[6px] shrink-0" />
-                <span className="font-body text-[12px] uppercase tracking-[0.1em] text-[color:var(--color-ink-muted)]">
-                  Consolidado
-                </span>
-                <span className="font-mono text-sm font-medium text-[color:var(--color-ink)]">
-                  {formatBRL(totalOpeningBalance)}
-                </span>
-              </div>
-            )}
           </div>
-        )}
-
-        {data?.bankAccounts?.length === 0 && !loading && (
-          <p className="mt-6 font-body text-sm text-[color:var(--color-ink-faint)]">
-            Nenhuma conta corrente sincronizada.
-          </p>
         )}
       </div>
 
-      {/* ── Ledger ── */}
+      {/* ── Month sections ── */}
+      {months.map((m, mi) => {
+        const q = queries[mi];
+        const data = q?.data;
+        const ms = monthStr(m.year, m.month);
+        const endBal = monthEndBalances.get(ms) ?? null;
+
+        return (
+          <MonthSection
+            key={ms}
+            year={m.year}
+            month={m.month}
+            data={data ?? null}
+            loading={q?.isLoading ?? false}
+            today={today}
+            dayBalances={dayBalances}
+            endBalance={endBal}
+            bankColorMap={bankColorMap}
+            bankNames={bankNames}
+            onSelectBill={onSelectBill}
+            onDeleteManual={(id) => deleteMut.mutate(id)}
+            onEditDesc={(entry, desc) => {
+              if (entry.type === 'manual_entry') {
+                descManualMut.mutate({ id: Number(entry.id.replace('manual-', '')), desc });
+              } else if (entry.type === 'bank_transaction') {
+                descTxMut.mutate({ id: entry.id, desc });
+              }
+            }}
+            onEditAmount={(entry, amount) => {
+              if (entry.type === 'manual_entry') {
+                amountManualMut.mutate({ id: Number(entry.id.replace('manual-', '')), amount });
+              }
+            }}
+            onEditDay={(entry, dayOfMonth) => {
+              if (entry.type === 'manual_entry') {
+                dayManualMut.mutate({ id: Number(entry.id.replace('manual-', '')), dayOfMonth });
+              }
+            }}
+          />
+        );
+      })}
+
+      {/* New entry row (global — applies to all months via day_of_month) */}
+      <NewEntryRow
+        active={addingEntry}
+        onActivate={() => setAddingEntry(true)}
+        onSubmit={(e) => createMut.mutate(e)}
+        onCancel={() => setAddingEntry(false)}
+        submitting={createMut.isPending}
+      />
+    </motion.section>
+  );
+}
+
+// ── Month section ──
+
+function MonthSection({
+  year,
+  month,
+  data,
+  loading,
+  today,
+  dayBalances,
+  endBalance,
+  bankColorMap,
+  bankNames,
+  onSelectBill,
+  onDeleteManual,
+  onEditDesc,
+  onEditAmount,
+  onEditDay,
+}: {
+  year: number;
+  month: number;
+  data: CashFlowResponse | null;
+  loading: boolean;
+  today: string;
+  dayBalances: Map<string, number>;
+  endBalance: number | null;
+  bankColorMap: Map<string, string>;
+  bankNames: Map<string, string>;
+  onSelectBill: (year: number, month: number) => void;
+  onDeleteManual: (id: number) => void;
+  onEditDesc: (entry: CashFlowEntry, desc: string) => void;
+  onEditAmount: (entry: CashFlowEntry, amount: number) => void;
+  onEditDay: (entry: CashFlowEntry, day: number) => void;
+}) {
+  return (
+    <div className="mb-10">
+      {/* Month header */}
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="font-display text-[28px] leading-none tracking-[-0.02em] text-[color:var(--color-ink)]">
+          {monthLabel(year, month)}
+        </h2>
+        {endBalance !== null && (
+          <span className="font-mono text-sm text-[color:var(--color-ink-muted)]">
+            {formatBRL(endBalance)}
+          </span>
+        )}
+      </div>
+
+      {/* Column headers */}
+      <div
+        className="rule-bottom grid items-baseline gap-x-6 pb-2"
+        style={{ gridTemplateColumns: GRID_COLS }}
+      >
+        <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+          origem
+        </span>
+        <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+          dia
+        </span>
+        <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+          descrição
+        </span>
+        <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+          débito
+        </span>
+        <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+          crédito
+        </span>
+        <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+          saldo
+        </span>
+      </div>
+
       {loading ? (
         <LedgerSkeleton />
       ) : data && data.days.length > 0 ? (
-        <>
-          {/* Column headers */}
-          <div
-            className="rule-bottom grid items-baseline gap-x-6 pb-2"
-            style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
-          >
-            <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
-              origem
-            </span>
-            <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
-              dia
-            </span>
-            <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
-              descrição
-            </span>
-            <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
-              débito
-            </span>
-            <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
-              crédito
-            </span>
-            <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
-              saldo
-            </span>
-          </div>
-
-          {/* Day groups */}
-          {data.days.map((day, di) => (
-            <DayGroup
-              key={day.date}
-              day={day}
-              today={today}
-              balance={dayBalances.get(day.date) ?? null}
-              bankColors={bankColorMap}
-              bankNames={bankNames}
-              onDeleteManual={(id) => deleteMut.mutate(id)}
-              onEditDesc={(entry, desc) => {
-                if (entry.type === 'manual_entry') {
-                  const numId = Number(entry.id.replace('manual-', ''));
-                  descManualMut.mutate({ id: numId, desc });
-                } else if (entry.type === 'bank_transaction') {
-                  descTxMut.mutate({ id: entry.id, desc });
-                }
-              }}
-              onEditAmount={(entry, amount) => {
-                if (entry.type === 'manual_entry') {
-                  const numId = Number(entry.id.replace('manual-', ''));
-                  amountManualMut.mutate({ id: numId, amount });
-                }
-              }}
-              onEditDay={(entry, dayOfMonth) => {
-                if (entry.type === 'manual_entry') {
-                  const numId = Number(entry.id.replace('manual-', ''));
-                  dayManualMut.mutate({ id: numId, dayOfMonth });
-                }
-              }}
-              staggerIndex={di}
-            />
-          ))}
-
-          {/* New entry row — appears on hover, click to activate */}
-          <NewEntryRow
-            active={addingEntry}
-            onActivate={() => setAddingEntry(true)}
-            onSubmit={(e) => createMut.mutate(e)}
-            onCancel={() => setAddingEntry(false)}
-            submitting={createMut.isPending}
+        data.days.map((day, di) => (
+          <DayGroup
+            key={day.date}
+            day={day}
+            today={today}
+            balance={dayBalances.get(day.date) ?? null}
+            bankColors={bankColorMap}
+            bankNames={bankNames}
+            onSelectBill={() => onSelectBill(year, month)}
+            onDeleteManual={onDeleteManual}
+            onEditDesc={onEditDesc}
+            onEditAmount={onEditAmount}
+            onEditDay={onEditDay}
+            staggerIndex={di}
           />
-
-          {/* End-of-month projected balance */}
-          {endBalance !== null && (
-            <div
-              className="grid items-baseline gap-x-6 border-t-2 border-[color:var(--color-ink)] py-3"
-              style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
-            >
-              <span />
-              <span />
-              <span className="font-body text-[12px] uppercase tracking-[0.1em] text-[color:var(--color-ink-muted)]">
-                Saldo projetado fim do mês
-              </span>
-              <span />
-              <span />
-              <span className="text-right font-mono text-sm font-medium text-[color:var(--color-ink)]">
-                {formatBRL(endBalance)}
-              </span>
-            </div>
-          )}
-        </>
+        ))
       ) : !loading && (
-        <p className="font-body text-sm text-[color:var(--color-ink-faint)]">
-          Nenhuma movimentação neste mês.
+        <p className="py-4 font-body text-sm text-[color:var(--color-ink-faint)]">
+          Nenhuma movimentação.
         </p>
       )}
-    </motion.section>
+    </div>
   );
 }
 
@@ -298,6 +363,7 @@ function DayGroup({
   balance,
   bankColors,
   bankNames,
+  onSelectBill,
   onDeleteManual,
   onEditDesc,
   onEditAmount,
@@ -309,6 +375,7 @@ function DayGroup({
   balance: number | null;
   bankColors: Map<string, string>;
   bankNames: Map<string, string>;
+  onSelectBill: () => void;
   onDeleteManual: (id: number) => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onEditAmount: (entry: CashFlowEntry, amount: number) => void;
@@ -316,7 +383,6 @@ function DayGroup({
   staggerIndex: number;
 }) {
   const isToday = day.date === today;
-  const isFuture = !day.isPast && !isToday;
 
   return (
     <motion.div
@@ -341,13 +407,15 @@ function DayGroup({
           <div
             key={entry.id}
             className={`group grid items-center gap-x-6 py-[7px] ${day.isPast ? 'bg-[color:var(--color-paper-tint)]' : ''}`}
-            style={{
-              gridTemplateColumns: '80px 64px 1fr 110px 110px 120px',
-            }}
+            style={{ gridTemplateColumns: GRID_COLS }}
           >
             {/* Source / bank column */}
             {entry.type === 'manual_entry' ? <span /> : (
-              <div className="flex items-center gap-1.5 min-w-0">
+              <div
+                className={`flex items-center gap-1.5 min-w-0 ${entry.type === 'credit_card_bill' ? 'cursor-pointer hover:text-[color:var(--color-accent)]' : ''}`}
+                onClick={() => { if (entry.type === 'credit_card_bill') onSelectBill(); }}
+                title={entry.type === 'credit_card_bill' ? 'Ver detalhes da fatura' : undefined}
+              >
                 <span
                   className="inline-block h-[5px] w-[5px] shrink-0 rounded-full"
                   style={{ backgroundColor: bulletColor }}
@@ -385,6 +453,7 @@ function DayGroup({
             <DescriptionCell
               entry={entry}
               manualId={manualId}
+              onSelectBill={entry.type === 'credit_card_bill' ? onSelectBill : undefined}
               onEditDesc={onEditDesc}
               onDeleteManual={onDeleteManual}
             />
@@ -423,11 +492,13 @@ function DayGroup({
 function DescriptionCell({
   entry,
   manualId,
+  onSelectBill,
   onEditDesc,
   onDeleteManual,
 }: {
   entry: CashFlowEntry;
   manualId: number | null;
+  onSelectBill?: () => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onDeleteManual: (id: number) => void;
 }) {
@@ -459,15 +530,29 @@ function DescriptionCell({
         />
       ) : (
         <span
-          className={`truncate font-body text-[13px] text-[color:var(--color-ink)] ${editable ? 'cursor-pointer hover:text-[color:var(--color-accent)]' : ''}`}
-          onClick={() => { if (editable) setEditing(true); }}
-          title={editable ? 'Editar descrição' : undefined}
+          className={`truncate font-body text-[13px] text-[color:var(--color-ink)] ${
+            editable
+              ? 'cursor-pointer hover:text-[color:var(--color-accent)]'
+              : onSelectBill
+                ? 'cursor-pointer hover:text-[color:var(--color-accent)]'
+                : ''
+          }`}
+          onClick={() => {
+            if (editable) setEditing(true);
+            else if (onSelectBill) onSelectBill();
+          }}
+          title={
+            editable
+              ? 'Editar descrição'
+              : onSelectBill
+                ? 'Ver detalhes da fatura'
+                : undefined
+          }
         >
           {entry.description}
         </span>
       )}
 
-      {/* Delete for manual entries */}
       {manualId !== null && (
         <button
           type="button"
@@ -481,7 +566,7 @@ function DescriptionCell({
   );
 }
 
-// ── Day cell (click-to-edit day of month for manual entries) ──
+// ── Day cell ──
 
 function DayCell({
   date,
@@ -494,7 +579,6 @@ function DayCell({
 }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
   const currentDay = Number(date.split('-')[2]);
 
   const handleSubmit = () => {
@@ -533,7 +617,7 @@ function DayCell({
   );
 }
 
-// ── Amount cell (click-to-edit for manual entries) ──
+// ── Amount cell ──
 
 function AmountCell({
   amount,
@@ -589,7 +673,7 @@ function AmountCell({
   );
 }
 
-// ── Inline new-entry row ──
+// ── New entry row ──
 
 function NewEntryRow({
   active,
@@ -621,13 +705,13 @@ function NewEntryRow({
     if (e.key === 'Escape') onCancel();
   };
 
-  const inputClass = "w-full bg-transparent outline-none border-b border-transparent focus:border-[color:var(--color-accent)]";
+  const inputClass = 'w-full bg-transparent outline-none border-b border-transparent focus:border-[color:var(--color-accent)]';
 
   if (!active) {
     return (
       <div
         className="rule-top grid items-center gap-x-6 py-[7px] opacity-0 transition-opacity hover:opacity-100 cursor-pointer"
-        style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
+        style={{ gridTemplateColumns: GRID_COLS }}
         onClick={onActivate}
       >
         <span />
@@ -643,12 +727,9 @@ function NewEntryRow({
   return (
     <div
       className="rule-top grid items-center gap-x-6 py-[7px]"
-      style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
+      style={{ gridTemplateColumns: GRID_COLS }}
     >
-      {/* Source — empty for manual */}
       <span />
-
-      {/* Day */}
       <input
         ref={dayRef}
         type="number"
@@ -659,8 +740,6 @@ function NewEntryRow({
         onKeyDown={handleKeyDown}
         autoFocus
       />
-
-      {/* Description */}
       <input
         ref={descRef}
         type="text"
@@ -668,8 +747,6 @@ function NewEntryRow({
         className={`${inputClass} font-body text-[13px] text-[color:var(--color-ink)] placeholder:text-[color:var(--color-ink-faint)]`}
         onKeyDown={handleKeyDown}
       />
-
-      {/* Amount (débito or crédito — user enters signed value) */}
       <input
         ref={amountRef}
         type="number"
@@ -678,8 +755,6 @@ function NewEntryRow({
         className={`${inputClass} text-right font-mono text-[13px] text-[color:var(--color-ink)] placeholder:text-[color:var(--color-ink-faint)]`}
         onKeyDown={handleKeyDown}
       />
-
-      {/* Actions */}
       <div className="flex items-center justify-end gap-3">
         <button
           type="button"
@@ -697,7 +772,6 @@ function NewEntryRow({
           esc
         </button>
       </div>
-
       <span />
     </div>
   );
@@ -708,14 +782,15 @@ function NewEntryRow({
 function LedgerSkeleton() {
   return (
     <div className="space-y-0 opacity-40">
-      {Array.from({ length: 6 }, (_, i) => (
+      {Array.from({ length: 4 }, (_, i) => (
         <div
           key={i}
           className="rule-top grid items-center gap-x-6 py-3"
-          style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
+          style={{ gridTemplateColumns: GRID_COLS }}
         >
           <div className="h-3 w-10 rounded-sm bg-[color:var(--color-paper-tint)]" />
-          <div className="h-3 rounded-sm bg-[color:var(--color-paper-tint)]" style={{ width: `${40 + i * 8}%` }} />
+          <div className="h-3 w-8 rounded-sm bg-[color:var(--color-paper-tint)]" />
+          <div className="h-3 rounded-sm bg-[color:var(--color-paper-tint)]" style={{ width: `${40 + i * 10}%` }} />
           <div className="ml-auto h-3 w-14 rounded-sm bg-[color:var(--color-paper-tint)]" />
           <div />
           <div className="ml-auto h-3 w-16 rounded-sm bg-[color:var(--color-paper-tint)]" />

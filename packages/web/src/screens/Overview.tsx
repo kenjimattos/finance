@@ -39,14 +39,14 @@ export function Overview({
   targetMonth: controlledMonth,
   onMonthChange,
   onSelectAccount,
-  onOpenCashFlow,
+  onBack,
 }: {
   items: Item[];
   /** Controlled month state — persisted in App so "voltar" restores it. */
   targetMonth: { year: number; month: number } | null;
   onMonthChange: (m: { year: number; month: number }) => void;
   onSelectAccount: (itemId: string, accountId: string, offset: number) => void;
-  onOpenCashFlow: () => void;
+  onBack: () => void;
 }) {
   const today = useMemo(() => new Date(), []);
 
@@ -185,6 +185,15 @@ export function Overview({
       transition={{ duration: 0.4, ease: [0.2, 0.65, 0.3, 0.9] }}
       className="pt-2"
     >
+      {/* Back to CashFlow */}
+      <button
+        type="button"
+        onClick={onBack}
+        className="eyebrow mb-6 inline-flex items-center gap-1 transition-colors hover:text-[color:var(--color-accent)]"
+      >
+        ← voltar
+      </button>
+
       {/* Month navigation header */}
       <div className="mb-10">
         <div className="eyebrow flex items-center gap-3">
@@ -243,16 +252,7 @@ export function Overview({
           <p className="font-body text-sm text-[color:var(--color-ink-muted)]">
             total de {configured.length} {configured.length === 1 ? 'fatura' : 'faturas'} com vencimento em {monthLabel(year, month)}
           </p>
-          <div className="flex items-baseline gap-4">
-            <button
-              type="button"
-              onClick={onOpenCashFlow}
-              className="font-body text-sm text-[color:var(--color-accent)] transition-colors hover:text-[color:var(--color-ink)]"
-            >
-              Fluxo de caixa →
-            </button>
-            <SyncAllButton items={items} />
-          </div>
+          <SyncAllButton items={items} />
         </div>
 
         {/* Category breakdown */}
