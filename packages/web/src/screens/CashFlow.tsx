@@ -326,9 +326,6 @@ function DayGroup({
   const isToday = day.date === today;
   const isFuture = !day.isPast && !isToday;
 
-  // All entries in this day group that are manual (for date editing).
-  const hasManualOnly = day.entries.length > 0 && day.entries.every((e) => e.type === 'manual_entry');
-
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -356,16 +353,16 @@ function DayGroup({
               gridTemplateColumns: '64px 80px 1fr 110px 110px 120px',
             }}
           >
-            {/* Date — only on first row of the group */}
+            {/* Date */}
             <div className="flex items-center gap-1">
-              {i === 0 ? (
+              {i === 0 || entry.type === 'manual_entry' ? (
                 <>
                   <DayCell
                     date={day.date}
-                    editable={hasManualOnly && entry.type === 'manual_entry'}
+                    editable={entry.type === 'manual_entry'}
                     onSubmit={(d) => onEditDay(entry, d)}
                   />
-                  {isToday && (
+                  {i === 0 && isToday && (
                     <span
                       className="inline-block h-[5px] w-[5px] rounded-full"
                       style={{ backgroundColor: 'var(--color-accent)' }}
