@@ -406,6 +406,9 @@ export const api = {
     return request<CashFlowResponse>(`/cashflow${qs}`);
   },
 
+  getCashFlowRange: () =>
+    request<{ firstMonth: string | null; lastMonth: string | null }>('/cashflow/range'),
+
   listManualEntries: () => request<ManualEntry[]>('/manual-entries'),
 
   createManualEntry: (body: {

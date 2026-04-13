@@ -8,6 +8,32 @@ import {
 
 export const cashflowRouter = Router();
 
+/**
+ * GET /cashflow/range — returns the first and last month that have BANK
+ * transactions, so the frontend knows which months to render.
+ */
+cashflowRouter.get('/cashflow/range', (_req, res) => {
+  const row = db
+    .prepare(
+      `SELECT MIN(t.date) AS first_date, MAX(t.date) AS last_date
+       FROM transactions t
+       JOIN accounts a ON a.id = t.account_id
+       WHERE a.type = 'BANK'`,
+    )
+    .get() as { first_date: string | null; last_date: string | null };
+
+  if (!row?.first_date || !row?.last_date) {
+    res.json({ firstMonth: null, lastMonth: null });
+    return;
+  }
+
+  // Extract YYYY-MM from the date strings.
+  res.json({
+    firstMonth: row.first_date.slice(0, 7),
+    lastMonth: row.last_date.slice(0, 7),
+  });
+});
+
 interface AccountRow {
   id: string;
   item_id: string;

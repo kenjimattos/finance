@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo } from 'react';
-import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { api } from '../lib/api';
 import type { CashFlowEntry, CashFlowDay, CashFlowResponse } from '../lib/api';
@@ -63,12 +63,18 @@ export function CashFlow({
   const qc = useQueryClient();
   const today = todayYmd();
 
-  // Month range: April 2026 through current month + 2.
-  const now = new Date();
+  // Fetch the actual date range of BANK transactions from the backend.
+  const rangeQ = useQuery({
+    queryKey: ['cashflow-range'],
+    queryFn: api.getCashFlowRange,
+  });
+
   const months = useMemo(() => {
-    const end = addMonth(now.getFullYear(), now.getMonth() + 1, 2);
-    return monthRange(2026, 4, end.year, end.month);
-  }, []);
+    if (!rangeQ.data?.firstMonth || !rangeQ.data?.lastMonth) return [];
+    const [sy, sm] = rangeQ.data.firstMonth.split('-').map(Number);
+    const [ey, em] = rangeQ.data.lastMonth.split('-').map(Number);
+    return monthRange(sy, sm, ey, em);
+  }, [rangeQ.data]);
 
   // Parallel queries — one per month.
   const queries = useQueries({
@@ -161,7 +167,7 @@ export function CashFlow({
     onSuccess: invalidateAll,
   });
 
-  const anyLoading = queries.some((q) => q.isLoading);
+  const anyLoading = rangeQ.isLoading || queries.some((q) => q.isLoading);
   const firstData = queries.find((q) => q.data)?.data;
 
   return (
@@ -178,8 +184,10 @@ export function CashFlow({
         <h1 className="mt-3 font-display text-[72px] leading-[0.9] tracking-[-0.03em] text-[color:var(--color-ink)] md:text-[96px]">
           {anyLoading && !firstData ? (
             <span className="inline-block h-[72px] w-2/3 animate-pulse rounded-sm bg-[color:var(--color-paper-tint)] md:h-[96px]" />
-          ) : (
+          ) : months.length > 0 ? (
             `${monthLabel(months[0].year, months[0].month).split(' ')[0]} — ${monthLabel(months[months.length - 1].year, months[months.length - 1].month)}`
+          ) : (
+            'Fluxo de caixa'
           )}
         </h1>
 
