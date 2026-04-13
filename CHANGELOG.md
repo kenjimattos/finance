@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-04-13
+
+### Added
+
+#### Overview as landing page (Caixa + Cartões)
+
+- **Overview is now the top-level screen**, divided into two editorial sections:
+  - **Caixa** — monthly cash flow summary: saldo (realized, based on last past day), entradas, saídas with delta vs previous month, faturas highlighted in accent. Faturas total intelligently includes both already-paid bills from bank transactions (matching "FATURA"/"INT" patterns) and projected future credit card bill outflows.
+  - **Cartões** — all credit card bills grouped by due-month: grand total with delta, aggregated category breakdown with proportional bars, per-account cards.
+- **"ver extrato →"** link in Caixa drills into the full CashFlow ledger; "← voltar" returns to Overview.
+
+#### CashFlow improvements
+
+- **Dynamic month range**: CashFlow fetches the actual date range of BANK transactions from `GET /cashflow/range` instead of a hardcoded range. Only months with data are shown.
+- **Current month by default**: previous months hidden behind a "mostrar N meses anteriores" toggle (up to 5). Avoids loading 12+ months on page load.
+- **Balance snapshots** (`balance_snapshots` table): records the Pluggy-reported bank balance at each sync. The cashflow endpoint uses the nearest snapshot as anchor for opening-balance calculations, so historical months stay accurate even after Pluggy ages out old transactions. Supports manual snapshot insertion for correcting historical drift.
+
+### Changed
+
+- App routing: Overview (landing) → CashFlow or Dashboard (both with back buttons). Was: CashFlow → Overview → Dashboard.
+
+### Fixed
+
+- **Caixa saldo** now reflects realized balance (opening + past bank transactions only), not a projection including future entries.
+- **Caixa faturas** includes credit card bill payments already made (detected from bank transaction descriptions) in addition to projected future bills.
+- Opening balance calculation uses the closest balance snapshot (before or after target month) instead of only looking forward, fixing a ~R$ 346 drift on older months where Pluggy's transaction history was incomplete.
+
 ## [0.2.0] - 2026-04-12
 
 ### Added
