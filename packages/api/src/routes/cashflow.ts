@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { db } from '../db/index.js';
 import {
   computeBillWindowAtOffset,
@@ -77,27 +78,51 @@ const BANK_TX_EXCLUDE_SQL = BANK_TX_EXCLUDE_DESCRIPTIONS
 const BANK_TX_EXCLUDE_PARAMS = BANK_TX_EXCLUDE_DESCRIPTIONS.map((d) => `%${d}%`);
 
 /**
- * GET /cashflow — day-by-day cash-flow view for the current month.
+ * GET /cashflow?month=YYYY-MM — day-by-day cash-flow view for a given month.
  *
  * Past days (up to yesterday): actual BANK transactions from Pluggy.
  * Future days (today onward): manual entries + credit card bill outflows.
  *
- * Opening balance = Pluggy's current balance minus all transactions in
- * the current month up to today. This gives us the end-of-previous-month
- * position, which is the correct starting point for the timeline.
+ * Opening balance = Pluggy's current balance minus all transactions from
+ * the target month's first day through today. For past months everything
+ * is "past"; for future months everything is "future".
  */
-cashflowRouter.get('/cashflow', (_req, res, next) => {
+cashflowRouter.get('/cashflow', (req, res, next) => {
   try {
+    const { month: monthParam } = z
+      .object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() })
+      .parse(req.query);
+
     const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1; // 1-based
-    const todayDay = now.getDate();
+    const realTodayDay = now.getDate();
+    const realYear = now.getFullYear();
+    const realMonth = now.getMonth() + 1;
+
+    // Target month — from param or current month.
+    const year = monthParam ? Number(monthParam.split('-')[0]) : realYear;
+    const month = monthParam ? Number(monthParam.split('-')[1]) : realMonth;
     const monthDays = daysInMonth(year, month);
 
     const monthStr = `${year}-${pad(month)}`;
     const firstDay = `${monthStr}-01`;
     const lastDay = `${monthStr}-${pad(monthDays)}`;
-    const today = `${monthStr}-${pad(todayDay)}`;
+
+    // "today" in the context of the target month:
+    // - past month: today = day after last day (everything is past)
+    // - current month: today = real today
+    // - future month: today = 1st (everything is future)
+    const realToday = `${realYear}-${pad(realMonth)}-${pad(realTodayDay)}`;
+    const today = monthStr < `${realYear}-${pad(realMonth)}`
+      ? `${monthStr}-${pad(monthDays + 1)}` // past month: everything is past
+      : monthStr > `${realYear}-${pad(realMonth)}`
+        ? `${monthStr}-01` // future month: everything is future
+        : realToday; // current month: real today
+
+    const todayDay = monthStr === `${realYear}-${pad(realMonth)}`
+      ? realTodayDay
+      : monthStr < `${realYear}-${pad(realMonth)}`
+        ? monthDays + 1 // past: all days are "past"
+        : 0; // future: no days are "past"
 
     // ── Find ALL BANK accounts ──
     const bankAccounts = db
@@ -110,18 +135,18 @@ cashflowRouter.get('/cashflow', (_req, res, next) => {
 
     // ── Compute opening balance per bank account ──
     // Opening balance = current Pluggy balance − sum of all transactions
-    // from the 1st of the month through today. This reconstructs the
-    // end-of-previous-month position.
+    // from the target month's first day onward. This reconstructs the
+    // end-of-previous-month position regardless of which month we're viewing.
     const openingBalances = new Map<string, number>();
     for (const ba of bankAccounts) {
       const row = db
         .prepare(
           `SELECT COALESCE(SUM(t.amount), 0) AS total
            FROM transactions t
-           WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
+           WHERE t.account_id = ? AND t.date >= ?
              AND ${BANK_TX_EXCLUDE_SQL}`,
         )
-        .get(ba.id, firstDay, today, ...BANK_TX_EXCLUDE_PARAMS) as { total: number };
+        .get(ba.id, firstDay, ...BANK_TX_EXCLUDE_PARAMS) as { total: number };
       openingBalances.set(ba.id, round2((ba.balance ?? 0) - row.total));
     }
 
