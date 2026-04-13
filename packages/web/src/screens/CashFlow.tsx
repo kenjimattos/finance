@@ -89,11 +89,11 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
   }, [data]);
 
   // ── Mutations ──
-  const [showForm, setShowForm] = useState(false);
+  const [addingEntry, setAddingEntry] = useState(false);
 
   const createMut = useMutation({
     mutationFn: api.createManualEntry,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); setShowForm(false); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); setAddingEntry(false); },
   });
   const deleteMut = useMutation({
     mutationFn: api.deleteManualEntry,
@@ -197,11 +197,13 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
           {/* Column headers */}
           <div
             className="rule-bottom grid items-baseline gap-x-6 pb-2"
-            style={{ gridTemplateColumns: '64px 80px 1fr 110px 110px 120px' }}
+            style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
           >
-            <span />
             <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
               origem
+            </span>
+            <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+              dia
             </span>
             <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
               descrição
@@ -251,11 +253,20 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
             />
           ))}
 
+          {/* New entry row — appears on hover, click to activate */}
+          <NewEntryRow
+            active={addingEntry}
+            onActivate={() => setAddingEntry(true)}
+            onSubmit={(e) => createMut.mutate(e)}
+            onCancel={() => setAddingEntry(false)}
+            submitting={createMut.isPending}
+          />
+
           {/* End-of-month projected balance */}
           {endBalance !== null && (
             <div
               className="grid items-baseline gap-x-6 border-t-2 border-[color:var(--color-ink)] py-3"
-              style={{ gridTemplateColumns: '64px 80px 1fr 110px 110px 120px' }}
+              style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
             >
               <span />
               <span />
@@ -275,25 +286,6 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
           Nenhuma movimentação neste mês.
         </p>
       )}
-
-      {/* Add manual entry */}
-      <div className="mt-10">
-        {showForm ? (
-          <EntryForm
-            onSubmit={(e) => createMut.mutate(e)}
-            onCancel={() => setShowForm(false)}
-            submitting={createMut.isPending}
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setShowForm(true)}
-            className="font-body text-[12px] uppercase tracking-[0.1em] text-[color:var(--color-accent)] transition-colors hover:text-[color:var(--color-ink)]"
-          >
-            + adicionar entrada mensal
-          </button>
-        )}
-      </div>
     </motion.section>
   );
 }
@@ -350,9 +342,26 @@ function DayGroup({
             key={entry.id}
             className={`group grid items-center gap-x-6 py-[7px] ${day.isPast ? 'bg-[color:var(--color-paper-tint)]' : ''}`}
             style={{
-              gridTemplateColumns: '64px 80px 1fr 110px 110px 120px',
+              gridTemplateColumns: '80px 64px 1fr 110px 110px 120px',
             }}
           >
+            {/* Source / bank column */}
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span
+                className="inline-block h-[5px] w-[5px] shrink-0 rounded-full"
+                style={{ backgroundColor: bulletColor }}
+              />
+              <span className="truncate font-body text-[10px] text-[color:var(--color-ink-faint)]">
+                {entry.type === 'bank_transaction' && entry.bankAccountId
+                  ? (bankNames?.get(entry.bankAccountId) ?? '')
+                  : entry.type === 'credit_card_bill'
+                    ? 'fatura'
+                    : entry.type === 'manual_entry'
+                      ? 'mensal'
+                      : ''}
+              </span>
+            </div>
+
             {/* Date */}
             <div className={`flex items-center gap-1 ${i > 0 && entry.type === 'manual_entry' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>
               {i === 0 || entry.type === 'manual_entry' ? (
@@ -370,23 +379,6 @@ function DayGroup({
                   )}
                 </>
               ) : <span />}
-            </div>
-
-            {/* Source / bank column */}
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span
-                className="inline-block h-[5px] w-[5px] shrink-0 rounded-full"
-                style={{ backgroundColor: bulletColor }}
-              />
-              <span className="truncate font-body text-[10px] text-[color:var(--color-ink-faint)]">
-                {entry.type === 'bank_transaction' && entry.bankAccountId
-                  ? (bankNames?.get(entry.bankAccountId) ?? '')
-                  : entry.type === 'credit_card_bill'
-                    ? 'fatura'
-                    : entry.type === 'manual_entry'
-                      ? 'mensal'
-                      : ''}
-              </span>
             </div>
 
             {/* Description */}
@@ -597,13 +589,17 @@ function AmountCell({
   );
 }
 
-// ── Manual entry form ──
+// ── Inline new-entry row ──
 
-function EntryForm({
+function NewEntryRow({
+  active,
+  onActivate,
   onSubmit,
   onCancel,
   submitting,
 }: {
+  active: boolean;
+  onActivate: () => void;
   onSubmit: (e: { description: string; amount: number; dayOfMonth: number }) => void;
   onCancel: () => void;
   submitting: boolean;
@@ -612,8 +608,7 @@ function EntryForm({
   const amountRef = useRef<HTMLInputElement>(null);
   const dayRef = useRef<HTMLInputElement>(null);
 
-  const handle = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = () => {
     const description = descRef.current?.value.trim();
     const amount = Number(amountRef.current?.value);
     const dayOfMonth = Number(dayRef.current?.value);
@@ -621,69 +616,96 @@ function EntryForm({
     onSubmit({ description, amount, dayOfMonth });
   };
 
-  return (
-    <form onSubmit={handle} className="rule-top pt-6 space-y-5">
-      <div className="eyebrow">nova entrada mensal</div>
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleSubmit();
+    if (e.key === 'Escape') onCancel();
+  };
 
-      <div className="flex flex-wrap items-end gap-5">
-        <label className="flex flex-col gap-1">
-          <span className="font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
-            Descrição
-          </span>
-          <input
-            ref={descRef}
-            type="text"
-            placeholder="Salário, aluguel…"
-            className="w-[220px] border-b border-[color:var(--color-paper-rule)] bg-transparent py-1.5 font-body text-sm text-[color:var(--color-ink)] placeholder:text-[color:var(--color-ink-faint)] outline-none focus:border-[color:var(--color-accent)]"
-            required
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
-            Valor
-          </span>
-          <input
-            ref={amountRef}
-            type="number"
-            step="0.01"
-            placeholder="+5000 ou −2200"
-            className="w-[150px] border-b border-[color:var(--color-paper-rule)] bg-transparent py-1.5 font-mono text-sm text-[color:var(--color-ink)] placeholder:text-[color:var(--color-ink-faint)] outline-none focus:border-[color:var(--color-accent)]"
-            required
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
-            Dia
-          </span>
-          <input
-            ref={dayRef}
-            type="number"
-            min={1}
-            max={31}
-            placeholder="15"
-            className="w-[60px] border-b border-[color:var(--color-paper-rule)] bg-transparent py-1.5 font-mono text-sm text-[color:var(--color-ink)] placeholder:text-[color:var(--color-ink-faint)] outline-none focus:border-[color:var(--color-accent)]"
-            required
-          />
-        </label>
+  const inputClass = "w-full bg-transparent outline-none border-b border-transparent focus:border-[color:var(--color-accent)]";
+
+  if (!active) {
+    return (
+      <div
+        className="rule-top grid items-center gap-x-6 py-[7px] opacity-0 transition-opacity hover:opacity-100 cursor-pointer"
+        style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
+        onClick={onActivate}
+      >
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block h-[5px] w-[5px] rounded-full bg-[color:var(--color-ink-faint)]" />
+          <span className="font-body text-[10px] text-[color:var(--color-ink-faint)]">mensal</span>
+        </div>
+        <span className="font-mono text-[11px] text-[color:var(--color-ink-faint)]">dia</span>
+        <span className="font-body text-[13px] text-[color:var(--color-ink-faint)]">+ nova entrada</span>
+        <span className="text-right font-mono text-[13px] text-[color:var(--color-ink-faint)]">valor</span>
+        <span />
+        <span />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="rule-top grid items-center gap-x-6 py-[7px]"
+      style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
+    >
+      {/* Source */}
+      <div className="flex items-center gap-1.5">
+        <span className="inline-block h-[5px] w-[5px] rounded-full bg-[color:var(--color-ink-faint)]" />
+        <span className="font-body text-[10px] text-[color:var(--color-ink-faint)]">mensal</span>
       </div>
 
-      <div className="flex items-center gap-4">
+      {/* Day */}
+      <input
+        ref={dayRef}
+        type="number"
+        min={1}
+        max={31}
+        placeholder="dia"
+        className={`${inputClass} font-mono text-[11px] text-[color:var(--color-ink)] placeholder:text-[color:var(--color-ink-faint)]`}
+        onKeyDown={handleKeyDown}
+        autoFocus
+      />
+
+      {/* Description */}
+      <input
+        ref={descRef}
+        type="text"
+        placeholder="Descrição"
+        className={`${inputClass} font-body text-[13px] text-[color:var(--color-ink)] placeholder:text-[color:var(--color-ink-faint)]`}
+        onKeyDown={handleKeyDown}
+      />
+
+      {/* Amount (débito or crédito — user enters signed value) */}
+      <input
+        ref={amountRef}
+        type="number"
+        step="0.01"
+        placeholder="valor"
+        className={`${inputClass} text-right font-mono text-[13px] text-[color:var(--color-ink)] placeholder:text-[color:var(--color-ink-faint)]`}
+        onKeyDown={handleKeyDown}
+      />
+
+      {/* Actions */}
+      <div className="flex items-center justify-end gap-3">
         <button
-          type="submit"
+          type="button"
+          onClick={handleSubmit}
           disabled={submitting}
-          className="font-body text-[12px] uppercase tracking-[0.1em] text-[color:var(--color-accent)] transition-colors hover:text-[color:var(--color-ink)] disabled:opacity-50"
+          className="font-body text-[10px] uppercase tracking-[0.1em] text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)] disabled:opacity-50"
         >
-          {submitting ? 'salvando…' : 'salvar'}
+          {submitting ? '…' : 'salvar'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="font-body text-[12px] uppercase tracking-[0.1em] text-[color:var(--color-ink-faint)] transition-colors hover:text-[color:var(--color-ink)]"
+          className="font-body text-[10px] uppercase tracking-[0.1em] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-ink)]"
         >
-          cancelar
+          esc
         </button>
       </div>
-    </form>
+
+      <span />
+    </div>
   );
 }
 
@@ -696,7 +718,7 @@ function LedgerSkeleton() {
         <div
           key={i}
           className="rule-top grid items-center gap-x-6 py-3"
-          style={{ gridTemplateColumns: '64px 80px 1fr 110px 110px 120px' }}
+          style={{ gridTemplateColumns: '80px 64px 1fr 110px 110px 120px' }}
         >
           <div className="h-3 w-10 rounded-sm bg-[color:var(--color-paper-tint)]" />
           <div className="h-3 rounded-sm bg-[color:var(--color-paper-tint)]" style={{ width: `${40 + i * 8}%` }} />
