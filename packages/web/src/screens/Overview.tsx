@@ -39,12 +39,14 @@ export function Overview({
   targetMonth: controlledMonth,
   onMonthChange,
   onSelectAccount,
+  onOpenCashFlow,
 }: {
   items: Item[];
   /** Controlled month state — persisted in App so "voltar" restores it. */
   targetMonth: { year: number; month: number } | null;
   onMonthChange: (m: { year: number; month: number }) => void;
   onSelectAccount: (itemId: string, accountId: string, offset: number) => void;
+  onOpenCashFlow: () => void;
 }) {
   const today = useMemo(() => new Date(), []);
 
@@ -241,7 +243,16 @@ export function Overview({
           <p className="font-body text-sm text-[color:var(--color-ink-muted)]">
             total de {configured.length} {configured.length === 1 ? 'fatura' : 'faturas'} com vencimento em {monthLabel(year, month)}
           </p>
-          <SyncAllButton items={items} />
+          <div className="flex items-baseline gap-4">
+            <button
+              type="button"
+              onClick={onOpenCashFlow}
+              className="font-body text-sm text-[color:var(--color-accent)] transition-colors hover:text-[color:var(--color-ink)]"
+            >
+              Fluxo de caixa →
+            </button>
+            <SyncAllButton items={items} />
+          </div>
         </div>
 
         {/* Category breakdown */}
