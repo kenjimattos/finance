@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PluggyConnect } from 'react-pluggy-connect';
 import { motion } from 'motion/react';
 import { api, type Item, type Account, type AccountSettings, type BillBreakdown } from '../lib/api';
@@ -39,14 +39,12 @@ export function Overview({
   targetMonth: controlledMonth,
   onMonthChange,
   onSelectAccount,
-  onBack,
 }: {
   items: Item[];
   /** Controlled month state — persisted in App so "voltar" restores it. */
   targetMonth: { year: number; month: number } | null;
   onMonthChange: (m: { year: number; month: number }) => void;
   onSelectAccount: (itemId: string, accountId: string, offset: number) => void;
-  onBack: () => void;
 }) {
   const today = useMemo(() => new Date(), []);
 
@@ -114,6 +112,58 @@ export function Overview({
     onMonthChange(next);
   }
 
+  // ── Cash flow summary for the target month ──
+
+  const ms = `${year}-${month < 10 ? '0' : ''}${month}`;
+  const prevM = addMonth(year, month, -1);
+  const prevMs = `${prevM.year}-${prevM.month < 10 ? '0' : ''}${prevM.month}`;
+
+  const cashflowQ = useQuery({
+    queryKey: ['cashflow', ms],
+    queryFn: () => api.getCashFlow(ms),
+  });
+  const prevCashflowQ = useQuery({
+    queryKey: ['cashflow', prevMs],
+    queryFn: () => api.getCashFlow(prevMs),
+  });
+
+  const cashSummary = useMemo(() => {
+    const data = cashflowQ.data;
+    if (!data) return null;
+
+    const openingBalance = data.bankAccounts.reduce((s, ba) => s + (ba.openingBalance ?? 0), 0);
+    let income = 0;
+    let expenses = 0;
+    let cardBills = 0;
+    for (const day of data.days) {
+      for (const e of day.entries) {
+        if (e.amount > 0) income += e.amount;
+        else expenses += e.amount;
+        if (e.type === 'credit_card_bill') cardBills += e.amount;
+      }
+    }
+    const closingBalance = Math.round((openingBalance + income + expenses) * 100) / 100;
+    return {
+      openingBalance: Math.round(openingBalance * 100) / 100,
+      closingBalance,
+      income: Math.round(income * 100) / 100,
+      expenses: Math.round(expenses * 100) / 100,
+      cardBills: Math.round(cardBills * 100) / 100,
+    };
+  }, [cashflowQ.data]);
+
+  const prevCashSummary = useMemo(() => {
+    const data = prevCashflowQ.data;
+    if (!data) return null;
+    let expenses = 0;
+    for (const day of data.days) {
+      for (const e of day.entries) {
+        if (e.amount < 0) expenses += e.amount;
+      }
+    }
+    return { expenses: Math.round(expenses * 100) / 100 };
+  }, [prevCashflowQ.data]);
+
   // ── Resolve offset per account and fetch breakdowns in parallel ──
 
   const accountOffsets = useMemo(
@@ -178,6 +228,15 @@ export function Overview({
 
   // ── Render ──
 
+  const expensesDelta = cashSummary && prevCashSummary
+    ? formatDelta(cashSummary.expenses - prevCashSummary.expenses)
+    : null;
+  const expensesDeltaDir = cashSummary && prevCashSummary
+    ? (cashSummary.expenses - prevCashSummary.expenses) < -0.01 ? 'higher'
+      : (cashSummary.expenses - prevCashSummary.expenses) > 0.01 ? 'lower'
+      : 'flat'
+    : 'flat';
+
   return (
     <motion.section
       initial={{ opacity: 0, y: 12 }}
@@ -185,116 +244,183 @@ export function Overview({
       transition={{ duration: 0.4, ease: [0.2, 0.65, 0.3, 0.9] }}
       className="pt-2"
     >
-      {/* Back to CashFlow */}
-      <button
-        type="button"
-        onClick={onBack}
-        className="eyebrow mb-6 inline-flex items-center gap-1 transition-colors hover:text-[color:var(--color-accent)]"
-      >
-        ← voltar
-      </button>
-
       {/* Month navigation header */}
-      <div className="mb-10">
-        <div className="eyebrow flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigateMonth(-1)}
-            aria-label="mês anterior"
-            className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none"
-          >
-            ←
-          </button>
-          <span className="uppercase">{monthLabel(year, month)}</span>
-          <button
-            type="button"
-            onClick={() => navigateMonth(1)}
-            disabled={isCurrentMonth}
-            aria-label="próximo mês"
-            className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:text-[color:var(--color-ink-faint)] disabled:opacity-40"
-          >
-            →
-          </button>
-        </div>
-
-        <div className="mt-3 font-display text-[72px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[96px]">
-          {loading ? (
-            <span className="inline-block h-[72px] w-2/3 animate-pulse rounded-sm bg-[color:var(--color-paper-tint)] md:h-[96px]" />
-          ) : (
-            formatBRL(grandTotal)
-          )}
-        </div>
-
-        {!loading && (() => {
-          const d = formatDelta(grandDelta);
-          const dir = grandDelta > 0.01 ? 'higher' : grandDelta < -0.01 ? 'lower' : 'flat';
-          return (
-            <div className="mt-4 flex items-center gap-2 font-body text-sm text-[color:var(--color-ink-muted)]">
-              <span
-                className="font-mono"
-                style={{
-                  color: dir === 'higher' ? 'var(--color-accent)'
-                    : dir === 'lower' ? 'var(--color-positive)'
-                    : 'var(--color-ink-faint)',
-                }}
-              >
-                {d.symbol}
-              </span>
-              <span>
-                {d.text}{' '}
-                <span className="text-[color:var(--color-ink-faint)]">vs anterior</span>
-              </span>
-            </div>
-          );
-        })()}
-
-        <div className="mt-3 flex items-baseline justify-between gap-4">
-          <p className="font-body text-sm text-[color:var(--color-ink-muted)]">
-            total de {configured.length} {configured.length === 1 ? 'fatura' : 'faturas'} com vencimento em {monthLabel(year, month)}
-          </p>
+      <div className="mb-12">
+        <div className="flex items-baseline justify-between gap-4">
+          <div className="eyebrow flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigateMonth(-1)}
+              aria-label="mês anterior"
+              className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none"
+            >
+              ←
+            </button>
+            <span className="uppercase">{monthLabel(year, month)}</span>
+            <button
+              type="button"
+              onClick={() => navigateMonth(1)}
+              disabled={isCurrentMonth}
+              aria-label="próximo mês"
+              className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:text-[color:var(--color-ink-faint)] disabled:opacity-40"
+            >
+              →
+            </button>
+          </div>
           <SyncAllButton items={items} />
         </div>
+      </div>
 
-        {/* Category breakdown */}
-        {aggregatedCategories.length > 0 && (
-          <CategoryBreakdown categories={aggregatedCategories} />
+      {/* ═══ CAIXA ═══ */}
+      <div className="mb-14">
+        <div className="eyebrow mb-6 uppercase">caixa</div>
+
+        {cashflowQ.isLoading ? (
+          <div className="h-24 w-2/3 animate-pulse rounded-sm bg-[color:var(--color-paper-tint)]" />
+        ) : cashSummary ? (
+          <div>
+            {/* Saldo headline */}
+            <div className="font-display text-[72px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[96px]">
+              {formatBRL(cashSummary.closingBalance)}
+            </div>
+            <p className="mt-2 font-body text-sm text-[color:var(--color-ink-muted)]">
+              saldo {isCurrentMonth ? 'atual' : 'final'}
+            </p>
+
+            {/* Entradas / Saídas / Faturas */}
+            <div className="mt-8 grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+              <div>
+                <div className="font-body text-[11px] uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)]">
+                  entradas
+                </div>
+                <div className="mt-1 font-mono text-lg tabular-nums text-[color:var(--color-positive)]">
+                  {formatBRL(cashSummary.income)}
+                </div>
+              </div>
+              <div>
+                <div className="font-body text-[11px] uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)]">
+                  saídas
+                </div>
+                <div className="mt-1 font-mono text-lg tabular-nums text-[color:var(--color-ink)]">
+                  {formatBRL(Math.abs(cashSummary.expenses))}
+                </div>
+                {expensesDelta && expensesDeltaDir !== 'flat' && (
+                  <div className="mt-1 flex items-center gap-1 font-body text-xs text-[color:var(--color-ink-muted)]">
+                    <span
+                      className="font-mono"
+                      style={{
+                        color: expensesDeltaDir === 'higher'
+                          ? 'var(--color-accent)'
+                          : 'var(--color-positive)',
+                      }}
+                    >
+                      {expensesDelta.symbol}
+                    </span>
+                    <span>{expensesDelta.text} <span className="text-[color:var(--color-ink-faint)]">vs anterior</span></span>
+                  </div>
+                )}
+              </div>
+              {cashSummary.cardBills !== 0 && (
+                <div>
+                  <div className="font-body text-[11px] uppercase tracking-[0.12em] text-[color:var(--color-accent)]">
+                    faturas
+                  </div>
+                  <div className="mt-1 font-mono text-lg tabular-nums text-[color:var(--color-accent)]">
+                    {formatBRL(Math.abs(cashSummary.cardBills))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="font-body text-sm text-[color:var(--color-ink-faint)]">
+            Nenhuma conta bancária conectada.
+          </p>
         )}
       </div>
 
-      {/* Account cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {configured.map(({ item, account, settings }, i) => {
-          const offset = accountOffsets[i];
-          const bq = breakdownQueries[i];
-          const breakdown = bq?.data ?? null;
+      {/* ═══ CARTÕES ═══ */}
+      <div>
+        <div className="eyebrow mb-6 uppercase">cartões</div>
 
-          return (
-            <AccountCard
+        {/* Grand total + delta */}
+        <div className="mb-6">
+          <div className="font-display text-[48px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[56px]">
+            {loading ? (
+              <span className="inline-block h-12 w-2/3 animate-pulse rounded-sm bg-[color:var(--color-paper-tint)]" />
+            ) : (
+              formatBRL(grandTotal)
+            )}
+          </div>
+
+          {!loading && (() => {
+            const d = formatDelta(grandDelta);
+            const dir = grandDelta > 0.01 ? 'higher' : grandDelta < -0.01 ? 'lower' : 'flat';
+            return (
+              <div className="mt-2 flex items-center gap-2 font-body text-sm text-[color:var(--color-ink-muted)]">
+                <span
+                  className="font-mono"
+                  style={{
+                    color: dir === 'higher' ? 'var(--color-accent)'
+                      : dir === 'lower' ? 'var(--color-positive)'
+                      : 'var(--color-ink-faint)',
+                  }}
+                >
+                  {d.symbol}
+                </span>
+                <span>
+                  {d.text}{' '}
+                  <span className="text-[color:var(--color-ink-faint)]">vs anterior</span>
+                </span>
+              </div>
+            );
+          })()}
+
+          <p className="mt-2 font-body text-sm text-[color:var(--color-ink-muted)]">
+            {configured.length} {configured.length === 1 ? 'fatura' : 'faturas'} com vencimento em {monthLabel(year, month)}
+          </p>
+
+          {/* Category breakdown */}
+          {aggregatedCategories.length > 0 && (
+            <CategoryBreakdown categories={aggregatedCategories} />
+          )}
+        </div>
+
+        {/* Account cards */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {configured.map(({ item, account, settings }, i) => {
+            const offset = accountOffsets[i];
+            const bq = breakdownQueries[i];
+            const breakdown = bq?.data ?? null;
+
+            return (
+              <AccountCard
+                key={account.id}
+                item={item}
+                account={account}
+                settings={settings}
+                breakdown={breakdown}
+                loading={bq?.isLoading ?? false}
+                onClick={() => {
+                  if (offset !== null) {
+                    onSelectAccount(item.id, account.id, offset);
+                  }
+                }}
+              />
+            );
+          })}
+
+          {unconfigured.map(({ item, account }) => (
+            <UnconfiguredCard
               key={account.id}
               item={item}
               account={account}
-              settings={settings}
-              breakdown={breakdown}
-              loading={bq?.isLoading ?? false}
-              onClick={() => {
-                if (offset !== null) {
-                  onSelectAccount(item.id, account.id, offset);
-                }
-              }}
+              onClick={() => onSelectAccount(item.id, account.id, 0)}
             />
-          );
-        })}
+          ))}
 
-        {unconfigured.map(({ item, account }) => (
-          <UnconfiguredCard
-            key={account.id}
-            item={item}
-            account={account}
-            onClick={() => onSelectAccount(item.id, account.id, 0)}
-          />
-        ))}
-
-        <AddBankCard />
+          <AddBankCard />
+        </div>
       </div>
     </motion.section>
   );

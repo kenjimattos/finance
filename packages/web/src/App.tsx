@@ -4,25 +4,24 @@ import { api } from './lib/api';
 import { Onboarding } from './screens/Onboarding';
 import { Overview } from './screens/Overview';
 import { Dashboard } from './screens/Dashboard';
-import { CashFlow } from './screens/CashFlow';
 
 /**
- * App is a thin router between three drill-down levels:
+ * App is a thin router between drill-down levels:
  *  - No item linked yet → Onboarding screen
- *  - Items exist → CashFlow (top-level, multi-month view)
- *  - Clicked a bill in CashFlow → Overview (bills by month)
- *  - Clicked an account in Overview → Dashboard (per-account detail)
+ *  - Items exist → Overview (landing page: Caixa + Cartões)
+ *  - Clicked an account card → Dashboard (per-account detail)
  */
 export function App() {
   const itemsQ = useQuery({ queryKey: ['items'], queryFn: api.listItems });
 
-  // Drill into Overview for a specific month (from clicking a bill in CashFlow).
-  const [overviewDrill, setOverviewDrill] = useState<{
+  // Persisted across Overview ↔ Dashboard transitions so "voltar"
+  // returns to the same month the user was browsing.
+  const [overviewMonth, setOverviewMonth] = useState<{
     year: number;
     month: number;
   } | null>(null);
 
-  // Drill into Dashboard for a specific account (from clicking a card in Overview).
+  // Drill into Dashboard for a specific account.
   const [drillDown, setDrillDown] = useState<{
     itemId: string;
     accountId: string;
@@ -32,7 +31,7 @@ export function App() {
   return (
     <>
       <div className="page-rule" aria-hidden="true" />
-      <main className="relative z-10 mx-auto max-w-[1440px] px-6 pt-16 pb-24 md:px-12 lg:pl-24">
+      <main className="relative z-10 mx-auto max-w-[960px] px-6 pt-16 pb-24 md:px-12 lg:pl-24">
         {itemsQ.isLoading && <Skeleton />}
         {itemsQ.isError && (
           <ErrorBanner
@@ -49,19 +48,14 @@ export function App() {
               initialOffset={drillDown.offset}
               onBack={() => setDrillDown(null)}
             />
-          ) : overviewDrill ? (
+          ) : (
             <Overview
               items={itemsQ.data}
-              targetMonth={overviewDrill}
-              onMonthChange={(m) => setOverviewDrill(m)}
+              targetMonth={overviewMonth}
+              onMonthChange={setOverviewMonth}
               onSelectAccount={(itemId, accountId, offset) =>
                 setDrillDown({ itemId, accountId, offset })
               }
-              onBack={() => setOverviewDrill(null)}
-            />
-          ) : (
-            <CashFlow
-              onSelectBill={(year, month) => setOverviewDrill({ year, month })}
             />
           ))}
       </main>
