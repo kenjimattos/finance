@@ -99,9 +99,14 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
     mutationFn: api.deleteManualEntry,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
   });
-  const descMut = useMutation({
+  const descTxMut = useMutation({
     mutationFn: ({ id, desc }: { id: string; desc: string }) =>
       api.updateTransactionDescription(id, desc),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
+  });
+  const descManualMut = useMutation({
+    mutationFn: ({ id, desc }: { id: number; desc: string }) =>
+      api.updateManualEntry(id, { description: desc }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
   });
 
@@ -212,7 +217,14 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
               bankColors={bankColorMap}
               bankNames={bankNames}
               onDeleteManual={(id) => deleteMut.mutate(id)}
-              onEditDesc={(id, desc) => descMut.mutate({ id, desc })}
+              onEditDesc={(entry, desc) => {
+                if (entry.type === 'manual_entry') {
+                  const numId = Number(entry.id.replace('manual-', ''));
+                  descManualMut.mutate({ id: numId, desc });
+                } else if (entry.type === 'bank_transaction') {
+                  descTxMut.mutate({ id: entry.id, desc });
+                }
+              }}
               staggerIndex={di}
             />
           ))}
@@ -282,7 +294,7 @@ function DayGroup({
   bankColors: Map<string, string>;
   bankNames: Map<string, string>;
   onDeleteManual: (id: number) => void;
-  onEditDesc: (id: string, desc: string) => void;
+  onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   staggerIndex: number;
 }) {
   const isToday = day.date === today;
@@ -352,7 +364,6 @@ function DayGroup({
             {/* Description */}
             <DescriptionCell
               entry={entry}
-              isPast={day.isPast}
               manualId={manualId}
               onEditDesc={onEditDesc}
               onDeleteManual={onDeleteManual}
@@ -385,23 +396,23 @@ function DayGroup({
 
 function DescriptionCell({
   entry,
-  isPast,
   manualId,
   onEditDesc,
   onDeleteManual,
 }: {
   entry: CashFlowEntry;
-  isPast: boolean;
   manualId: number | null;
-  onEditDesc: (id: string, desc: string) => void;
+  onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onDeleteManual: (id: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const editable = entry.type === 'bank_transaction' || entry.type === 'manual_entry';
+
   const handleSubmit = () => {
     const val = inputRef.current?.value.trim();
-    if (val && val !== entry.description) onEditDesc(entry.id, val);
+    if (val && val !== entry.description) onEditDesc(entry, val);
     setEditing(false);
   };
 
@@ -422,15 +433,9 @@ function DescriptionCell({
         />
       ) : (
         <span
-          className={`truncate font-body text-[13px] text-[color:var(--color-ink)] ${
-            isPast && entry.type === 'bank_transaction'
-              ? 'cursor-pointer hover:text-[color:var(--color-accent)]'
-              : ''
-          }`}
-          onClick={() => {
-            if (isPast && entry.type === 'bank_transaction') setEditing(true);
-          }}
-          title={isPast && entry.type === 'bank_transaction' ? 'Editar descrição' : undefined}
+          className={`truncate font-body text-[13px] text-[color:var(--color-ink)] ${editable ? 'cursor-pointer hover:text-[color:var(--color-accent)]' : ''}`}
+          onClick={() => { if (editable) setEditing(true); }}
+          title={editable ? 'Editar descrição' : undefined}
         >
           {entry.description}
         </span>
