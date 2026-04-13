@@ -401,7 +401,10 @@ export const api = {
 
   // ── Cash Flow ──
 
-  getCashFlow: () => request<CashFlowResponse>('/cashflow'),
+  getCashFlow: (month?: string) => {
+    const qs = month ? `?month=${encodeURIComponent(month)}` : '';
+    return request<CashFlowResponse>(`/cashflow${qs}`);
+  },
 
   listManualEntries: () => request<ManualEntry[]>('/manual-entries'),
 
