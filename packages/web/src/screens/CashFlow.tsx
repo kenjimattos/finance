@@ -57,8 +57,10 @@ const GRID_COLS = '80px 64px 1fr 110px 110px 120px';
 
 export function CashFlow({
   onSelectBill,
+  onBack,
 }: {
   onSelectBill: (year: number, month: number) => void;
+  onBack?: () => void;
 }) {
   const qc = useQueryClient();
   const today = todayYmd();
@@ -201,6 +203,15 @@ export function CashFlow({
     >
       {/* Masthead */}
       <div className="mb-12">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="eyebrow mb-6 inline-flex items-center gap-1 transition-colors hover:text-[color:var(--color-accent)]"
+          >
+            ← voltar
+          </button>
+        )}
         <div className="eyebrow uppercase">fluxo de caixa</div>
 
         <h1 className="mt-3 font-display text-[72px] leading-[0.9] tracking-[-0.03em] text-[color:var(--color-ink)] md:text-[96px]">
