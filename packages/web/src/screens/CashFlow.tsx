@@ -182,9 +182,12 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
           {/* Column headers */}
           <div
             className="rule-bottom grid items-baseline gap-x-4 pb-2"
-            style={{ gridTemplateColumns: '64px 1fr 90px 90px 100px' }}
+            style={{ gridTemplateColumns: '64px 80px 1fr 90px 90px 100px' }}
           >
             <span />
+            <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+              origem
+            </span>
             <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
               descrição
             </span>
@@ -207,7 +210,7 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
               today={today}
               balance={dayBalances.get(day.date) ?? null}
               bankColors={bankColorMap}
-              bankNames={multiBanks ? bankNames : null}
+              bankNames={bankNames}
               onDeleteManual={(id) => deleteMut.mutate(id)}
               onEditDesc={(id, desc) => descMut.mutate({ id, desc })}
               staggerIndex={di}
@@ -218,8 +221,9 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
           {endBalance !== null && (
             <div
               className="grid items-baseline gap-x-4 border-t-2 border-[color:var(--color-ink)] py-3"
-              style={{ gridTemplateColumns: '64px 1fr 90px 90px 100px' }}
+              style={{ gridTemplateColumns: '64px 80px 1fr 90px 90px 100px' }}
             >
+              <span />
               <span />
               <span className="font-body text-[12px] uppercase tracking-[0.1em] text-[color:var(--color-ink-muted)]">
                 Saldo projetado fim do mês
@@ -276,7 +280,7 @@ function DayGroup({
   today: string;
   balance: number | null;
   bankColors: Map<string, string>;
-  bankNames: Map<string, string> | null;
+  bankNames: Map<string, string>;
   onDeleteManual: (id: number) => void;
   onEditDesc: (id: string, desc: string) => void;
   staggerIndex: number;
@@ -308,7 +312,7 @@ function DayGroup({
             key={entry.id}
             className="group grid items-center gap-x-4 py-[7px]"
             style={{
-              gridTemplateColumns: '64px 1fr 90px 90px 100px',
+              gridTemplateColumns: '64px 80px 1fr 90px 90px 100px',
               opacity: isFuture ? 0.55 : 1,
             }}
           >
@@ -329,17 +333,28 @@ function DayGroup({
               ) : <span />}
             </div>
 
+            {/* Source / bank column */}
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span
+                className="inline-block h-[5px] w-[5px] shrink-0 rounded-full"
+                style={{ backgroundColor: bulletColor }}
+              />
+              <span className="truncate font-body text-[10px] text-[color:var(--color-ink-faint)]">
+                {entry.type === 'bank_transaction' && entry.bankAccountId
+                  ? (bankNames?.get(entry.bankAccountId) ?? '')
+                  : entry.type === 'credit_card_bill'
+                    ? 'fatura'
+                    : entry.type === 'manual_entry'
+                      ? 'mensal'
+                      : ''}
+              </span>
+            </div>
+
             {/* Description */}
             <DescriptionCell
               entry={entry}
               isPast={day.isPast}
               isFuture={isFuture}
-              bulletColor={bulletColor}
-              bankName={
-                bankNames && entry.bankAccountId
-                  ? bankNames.get(entry.bankAccountId) ?? null
-                  : null
-              }
               manualId={manualId}
               onEditDesc={onEditDesc}
               onDeleteManual={onDeleteManual}
@@ -374,8 +389,6 @@ function DescriptionCell({
   entry,
   isPast,
   isFuture,
-  bulletColor,
-  bankName,
   manualId,
   onEditDesc,
   onDeleteManual,
@@ -383,20 +396,12 @@ function DescriptionCell({
   entry: CashFlowEntry;
   isPast: boolean;
   isFuture: boolean;
-  bulletColor: string;
-  bankName: string | null;
   manualId: number | null;
   onEditDesc: (id: string, desc: string) => void;
   onDeleteManual: (id: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const label = entry.type === 'bank_transaction'
-    ? bankName
-    : entry.type === 'manual_entry'
-      ? 'mensal'
-      : 'fatura';
 
   const handleSubmit = () => {
     const val = inputRef.current?.value.trim();
@@ -406,13 +411,6 @@ function DescriptionCell({
 
   return (
     <div className="group/desc flex min-w-0 items-center gap-2">
-      {/* Bullet */}
-      <span
-        className="inline-block h-[5px] w-[5px] shrink-0 rounded-full"
-        style={{ backgroundColor: bulletColor }}
-      />
-
-      {/* Text */}
       {editing ? (
         <input
           ref={inputRef}
@@ -441,13 +439,6 @@ function DescriptionCell({
           title={isPast && entry.type === 'bank_transaction' ? 'Editar descrição' : undefined}
         >
           {entry.description}
-        </span>
-      )}
-
-      {/* Type label */}
-      {label && (
-        <span className="shrink-0 font-body text-[10px] italic text-[color:var(--color-ink-faint)]">
-          {label}
         </span>
       )}
 
@@ -564,7 +555,7 @@ function LedgerSkeleton() {
         <div
           key={i}
           className="rule-top grid items-center gap-x-4 py-3"
-          style={{ gridTemplateColumns: '64px 1fr 90px 90px 100px' }}
+          style={{ gridTemplateColumns: '64px 80px 1fr 90px 90px 100px' }}
         >
           <div className="h-3 w-10 rounded-sm bg-[color:var(--color-paper-tint)]" />
           <div className="h-3 rounded-sm bg-[color:var(--color-paper-tint)]" style={{ width: `${40 + i * 8}%` }} />
