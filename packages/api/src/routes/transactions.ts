@@ -234,33 +234,48 @@ transactionsRouter.post('/transactions/sync', async (req, res, next) => {
  * (billWindow ranges, UI date pills, etc.) can use plain string math.
  */
 async function syncItem(itemId: string) {
-  const { results: accounts } = await pluggy.fetchAccounts(itemId, 'CREDIT');
-  console.log(`[sync] itemId=${itemId} found ${accounts.length} CREDIT account(s):`, accounts.map(a => ({ id: a.id, name: a.name, number: a.number })));
+  const { results: creditAccounts } = await pluggy.fetchAccounts(itemId, 'CREDIT');
+  console.log(`[sync] itemId=${itemId} found ${creditAccounts.length} CREDIT account(s):`, creditAccounts.map(a => ({ id: a.id, name: a.name, number: a.number })));
+
+  let bankAccounts: typeof creditAccounts = [];
+  try {
+    const res = await pluggy.fetchAccounts(itemId, 'BANK');
+    bankAccounts = res.results;
+    console.log(`[sync] itemId=${itemId} found ${bankAccounts.length} BANK account(s):`, bankAccounts.map(a => ({ id: a.id, name: a.name, number: a.number })));
+  } catch {
+    // Item may not have bank accounts — that's fine.
+  }
+
+  const allAccounts = [...creditAccounts, ...bankAccounts];
 
   // Upsert discovered accounts so downstream code (settings, groups, bill
   // windows) can reference them by account_id.
   const upsertAccount = db.prepare(`
     INSERT INTO accounts
-      (id, item_id, name, number, type, raw_json, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      (id, item_id, name, number, type, subtype, balance, raw_json, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
       item_id   = excluded.item_id,
       name      = excluded.name,
       number    = excluded.number,
       type      = excluded.type,
+      subtype   = excluded.subtype,
+      balance   = excluded.balance,
       raw_json  = excluded.raw_json,
       synced_at = datetime('now')
   `);
   const reassignTxItemId = db.prepare(
     `UPDATE transactions SET item_id = ? WHERE account_id = ? AND item_id != ?`,
   );
-  for (const account of accounts) {
+  for (const account of allAccounts) {
     upsertAccount.run(
       account.id,
       itemId,
       account.name ?? null,
       account.number ?? null,
       account.type ?? null,
+      account.subtype ?? null,
+      account.balance ?? null,
       JSON.stringify(account),
     );
     // If the account was previously synced under a different item (e.g. user
@@ -340,31 +355,34 @@ async function syncItem(itemId: string) {
     }
   });
 
-  for (const account of accounts) {
-    // Bills first — they're cheap and independent.
-    try {
-      const billsPage = await pluggy.fetchCreditCardBills(account.id);
-      const upsertBillBatch = db.transaction(() => {
-        for (const bill of billsPage.results) {
-          insertBill.run(
-            bill.id,
-            account.id,
-            itemId,
-            toYmd(bill.dueDate),
-            bill.totalAmount,
-            bill.totalAmountCurrencyCode,
-            bill.minimumPaymentAmount,
-            JSON.stringify(bill),
-          );
-          billCount++;
-        }
-      });
-      upsertBillBatch();
-    } catch (err) {
-      // Some connectors don't support bills; log and continue.
-      console.warn(`[sync] fetchCreditCardBills failed for account ${account.id}:`, err);
+  for (const account of allAccounts) {
+    // Bills — only for CREDIT accounts (BANK accounts don't have bills).
+    if (account.type === 'CREDIT') {
+      try {
+        const billsPage = await pluggy.fetchCreditCardBills(account.id);
+        const upsertBillBatch = db.transaction(() => {
+          for (const bill of billsPage.results) {
+            insertBill.run(
+              bill.id,
+              account.id,
+              itemId,
+              toYmd(bill.dueDate),
+              bill.totalAmount,
+              bill.totalAmountCurrencyCode,
+              bill.minimumPaymentAmount,
+              JSON.stringify(bill),
+            );
+            billCount++;
+          }
+        });
+        upsertBillBatch();
+      } catch (err) {
+        // Some connectors don't support bills; log and continue.
+        console.warn(`[sync] fetchCreditCardBills failed for account ${account.id}:`, err);
+      }
     }
 
+    // Transactions — fetch for all account types.
     const txPage = await pluggy.fetchTransactions(account.id, { pageSize: 500 });
     upsertTxBatch(txPage.results, account.id);
   }
