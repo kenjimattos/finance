@@ -212,6 +212,48 @@ export function parseCardGroupFilter(
   return { kind: 'id', id: parsed };
 }
 
+// PUT /transactions/:id/description — override a transaction's display description
+transactionsRouter.put('/transactions/:id/description', (req, res, next) => {
+  try {
+    const txId = req.params.id;
+    const { description } = z
+      .object({ description: z.string().min(1) })
+      .parse(req.body);
+
+    // Verify transaction exists.
+    const tx = db
+      .prepare('SELECT id FROM transactions WHERE id = ?')
+      .get(txId);
+    if (!tx) {
+      res.status(404).json({ error: 'Transaction not found' });
+      return;
+    }
+
+    db.prepare(
+      `INSERT INTO transaction_description_overrides (transaction_id, description)
+       VALUES (?, ?)
+       ON CONFLICT(transaction_id) DO UPDATE SET description = excluded.description`,
+    ).run(txId, description);
+
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /transactions/:id/description — remove description override
+transactionsRouter.delete('/transactions/:id/description', (req, res, next) => {
+  try {
+    const txId = req.params.id;
+    db.prepare(
+      'DELETE FROM transaction_description_overrides WHERE transaction_id = ?',
+    ).run(txId);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /transactions/sync?itemId=... — explicit sync endpoint (mutating)
 transactionsRouter.post('/transactions/sync', async (req, res, next) => {
   try {
