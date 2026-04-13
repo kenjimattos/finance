@@ -175,7 +175,7 @@ export function Overview({
       openingBalance: Math.round(openingBalance * 100) / 100,
       currentBalance,
       income: Math.round(income * 100) / 100,
-      expenses: Math.round(expenses * 100) / 100,
+      expenses: Math.round((expenses - cardBills) * 100) / 100, // saídas sem faturas
       cardBills: Math.round(cardBills * 100) / 100,
     };
   }, [cashflowQ.data]);
@@ -183,13 +183,24 @@ export function Overview({
   const prevCashSummary = useMemo(() => {
     const data = prevCashflowQ.data;
     if (!data) return null;
+    const isBillPayment = (desc: string) =>
+      /fatura/i.test(desc) || /^INT\s/i.test(desc);
     let expenses = 0;
+    let cardBills = 0;
     for (const day of data.days) {
       for (const e of day.entries) {
-        if (e.amount < 0) expenses += e.amount;
+        if (e.amount < 0) {
+          expenses += e.amount;
+          if (
+            (e.type === 'bank_transaction' && isBillPayment(e.description)) ||
+            e.type === 'credit_card_bill'
+          ) {
+            cardBills += e.amount;
+          }
+        }
       }
     }
-    return { expenses: Math.round(expenses * 100) / 100 };
+    return { expenses: Math.round((expenses - cardBills) * 100) / 100 };
   }, [prevCashflowQ.data]);
 
   // ── Resolve offset per account and fetch breakdowns in parallel ──
