@@ -69,16 +69,38 @@ export function CashFlow({
     queryFn: api.getCashFlowRange,
   });
 
-  const months = useMemo(() => {
-    if (!rangeQ.data?.firstMonth || !rangeQ.data?.lastMonth) return [];
-    const [sy, sm] = rangeQ.data.firstMonth.split('-').map(Number);
-    const [ey, em] = rangeQ.data.lastMonth.split('-').map(Number);
-    return monthRange(sy, sm, ey, em);
-  }, [rangeQ.data]);
+  // Current month is always visible; up to 5 previous months are behind a toggle.
+  const [historyOpen, setHistoryOpen] = useState(false);
 
-  // Parallel queries — one per month.
+  const { currentMonth, historyMonths, allVisibleMonths } = useMemo(() => {
+    if (!rangeQ.data?.lastMonth) return { currentMonth: null, historyMonths: [], allVisibleMonths: [] };
+    const [ey, em] = rangeQ.data.lastMonth.split('-').map(Number);
+    const current = { year: ey, month: em };
+
+    // Up to 5 months before the current, capped by firstMonth.
+    const history: Array<{ year: number; month: number }> = [];
+    const first = rangeQ.data.firstMonth;
+    if (first) {
+      const [fy, fm] = first.split('-').map(Number);
+      const sixBack = addMonth(ey, em, -5);
+      // Start from whichever is later: 6 months ago or first available.
+      const startY = sixBack.year > fy || (sixBack.year === fy && sixBack.month > fm) ? sixBack.year : fy;
+      const startM = sixBack.year > fy || (sixBack.year === fy && sixBack.month > fm) ? sixBack.month : fm;
+      const range = monthRange(startY, startM, ey, em);
+      // Everything except the last entry (which is the current month).
+      for (let i = 0; i < range.length - 1; i++) history.push(range[i]);
+    }
+
+    return {
+      currentMonth: current,
+      historyMonths: history,
+      allVisibleMonths: historyOpen ? [...history, current] : [current],
+    };
+  }, [rangeQ.data, historyOpen]);
+
+  // Only fetch months that are visible — avoids 12 parallel requests on load.
   const queries = useQueries({
-    queries: months.map((m) => ({
+    queries: allVisibleMonths.map((m) => ({
       queryKey: ['cashflow', monthStr(m.year, m.month)],
       queryFn: () => api.getCashFlow(monthStr(m.year, m.month)),
     })),
@@ -184,8 +206,10 @@ export function CashFlow({
         <h1 className="mt-3 font-display text-[72px] leading-[0.9] tracking-[-0.03em] text-[color:var(--color-ink)] md:text-[96px]">
           {anyLoading && !firstData ? (
             <span className="inline-block h-[72px] w-2/3 animate-pulse rounded-sm bg-[color:var(--color-paper-tint)] md:h-[96px]" />
-          ) : months.length > 0 ? (
-            `${monthLabel(months[0].year, months[0].month).split(' ')[0]} — ${monthLabel(months[months.length - 1].year, months[months.length - 1].month)}`
+          ) : allVisibleMonths.length > 0 ? (
+            allVisibleMonths.length === 1
+              ? monthLabel(allVisibleMonths[0].year, allVisibleMonths[0].month)
+              : `${monthLabel(allVisibleMonths[0].year, allVisibleMonths[0].month).split(' ')[0]} — ${monthLabel(allVisibleMonths[allVisibleMonths.length - 1].year, allVisibleMonths[allVisibleMonths.length - 1].month)}`
           ) : (
             'Fluxo de caixa'
           )}
@@ -209,8 +233,21 @@ export function CashFlow({
         )}
       </div>
 
+      {/* History toggle */}
+      {historyMonths.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((o) => !o)}
+          className="mb-8 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+        >
+          {historyOpen
+            ? '− ocultar histórico'
+            : `+ mostrar ${historyMonths.length} ${historyMonths.length === 1 ? 'mês anterior' : 'meses anteriores'}`}
+        </button>
+      )}
+
       {/* ── Month sections ── */}
-      {months.map((m, mi) => {
+      {allVisibleMonths.map((m, mi) => {
         const q = queries[mi];
         const data = q?.data;
         const ms = monthStr(m.year, m.month);

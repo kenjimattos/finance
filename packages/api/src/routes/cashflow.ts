@@ -160,20 +160,33 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
     const bankAccountIds = bankAccounts.map((a) => a.id);
 
     // ── Compute opening balance per bank account ──
-    // Opening balance = current Pluggy balance − sum of all transactions
-    // from the target month's first day onward. This reconstructs the
-    // end-of-previous-month position regardless of which month we're viewing.
+    // Uses the nearest balance snapshot (at or after the first day of the
+    // target month) as anchor, falling back to the live Pluggy balance.
+    // Formula: opening = snapshot_balance − sum(transactions from firstDay
+    // through snapshot_date).
     const openingBalances = new Map<string, number>();
     for (const ba of bankAccounts) {
+      // Find the closest snapshot on or after the target month's first day.
+      const snap = db
+        .prepare(
+          `SELECT date, balance FROM balance_snapshots
+           WHERE account_id = ? AND date >= ?
+           ORDER BY date ASC LIMIT 1`,
+        )
+        .get(ba.id, firstDay) as { date: string; balance: number } | undefined;
+
+      const anchorBalance = snap?.balance ?? ba.balance ?? 0;
+      const anchorCutoff = snap?.date ?? '9999-12-31'; // all transactions if using live balance
+
       const row = db
         .prepare(
           `SELECT COALESCE(SUM(t.amount), 0) AS total
            FROM transactions t
-           WHERE t.account_id = ? AND t.date >= ?
+           WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
              AND ${BANK_TX_EXCLUDE_SQL}`,
         )
-        .get(ba.id, firstDay, ...BANK_TX_EXCLUDE_PARAMS) as { total: number };
-      openingBalances.set(ba.id, round2((ba.balance ?? 0) - row.total));
+        .get(ba.id, firstDay, anchorCutoff, ...BANK_TX_EXCLUDE_PARAMS) as { total: number };
+      openingBalances.set(ba.id, round2(anchorBalance - row.total));
     }
 
     // ── Past days: actual bank transactions (all bank accounts) ──
