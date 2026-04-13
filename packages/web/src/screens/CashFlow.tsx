@@ -310,10 +310,9 @@ function DayGroup({
         return (
           <div
             key={entry.id}
-            className="group grid items-center gap-x-6 py-[7px]"
+            className={`group grid items-center gap-x-6 py-[7px] ${day.isPast ? 'bg-[color:var(--color-paper-tint)]' : ''}`}
             style={{
               gridTemplateColumns: '64px 80px 1fr 110px 110px 120px',
-              opacity: isFuture ? 0.55 : 1,
             }}
           >
             {/* Date — only on first row of the group */}
@@ -354,7 +353,6 @@ function DayGroup({
             <DescriptionCell
               entry={entry}
               isPast={day.isPast}
-              isFuture={isFuture}
               manualId={manualId}
               onEditDesc={onEditDesc}
               onDeleteManual={onDeleteManual}
@@ -388,14 +386,12 @@ function DayGroup({
 function DescriptionCell({
   entry,
   isPast,
-  isFuture,
   manualId,
   onEditDesc,
   onDeleteManual,
 }: {
   entry: CashFlowEntry;
   isPast: boolean;
-  isFuture: boolean;
   manualId: number | null;
   onEditDesc: (id: string, desc: string) => void;
   onDeleteManual: (id: number) => void;
@@ -426,12 +422,10 @@ function DescriptionCell({
         />
       ) : (
         <span
-          className={`truncate font-body text-[13px] ${
+          className={`truncate font-body text-[13px] text-[color:var(--color-ink)] ${
             isPast && entry.type === 'bank_transaction'
-              ? 'cursor-pointer text-[color:var(--color-ink)] hover:text-[color:var(--color-accent)]'
-              : isFuture
-                ? 'italic text-[color:var(--color-ink-soft)]'
-                : 'text-[color:var(--color-ink)]'
+              ? 'cursor-pointer hover:text-[color:var(--color-accent)]'
+              : ''
           }`}
           onClick={() => {
             if (isPast && entry.type === 'bank_transaction') setEditing(true);
