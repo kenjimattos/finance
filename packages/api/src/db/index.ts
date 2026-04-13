@@ -195,6 +195,28 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
   );
+
+  -- Manual recurring entries for cash-flow projection. Each row represents
+  -- a monthly event (salary, rent, etc.) that lands on a fixed day. The
+  -- cash-flow screen places these on future days of the current month.
+  CREATE TABLE IF NOT EXISTS manual_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    description TEXT NOT NULL,
+    amount REAL NOT NULL,           -- positive = income, negative = expense
+    day_of_month INTEGER NOT NULL,  -- 1-31; clamped to actual month length at query time
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- User overrides for transaction descriptions. Allows renaming bank
+  -- transactions (e.g. "PIX RECEBIDO CP 123" → "Salário") without
+  -- mutating the Pluggy cache. Same join-table pattern as other overrides.
+  CREATE TABLE IF NOT EXISTS transaction_description_overrides (
+    transaction_id TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
 `);
 
 // -----------------------------------------------------------------------------
@@ -208,6 +230,19 @@ db.exec(`
 // DB out there has already run them.
 addColumnIfMissing('transactions', 'card_last4', 'TEXT');
 addColumnIfMissing('transactions', 'amount_in_account_currency', 'REAL');
+
+// Phase 5: add balance and subtype to accounts for BANK account support.
+addColumnIfMissing('accounts', 'balance', 'REAL');
+addColumnIfMissing('accounts', 'subtype', 'TEXT');
+
+// Backfill balance and subtype from raw_json for existing accounts.
+db.exec(`
+  UPDATE accounts
+  SET balance = json_extract(raw_json, '$.balance'),
+      subtype = json_extract(raw_json, '$.subtype')
+  WHERE balance IS NULL
+    AND json_extract(raw_json, '$.balance') IS NOT NULL
+`);
 
 // Backfill amount_in_account_currency from raw_json for existing rows.
 // Pluggy provides this field for foreign-currency transactions (e.g. USD
