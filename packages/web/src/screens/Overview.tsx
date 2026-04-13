@@ -137,17 +137,43 @@ export function Overview({
     let income = 0;
     let expenses = 0;
     let cardBills = 0;
+
+    // Bill payment patterns in bank transaction descriptions.
+    const isBillPayment = (desc: string) =>
+      /fatura/i.test(desc) || /^INT\s/i.test(desc);
+
     for (const day of data.days) {
       for (const e of day.entries) {
-        if (e.amount > 0) income += e.amount;
-        else expenses += e.amount;
-        if (e.type === 'credit_card_bill') cardBills += e.amount;
+        if (day.isPast) {
+          // Realized: actual bank transactions
+          if (e.amount > 0) income += e.amount;
+          else expenses += e.amount;
+          // Detect bill payments from bank statement
+          if (e.type === 'bank_transaction' && e.amount < 0 && isBillPayment(e.description)) {
+            cardBills += e.amount;
+          }
+        } else {
+          // Projected: manual entries + credit card bills
+          if (e.amount > 0) income += e.amount;
+          else expenses += e.amount;
+          if (e.type === 'credit_card_bill') {
+            cardBills += e.amount;
+          }
+        }
       }
     }
-    const closingBalance = Math.round((openingBalance + income + expenses) * 100) / 100;
+
+    // Saldo = opening + realized only (past days)
+    let realizedSum = 0;
+    for (const day of data.days) {
+      if (!day.isPast) break;
+      for (const e of day.entries) realizedSum += e.amount;
+    }
+    const currentBalance = Math.round((openingBalance + realizedSum) * 100) / 100;
+
     return {
       openingBalance: Math.round(openingBalance * 100) / 100,
-      closingBalance,
+      currentBalance,
       income: Math.round(income * 100) / 100,
       expenses: Math.round(expenses * 100) / 100,
       cardBills: Math.round(cardBills * 100) / 100,
@@ -283,7 +309,7 @@ export function Overview({
           <div>
             {/* Saldo headline */}
             <div className="font-display text-[72px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[96px]">
-              {formatBRL(cashSummary.closingBalance)}
+              {formatBRL(cashSummary.currentBalance)}
             </div>
             <div className="mt-2 flex items-baseline gap-4">
               <p className="font-body text-sm text-[color:var(--color-ink-muted)]">
