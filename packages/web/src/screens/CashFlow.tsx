@@ -109,6 +109,11 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
       api.updateManualEntry(id, { description: desc }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
   });
+  const amountManualMut = useMutation({
+    mutationFn: ({ id, amount }: { id: number; amount: number }) =>
+      api.updateManualEntry(id, { amount }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cashflow'] }),
+  });
 
   const loading = cashflowQ.isLoading;
   const multiBanks = (data?.bankAccounts?.length ?? 0) > 1;
@@ -225,6 +230,12 @@ export function CashFlow({ onBack }: { onBack: () => void }) {
                   descTxMut.mutate({ id: entry.id, desc });
                 }
               }}
+              onEditAmount={(entry, amount) => {
+                if (entry.type === 'manual_entry') {
+                  const numId = Number(entry.id.replace('manual-', ''));
+                  amountManualMut.mutate({ id: numId, amount });
+                }
+              }}
               staggerIndex={di}
             />
           ))}
@@ -286,6 +297,7 @@ function DayGroup({
   bankNames,
   onDeleteManual,
   onEditDesc,
+  onEditAmount,
   staggerIndex,
 }: {
   day: CashFlowDay;
@@ -295,6 +307,7 @@ function DayGroup({
   bankNames: Map<string, string>;
   onDeleteManual: (id: number) => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
+  onEditAmount: (entry: CashFlowEntry, amount: number) => void;
   staggerIndex: number;
 }) {
   const isToday = day.date === today;
@@ -370,14 +383,20 @@ function DayGroup({
             />
 
             {/* Debit column */}
-            <div className="text-right font-mono text-[13px] tabular-nums text-[color:var(--color-ink)]">
-              {isDebit ? formatBRL(entry.amount) : ''}
-            </div>
+            <AmountCell
+              amount={isDebit ? entry.amount : null}
+              color="var(--color-ink)"
+              editable={entry.type === 'manual_entry'}
+              onSubmit={(val) => onEditAmount(entry, val)}
+            />
 
             {/* Credit column */}
-            <div className="text-right font-mono text-[13px] tabular-nums text-[color:var(--color-positive)]">
-              {!isDebit ? formatBRL(entry.amount) : ''}
-            </div>
+            <AmountCell
+              amount={!isDebit ? entry.amount : null}
+              color="var(--color-positive)"
+              editable={entry.type === 'manual_entry'}
+              onSubmit={(val) => onEditAmount(entry, val)}
+            />
 
             {/* Running balance — only on last row of the group */}
             <div className="text-right font-mono text-[11px] tabular-nums text-[color:var(--color-ink-muted)]">
@@ -451,6 +470,62 @@ function DescriptionCell({
           remover
         </button>
       )}
+    </div>
+  );
+}
+
+// ── Amount cell (click-to-edit for manual entries) ──
+
+function AmountCell({
+  amount,
+  color,
+  editable,
+  onSubmit,
+}: {
+  amount: number | null;
+  color: string;
+  editable: boolean;
+  onSubmit: (val: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  if (amount === null) return <div />;
+
+  const handleSubmit = () => {
+    const val = Number(inputRef.current?.value);
+    if (!isNaN(val) && val !== 0 && val !== amount) onSubmit(val);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="text-right">
+        <input
+          ref={inputRef}
+          type="number"
+          step="0.01"
+          defaultValue={amount}
+          className="w-full border-b border-[color:var(--color-accent)] bg-transparent text-right font-mono text-[13px] tabular-nums text-[color:var(--color-ink)] outline-none"
+          onBlur={handleSubmit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSubmit();
+            if (e.key === 'Escape') setEditing(false);
+          }}
+          autoFocus
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`text-right font-mono text-[13px] tabular-nums ${editable ? 'cursor-pointer hover:text-[color:var(--color-accent)]' : ''}`}
+      style={{ color }}
+      onClick={() => { if (editable) setEditing(true); }}
+      title={editable ? 'Editar valor' : undefined}
+    >
+      {formatBRL(amount)}
     </div>
   );
 }
