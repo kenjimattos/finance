@@ -76,8 +76,8 @@ export function CashFlow({
 
   const [projectionOpen, setProjectionOpen] = useState(false);
 
-  const { currentMonth, historyMonths, projectionMonth, allVisibleMonths } = useMemo(() => {
-    if (!rangeQ.data?.lastMonth) return { currentMonth: null, historyMonths: [], projectionMonth: null, allVisibleMonths: [] };
+  const { historyMonths, projectionMonth, allVisibleMonths } = useMemo(() => {
+    if (!rangeQ.data?.lastMonth) return { historyMonths: [], projectionMonth: null, allVisibleMonths: [] };
     const [ey, em] = rangeQ.data.lastMonth.split('-').map(Number);
     const current = { year: ey, month: em };
     const projection = addMonth(ey, em, 1);
@@ -98,7 +98,6 @@ export function CashFlow({
     if (projectionOpen) visible.push(projection);
 
     return {
-      currentMonth: current,
       historyMonths: history,
       projectionMonth: projection,
       allVisibleMonths: visible,
@@ -166,13 +165,12 @@ export function CashFlow({
   }, [queries]);
 
   // ── Mutations ──
-  const [addingEntry, setAddingEntry] = useState(false);
 
   const invalidateAll = () => qc.invalidateQueries({ queryKey: ['cashflow'] });
 
   const createMut = useMutation({
     mutationFn: api.createManualEntry,
-    onSuccess: () => { invalidateAll(); setAddingEntry(false); },
+    onSuccess: invalidateAll,
   });
   const deleteMut = useMutation({ mutationFn: api.deleteManualEntry, onSuccess: invalidateAll });
   const descTxMut = useMutation({
@@ -268,14 +266,13 @@ export function CashFlow({
         const data = q?.data;
         const ms = monthStr(m.year, m.month);
         const endBal = monthEndBalances.get(ms) ?? null;
-        const isProjection = projectionMonth
-          && m.year === projectionMonth.year && m.month === projectionMonth.month;
 
         return (
           <MonthSection
             key={ms}
             year={m.year}
             month={m.month}
+            monthStr={ms}
             data={data ?? null}
             loading={q?.isLoading ?? false}
             today={today}
@@ -283,9 +280,10 @@ export function CashFlow({
             endBalance={endBal}
             bankColorMap={bankColorMap}
             bankNames={bankNames}
-            readOnly={!!isProjection}
             onSelectBill={onSelectBill}
             onDeleteManual={(id) => deleteMut.mutate(id)}
+            onCreateEntry={(e) => createMut.mutate({ ...e, month: ms })}
+            creating={createMut.isPending}
             onEditDesc={(entry, desc) => {
               if (entry.type === 'manual_entry') {
                 descManualMut.mutate({ id: Number(entry.id.replace('manual-', '')), desc });
@@ -320,14 +318,6 @@ export function CashFlow({
         </button>
       )}
 
-      {/* New entry row (global — applies to all months via day_of_month) */}
-      <NewEntryRow
-        active={addingEntry}
-        onActivate={() => setAddingEntry(true)}
-        onSubmit={(e) => createMut.mutate(e)}
-        onCancel={() => setAddingEntry(false)}
-        submitting={createMut.isPending}
-      />
     </motion.section>
   );
 }
@@ -337,6 +327,7 @@ export function CashFlow({
 function MonthSection({
   year,
   month,
+  monthStr,
   data,
   loading,
   today,
@@ -344,15 +335,17 @@ function MonthSection({
   endBalance,
   bankColorMap,
   bankNames,
-  readOnly = false,
   onSelectBill,
   onDeleteManual,
+  onCreateEntry,
+  creating,
   onEditDesc,
   onEditAmount,
   onEditDay,
 }: {
   year: number;
   month: number;
+  monthStr: string;
   data: CashFlowResponse | null;
   loading: boolean;
   today: string;
@@ -360,14 +353,15 @@ function MonthSection({
   endBalance: number | null;
   bankColorMap: Map<string, string>;
   bankNames: Map<string, string>;
-  /** When true, entries are not editable (projection month). */
-  readOnly?: boolean;
   onSelectBill: (year: number, month: number) => void;
   onDeleteManual: (id: number) => void;
+  onCreateEntry: (e: { description: string; amount: number; dayOfMonth: number }) => void;
+  creating: boolean;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onEditAmount: (entry: CashFlowEntry, amount: number) => void;
   onEditDay: (entry: CashFlowEntry, day: number) => void;
 }) {
+  const [addingEntry, setAddingEntry] = useState(false);
   return (
     <div className="mb-10">
       {/* Month header */}
@@ -418,7 +412,6 @@ function MonthSection({
             balance={dayBalances.get(day.date) ?? null}
             bankColors={bankColorMap}
             bankNames={bankNames}
-            readOnly={readOnly}
             onSelectBill={() => onSelectBill(year, month)}
             onDeleteManual={onDeleteManual}
             onEditDesc={onEditDesc}
@@ -432,6 +425,15 @@ function MonthSection({
           Nenhuma movimentação.
         </p>
       )}
+
+      {/* Add entry — scoped to this month */}
+      <NewEntryRow
+        active={addingEntry}
+        onActivate={() => setAddingEntry(true)}
+        onSubmit={(e) => { onCreateEntry(e); setAddingEntry(false); }}
+        onCancel={() => setAddingEntry(false)}
+        submitting={creating}
+      />
     </div>
   );
 }
@@ -444,7 +446,6 @@ function DayGroup({
   balance,
   bankColors,
   bankNames,
-  readOnly = false,
   onSelectBill,
   onDeleteManual,
   onEditDesc,
@@ -457,7 +458,6 @@ function DayGroup({
   balance: number | null;
   bankColors: Map<string, string>;
   bankNames: Map<string, string>;
-  readOnly?: boolean;
   onSelectBill: () => void;
   onDeleteManual: (id: number) => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
@@ -519,7 +519,7 @@ function DayGroup({
                 <>
                   <DayCell
                     date={day.date}
-                    editable={!readOnly && entry.type === 'manual_entry'}
+                    editable={entry.type === 'manual_entry'}
                     onSubmit={(d) => onEditDay(entry, d)}
                   />
                   {i === 0 && isToday && (
@@ -535,8 +535,7 @@ function DayGroup({
             {/* Description */}
             <DescriptionCell
               entry={entry}
-              manualId={readOnly ? null : manualId}
-              readOnly={readOnly}
+              manualId={manualId}
               onSelectBill={entry.type === 'credit_card_bill' ? onSelectBill : undefined}
               onEditDesc={onEditDesc}
               onDeleteManual={onDeleteManual}
@@ -546,7 +545,7 @@ function DayGroup({
             <AmountCell
               amount={isDebit ? entry.amount : null}
               color="var(--color-ink)"
-              editable={!readOnly && entry.type === 'manual_entry'}
+              editable={entry.type === 'manual_entry'}
               onSubmit={(val) => onEditAmount(entry, val)}
             />
 
@@ -554,7 +553,7 @@ function DayGroup({
             <AmountCell
               amount={!isDebit ? entry.amount : null}
               color="var(--color-positive)"
-              editable={!readOnly && entry.type === 'manual_entry'}
+              editable={entry.type === 'manual_entry'}
               onSubmit={(val) => onEditAmount(entry, val)}
             />
 
@@ -576,14 +575,12 @@ function DayGroup({
 function DescriptionCell({
   entry,
   manualId,
-  readOnly = false,
   onSelectBill,
   onEditDesc,
   onDeleteManual,
 }: {
   entry: CashFlowEntry;
   manualId: number | null;
-  readOnly?: boolean;
   onSelectBill?: () => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onDeleteManual: (id: number) => void;
@@ -591,7 +588,7 @@ function DescriptionCell({
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const editable = !readOnly && (entry.type === 'bank_transaction' || entry.type === 'manual_entry');
+  const editable = entry.type === 'bank_transaction' || entry.type === 'manual_entry';
 
   const handleSubmit = () => {
     const val = inputRef.current?.value.trim();

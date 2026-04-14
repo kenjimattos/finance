@@ -9,6 +9,7 @@ interface ManualEntryRow {
   description: string;
   amount: number;
   day_of_month: number;
+  month: string;
   active: number;
   created_at: string;
 }
@@ -19,17 +20,26 @@ function toResponse(row: ManualEntryRow) {
     description: row.description,
     amount: row.amount,
     dayOfMonth: row.day_of_month,
+    month: row.month,
     active: row.active === 1,
     createdAt: row.created_at,
   };
 }
 
-// GET /manual-entries — list all manual entries
-manualEntriesRouter.get('/manual-entries', (_req, res, next) => {
+// GET /manual-entries?month=YYYY-MM — list entries for a specific month
+manualEntriesRouter.get('/manual-entries', (req, res, next) => {
   try {
-    const rows = db
-      .prepare('SELECT * FROM manual_entries ORDER BY day_of_month ASC')
-      .all() as ManualEntryRow[];
+    const { month } = z
+      .object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() })
+      .parse(req.query);
+
+    const rows = month
+      ? db
+          .prepare('SELECT * FROM manual_entries WHERE month = ? ORDER BY day_of_month ASC')
+          .all(month) as ManualEntryRow[]
+      : db
+          .prepare('SELECT * FROM manual_entries ORDER BY month ASC, day_of_month ASC')
+          .all() as ManualEntryRow[];
     res.json(rows.map(toResponse));
   } catch (err) {
     next(err);
@@ -40,17 +50,18 @@ const createSchema = z.object({
   description: z.string().min(1),
   amount: z.number(),
   dayOfMonth: z.number().int().min(1).max(31),
+  month: z.string().regex(/^\d{4}-\d{2}$/),
 });
 
-// POST /manual-entries — create a new entry
+// POST /manual-entries — create a new entry for a specific month
 manualEntriesRouter.post('/manual-entries', (req, res, next) => {
   try {
-    const { description, amount, dayOfMonth } = createSchema.parse(req.body);
+    const { description, amount, dayOfMonth, month } = createSchema.parse(req.body);
     const result = db
       .prepare(
-        'INSERT INTO manual_entries (description, amount, day_of_month) VALUES (?, ?, ?)',
+        'INSERT INTO manual_entries (description, amount, day_of_month, month) VALUES (?, ?, ?, ?)',
       )
-      .run(description, amount, dayOfMonth);
+      .run(description, amount, dayOfMonth, month);
     const row = db
       .prepare('SELECT * FROM manual_entries WHERE id = ?')
       .get(result.lastInsertRowid) as ManualEntryRow;

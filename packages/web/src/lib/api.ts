@@ -202,6 +202,7 @@ export interface ManualEntry {
   description: string;
   amount: number;
   dayOfMonth: number;
+  month: string;
   active: boolean;
   createdAt: string;
 }
@@ -415,6 +416,7 @@ export const api = {
     description: string;
     amount: number;
     dayOfMonth: number;
+    month: string;
   }) =>
     request<ManualEntry>('/manual-entries', {
       method: 'POST',

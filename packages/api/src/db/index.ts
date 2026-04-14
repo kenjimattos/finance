@@ -243,6 +243,16 @@ db.exec(`
 // DB out there has already run them.
 addColumnIfMissing('transactions', 'card_last4', 'TEXT');
 addColumnIfMissing('transactions', 'amount_in_account_currency', 'REAL');
+addColumnIfMissing('manual_entries', 'month', 'TEXT');
+
+// Backfill: assign existing month-less manual entries to the current month.
+// Manual entries are now per-month (independent editing). Legacy rows without
+// a month get pinned to today's month so they don't appear in every month.
+{
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  db.prepare(`UPDATE manual_entries SET month = ? WHERE month IS NULL`).run(currentMonth);
+}
 
 // Phase 5: add balance and subtype to accounts for BANK account support.
 addColumnIfMissing('accounts', 'balance', 'REAL');

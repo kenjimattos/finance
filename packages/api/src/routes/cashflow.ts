@@ -263,8 +263,8 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
 
     // ── Future days: manual entries ──
     const manualEntries = db
-      .prepare('SELECT id, description, amount, day_of_month FROM manual_entries WHERE active = 1')
-      .all() as ManualEntryRow[];
+      .prepare('SELECT id, description, amount, day_of_month FROM manual_entries WHERE active = 1 AND month = ?')
+      .all(monthStr) as ManualEntryRow[];
 
     // ── Future days: credit card bill outflows ──
     const creditAccounts = db
