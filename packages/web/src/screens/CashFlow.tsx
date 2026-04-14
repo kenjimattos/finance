@@ -283,6 +283,7 @@ export function CashFlow({
             onSelectBill={onSelectBill}
             onDeleteManual={(id) => deleteMut.mutate(id)}
             onCreateEntry={(e) => createMut.mutate({ ...e, month: ms })}
+            onDuplicateEntry={(e) => createMut.mutate(e)}
             creating={createMut.isPending}
             onEditDesc={(entry, desc) => {
               if (entry.type === 'manual_entry') {
@@ -327,7 +328,7 @@ export function CashFlow({
 function MonthSection({
   year,
   month,
-  monthStr,
+  monthStr: ms,
   data,
   loading,
   today,
@@ -338,6 +339,7 @@ function MonthSection({
   onSelectBill,
   onDeleteManual,
   onCreateEntry,
+  onDuplicateEntry,
   creating,
   onEditDesc,
   onEditAmount,
@@ -356,12 +358,17 @@ function MonthSection({
   onSelectBill: (year: number, month: number) => void;
   onDeleteManual: (id: number) => void;
   onCreateEntry: (e: { description: string; amount: number; dayOfMonth: number }) => void;
+  onDuplicateEntry: (e: { description: string; amount: number; dayOfMonth: number; month: string }) => void;
   creating: boolean;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onEditAmount: (entry: CashFlowEntry, amount: number) => void;
   onEditDay: (entry: CashFlowEntry, day: number) => void;
 }) {
   const [addingEntry, setAddingEntry] = useState(false);
+  const nextMs = (() => {
+    const n = addMonth(year, month, 1);
+    return `${n.year}-${pad(n.month)}`;
+  })();
   return (
     <div className="mb-10">
       {/* Month header */}
@@ -414,6 +421,18 @@ function MonthSection({
             bankNames={bankNames}
             onSelectBill={() => onSelectBill(year, month)}
             onDeleteManual={onDeleteManual}
+            onDuplicate={(entry, dom) => onDuplicateEntry({
+              description: entry.description,
+              amount: entry.amount,
+              dayOfMonth: dom,
+              month: ms,
+            })}
+            onDuplicateNext={(entry, dom) => onDuplicateEntry({
+              description: entry.description,
+              amount: entry.amount,
+              dayOfMonth: dom,
+              month: nextMs,
+            })}
             onEditDesc={onEditDesc}
             onEditAmount={onEditAmount}
             onEditDay={onEditDay}
@@ -448,6 +467,8 @@ function DayGroup({
   bankNames,
   onSelectBill,
   onDeleteManual,
+  onDuplicate,
+  onDuplicateNext,
   onEditDesc,
   onEditAmount,
   onEditDay,
@@ -460,11 +481,14 @@ function DayGroup({
   bankNames: Map<string, string>;
   onSelectBill: () => void;
   onDeleteManual: (id: number) => void;
+  onDuplicate: (entry: CashFlowEntry, dayOfMonth: number) => void;
+  onDuplicateNext: (entry: CashFlowEntry, dayOfMonth: number) => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onEditAmount: (entry: CashFlowEntry, amount: number) => void;
   onEditDay: (entry: CashFlowEntry, day: number) => void;
   staggerIndex: number;
 }) {
+  const dayOfMonth = Number(day.date.split('-')[2]);
   const isToday = day.date === today;
 
   return (
@@ -539,6 +563,8 @@ function DayGroup({
               onSelectBill={entry.type === 'credit_card_bill' ? onSelectBill : undefined}
               onEditDesc={onEditDesc}
               onDeleteManual={onDeleteManual}
+              onDuplicate={() => onDuplicate(entry, dayOfMonth)}
+              onDuplicateNext={() => onDuplicateNext(entry, dayOfMonth)}
             />
 
             {/* Debit column */}
@@ -578,12 +604,16 @@ function DescriptionCell({
   onSelectBill,
   onEditDesc,
   onDeleteManual,
+  onDuplicate,
+  onDuplicateNext,
 }: {
   entry: CashFlowEntry;
   manualId: number | null;
   onSelectBill?: () => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onDeleteManual: (id: number) => void;
+  onDuplicate: () => void;
+  onDuplicateNext: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -637,13 +667,31 @@ function DescriptionCell({
       )}
 
       {manualId !== null && (
-        <button
-          type="button"
-          onClick={() => onDeleteManual(manualId)}
-          className="ml-auto shrink-0 font-body text-[10px] text-[color:var(--color-ink-faint)] opacity-0 transition-opacity hover:text-[color:var(--color-accent)] group-hover/desc:opacity-100"
-        >
-          remover
-        </button>
+        <div className="ml-auto flex shrink-0 gap-3 opacity-0 transition-opacity group-hover/desc:opacity-100">
+          <button
+            type="button"
+            onClick={onDuplicate}
+            className="font-body text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
+            title="Duplicar neste mês"
+          >
+            duplicar
+          </button>
+          <button
+            type="button"
+            onClick={onDuplicateNext}
+            className="font-body text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
+            title="Duplicar no próximo mês"
+          >
+            → próx.
+          </button>
+          <button
+            type="button"
+            onClick={() => onDeleteManual(manualId)}
+            className="font-body text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
+          >
+            remover
+          </button>
+        </div>
       )}
     </div>
   );
