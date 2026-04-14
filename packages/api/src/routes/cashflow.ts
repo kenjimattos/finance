@@ -34,6 +34,24 @@ cashflowRouter.get('/cashflow/range', (_req, res) => {
   });
 });
 
+/**
+ * PUT /cashflow/bill-tag/:transactionId — tag a bank transaction as a bill payment.
+ * DELETE /cashflow/bill-tag/:transactionId — remove the tag.
+ */
+cashflowRouter.put('/cashflow/bill-tag/:transactionId', (req, res) => {
+  const { transactionId } = req.params;
+  db.prepare(
+    `INSERT OR IGNORE INTO bill_payment_tags (transaction_id) VALUES (?)`,
+  ).run(transactionId);
+  res.json({ ok: true, transactionId, tagged: true });
+});
+
+cashflowRouter.delete('/cashflow/bill-tag/:transactionId', (req, res) => {
+  const { transactionId } = req.params;
+  db.prepare('DELETE FROM bill_payment_tags WHERE transaction_id = ?').run(transactionId);
+  res.json({ ok: true, transactionId, tagged: false });
+});
+
 interface AccountRow {
   id: string;
   item_id: string;
@@ -49,6 +67,7 @@ interface BankTxRow {
   description: string | null;
   amount: number;
   type: string | null;
+  is_bill_tagged: number;
 }
 
 interface ManualEntryRow {
@@ -65,6 +84,7 @@ interface CashFlowEntry {
   type: 'bank_transaction' | 'manual_entry' | 'credit_card_bill';
   accountId?: string;
   bankAccountId?: string;
+  isBillPayment?: boolean;
 }
 
 interface CashFlowDay {
@@ -250,9 +270,11 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
         .prepare(
           `SELECT t.id, t.account_id,  t.date,
                   COALESCE(o.description, t.description) AS description,
-                  t.amount, t.type
+                  t.amount, t.type,
+                  CASE WHEN bp.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_bill_tagged
            FROM transactions t
            LEFT JOIN transaction_description_overrides o ON o.transaction_id = t.id
+           LEFT JOIN bill_payment_tags bp ON bp.transaction_id = t.id
            WHERE t.account_id IN (${placeholders})
              AND t.date >= ? AND t.date <= ?
              AND ${BANK_TX_EXCLUDE_SQL}
@@ -347,12 +369,14 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
         // Actual bank transactions for this day (all bank accounts).
         for (const tx of pastTxRows) {
           if (tx.date === date) {
+            const billTagged = tx.is_bill_tagged === 1;
             entries.push({
               id: tx.id,
               description: tx.description ?? '',
               amount: round2(tx.amount),
               type: 'bank_transaction',
               bankAccountId: tx.account_id,
+              isBillPayment: billTagged || undefined,
             });
           }
         }

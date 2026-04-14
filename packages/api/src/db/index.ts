@@ -230,6 +230,15 @@ db.exec(`
     PRIMARY KEY (account_id, date),
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
   );
+
+  -- Manual tag: marks a BANK transaction as a credit card bill payment.
+  -- Used by the Overview to compute the faturas total when the auto-detection
+  -- (matching "FATURA"/"INT" in description) doesn't catch a payment.
+  CREATE TABLE IF NOT EXISTS bill_payment_tags (
+    transaction_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
 `);
 
 // -----------------------------------------------------------------------------

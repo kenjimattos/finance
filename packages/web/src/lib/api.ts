@@ -214,6 +214,7 @@ export interface CashFlowEntry {
   type: 'bank_transaction' | 'manual_entry' | 'credit_card_bill';
   accountId?: string;
   bankAccountId?: string;
+  isBillPayment?: boolean;
 }
 
 export interface CashFlowDay {
@@ -409,6 +410,12 @@ export const api = {
 
   getCashFlowRange: () =>
     request<{ firstMonth: string | null; lastMonth: string | null }>('/cashflow/range'),
+
+  tagBillPayment: (transactionId: string) =>
+    request<{ ok: true }>(`/cashflow/bill-tag/${encodeURIComponent(transactionId)}`, { method: 'PUT' }),
+
+  untagBillPayment: (transactionId: string) =>
+    request<{ ok: true }>(`/cashflow/bill-tag/${encodeURIComponent(transactionId)}`, { method: 'DELETE' }),
 
   listManualEntries: () => request<ManualEntry[]>('/manual-entries'),
 
