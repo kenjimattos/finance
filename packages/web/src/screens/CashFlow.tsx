@@ -667,29 +667,30 @@ function DescriptionCell({
       )}
 
       {manualId !== null && (
-        <div className="ml-auto flex shrink-0 gap-3 opacity-0 transition-opacity group-hover/desc:opacity-100">
+        <div className="ml-auto flex shrink-0 gap-2 opacity-0 transition-opacity group-hover/desc:opacity-100">
           <button
             type="button"
             onClick={onDuplicate}
-            className="font-body text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
+            className="font-mono text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
             title="Duplicar neste mês"
           >
-            duplicar
+            ++
           </button>
           <button
             type="button"
             onClick={onDuplicateNext}
-            className="font-body text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
+            className="font-mono text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
             title="Duplicar no próximo mês"
           >
-            → próx.
+            +→
           </button>
           <button
             type="button"
             onClick={() => onDeleteManual(manualId)}
-            className="font-body text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
+            className="font-mono text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
+            title="Remover"
           >
-            remover
+            ×
           </button>
         </div>
       )}
