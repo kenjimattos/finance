@@ -173,6 +173,11 @@ export function CashFlow({
     onSuccess: invalidateAll,
   });
   const deleteMut = useMutation({ mutationFn: api.deleteManualEntry, onSuccess: invalidateAll });
+  const billTagMut = useMutation({
+    mutationFn: ({ id, tagged }: { id: string; tagged: boolean }) =>
+      tagged ? api.untagBillPayment(id) : api.tagBillPayment(id),
+    onSuccess: invalidateAll,
+  });
   const descTxMut = useMutation({
     mutationFn: ({ id, desc }: { id: string; desc: string }) =>
       api.updateTransactionDescription(id, desc),
@@ -282,6 +287,9 @@ export function CashFlow({
             bankNames={bankNames}
             onSelectBill={onSelectBill}
             onDeleteManual={(id) => deleteMut.mutate(id)}
+            onToggleBillTag={(entry) =>
+              billTagMut.mutate({ id: entry.id, tagged: !!entry.isBillPayment })
+            }
             onCreateEntry={(e) => createMut.mutate({ ...e, month: ms })}
             onDuplicateEntry={(e) => createMut.mutate(e)}
             creating={createMut.isPending}
@@ -338,6 +346,7 @@ function MonthSection({
   bankNames,
   onSelectBill,
   onDeleteManual,
+  onToggleBillTag,
   onCreateEntry,
   onDuplicateEntry,
   creating,
@@ -357,6 +366,7 @@ function MonthSection({
   bankNames: Map<string, string>;
   onSelectBill: (year: number, month: number) => void;
   onDeleteManual: (id: number) => void;
+  onToggleBillTag: (entry: CashFlowEntry) => void;
   onCreateEntry: (e: { description: string; amount: number; dayOfMonth: number }) => void;
   onDuplicateEntry: (e: { description: string; amount: number; dayOfMonth: number; month: string }) => void;
   creating: boolean;
@@ -421,6 +431,7 @@ function MonthSection({
             bankNames={bankNames}
             onSelectBill={() => onSelectBill(year, month)}
             onDeleteManual={onDeleteManual}
+            onToggleBillTag={onToggleBillTag}
             onDuplicate={(entry, dom) => onDuplicateEntry({
               description: entry.description,
               amount: entry.amount,
@@ -469,6 +480,7 @@ function DayGroup({
   onDeleteManual,
   onDuplicate,
   onDuplicateNext,
+  onToggleBillTag,
   onEditDesc,
   onEditAmount,
   onEditDay,
@@ -483,6 +495,7 @@ function DayGroup({
   onDeleteManual: (id: number) => void;
   onDuplicate: (entry: CashFlowEntry, dayOfMonth: number) => void;
   onDuplicateNext: (entry: CashFlowEntry, dayOfMonth: number) => void;
+  onToggleBillTag: (entry: CashFlowEntry) => void;
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onEditAmount: (entry: CashFlowEntry, amount: number) => void;
   onEditDay: (entry: CashFlowEntry, day: number) => void;
@@ -504,11 +517,14 @@ function DayGroup({
           ? Number(entry.id.replace('manual-', ''))
           : null;
 
-        const bulletColor = entry.bankAccountId
-          ? bankColors.get(entry.bankAccountId) ?? 'var(--color-ink-muted)'
-          : entry.type === 'credit_card_bill'
-            ? 'var(--color-accent)'
+        const isBill = entry.isBillPayment || entry.type === 'credit_card_bill';
+        const bulletColor = isBill
+          ? 'var(--color-accent)'
+          : entry.bankAccountId
+            ? bankColors.get(entry.bankAccountId) ?? 'var(--color-ink-muted)'
             : 'var(--color-ink-faint)';
+
+        const canToggleBillTag = day.isPast && entry.type === 'bank_transaction';
 
         return (
           <div
@@ -519,19 +535,32 @@ function DayGroup({
             {/* Source / bank column */}
             {entry.type === 'manual_entry' ? <span /> : (
               <div
-                className={`flex items-center gap-1.5 min-w-0 ${entry.type === 'credit_card_bill' ? 'cursor-pointer hover:text-[color:var(--color-accent)]' : ''}`}
-                onClick={() => { if (entry.type === 'credit_card_bill') onSelectBill(); }}
-                title={entry.type === 'credit_card_bill' ? 'Ver detalhes da fatura' : undefined}
+                className={`flex items-center gap-1.5 min-w-0 ${
+                  canToggleBillTag || entry.type === 'credit_card_bill'
+                    ? 'cursor-pointer hover:text-[color:var(--color-accent)]'
+                    : ''
+                }`}
+                onClick={() => {
+                  if (canToggleBillTag) onToggleBillTag(entry);
+                  else if (entry.type === 'credit_card_bill') onSelectBill();
+                }}
+                title={
+                  canToggleBillTag
+                    ? (entry.isBillPayment ? 'Desmarcar como fatura' : 'Marcar como fatura')
+                    : entry.type === 'credit_card_bill'
+                      ? 'Ver detalhes da fatura'
+                      : undefined
+                }
               >
                 <span
                   className="inline-block h-[5px] w-[5px] shrink-0 rounded-full"
                   style={{ backgroundColor: bulletColor }}
                 />
-                <span className="truncate font-body text-[10px] text-[color:var(--color-ink-faint)]">
-                  {entry.type === 'bank_transaction' && entry.bankAccountId
-                    ? (bankNames?.get(entry.bankAccountId) ?? '')
-                    : entry.type === 'credit_card_bill'
-                      ? 'fatura'
+                <span className={`truncate font-body text-[10px] ${isBill ? 'text-[color:var(--color-accent)]' : 'text-[color:var(--color-ink-faint)]'}`}>
+                  {isBill
+                    ? 'fatura'
+                    : entry.type === 'bank_transaction' && entry.bankAccountId
+                      ? (bankNames?.get(entry.bankAccountId) ?? '')
                       : ''}
                 </span>
               </div>

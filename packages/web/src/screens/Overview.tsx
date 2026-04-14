@@ -144,18 +144,16 @@ export function Overview({
     let expenses = 0;
     let cardBills = 0;
 
-    // Bill payment patterns in bank transaction descriptions.
-    const isBillPayment = (desc: string) =>
-      /fatura/i.test(desc) || /^INT\s/i.test(desc);
+    // Bill payment: either manually tagged or auto-detected from description.
+    const isBillPayment = (e: typeof data.days[0]['entries'][0]) =>
+      e.isBillPayment || /fatura/i.test(e.description) || /^INT\s/i.test(e.description);
 
     for (const day of data.days) {
       for (const e of day.entries) {
         if (day.isPast) {
-          // Realized: actual bank transactions
           if (e.amount > 0) income += e.amount;
           else expenses += e.amount;
-          // Detect bill payments from bank statement
-          if (e.type === 'bank_transaction' && e.amount < 0 && isBillPayment(e.description)) {
+          if (e.type === 'bank_transaction' && e.amount < 0 && isBillPayment(e)) {
             cardBills += e.amount;
           }
         } else {
@@ -189,8 +187,8 @@ export function Overview({
   const prevCashSummary = useMemo(() => {
     const data = prevCashflowQ.data;
     if (!data) return null;
-    const isBillPayment = (desc: string) =>
-      /fatura/i.test(desc) || /^INT\s/i.test(desc);
+    const isBill = (e: typeof data.days[0]['entries'][0]) =>
+      e.isBillPayment || /fatura/i.test(e.description) || /^INT\s/i.test(e.description);
     let expenses = 0;
     let cardBills = 0;
     for (const day of data.days) {
@@ -198,7 +196,7 @@ export function Overview({
         if (e.amount < 0) {
           expenses += e.amount;
           if (
-            (e.type === 'bank_transaction' && isBillPayment(e.description)) ||
+            (e.type === 'bank_transaction' && isBill(e)) ||
             e.type === 'credit_card_bill'
           ) {
             cardBills += e.amount;
