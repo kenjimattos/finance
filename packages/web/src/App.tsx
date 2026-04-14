@@ -32,7 +32,7 @@ export function App() {
   return (
     <>
       <div className="page-rule" aria-hidden="true" />
-      <main className="relative z-10 mx-auto max-w-[960px] px-6 pt-16 pb-24 md:px-12 lg:pl-24">
+      <main className="relative z-10 mx-auto max-w-[1120px] px-6 pt-16 pb-24 md:px-12 lg:pl-24">
         {itemsQ.isLoading && <Skeleton />}
         {itemsQ.isError && (
           <ErrorBanner
