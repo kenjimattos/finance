@@ -4,32 +4,39 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.3.0] - 2026-04-13
+## [1.0.0] - 2026-04-13
+
+The app now covers both sides of personal finance — credit card bills (categorization, multi-bank) and checking account cash flow (realized + projected) — in a single Overview landing page.
 
 ### Added
 
 #### Overview as landing page (Caixa + Cartões)
 
 - **Overview is now the top-level screen**, divided into two editorial sections:
-  - **Caixa** — monthly cash flow summary: saldo (realized, based on last past day), entradas, saídas with delta vs previous month, faturas highlighted in accent. Faturas total intelligently includes both already-paid bills from bank transactions (matching "FATURA"/"INT" patterns) and projected future credit card bill outflows.
-  - **Cartões** — all credit card bills grouped by due-month: grand total with delta, aggregated category breakdown with proportional bars, per-account cards.
-- **"ver extrato →"** link in Caixa drills into the full CashFlow ledger; "← voltar" returns to Overview.
+  - **Caixa** — monthly cash flow summary: saldo (realized, based on last past day), entradas, saídas (excluding faturas) with delta vs previous month, faturas highlighted in accent color. "ver extrato →" drills into the full CashFlow ledger.
+  - **Cartões** — all credit card bills grouped by due-month: grand total with delta, aggregated category breakdown with proportional bars, per-account cards with closing/due dates.
+- **Next-month projection**: ←/→ navigation goes one month into the future. Future months show projected saldo based on manual entries + credit card bill outflows. Label switches to "saldo projetado".
 
 #### CashFlow improvements
 
-- **Dynamic month range**: CashFlow fetches the actual date range of BANK transactions from `GET /cashflow/range` instead of a hardcoded range. Only months with data are shown.
-- **Current month by default**: previous months hidden behind a "mostrar N meses anteriores" toggle (up to 5). Avoids loading 12+ months on page load.
-- **Balance snapshots** (`balance_snapshots` table): records the Pluggy-reported bank balance at each sync. The cashflow endpoint uses the nearest snapshot as anchor for opening-balance calculations, so historical months stay accurate even after Pluggy ages out old transactions. Supports manual snapshot insertion for correcting historical drift.
+- **Dynamic month range**: fetches actual date range of BANK transactions from `GET /cashflow/range`. Only months with data are shown.
+- **History toggle**: previous months hidden by default behind "mostrar N meses anteriores" (up to 5).
+- **Projection month**: "+ projeção" toggle at the bottom shows the next month's projected entries, fully editable and independent.
+- **Per-month manual entries**: manual entries now belong to a specific month (`month` column). Editing in one month does not affect others. Each month has its own "nova entrada" ghost row.
+- **Duplicate entries**: `++` duplicates within the same month, `+→` duplicates to the next month. Compact monospace buttons on hover.
+- **Bill payment tagging**: click the source/origin column on any realized bank transaction to toggle it as a credit card bill payment. Tagged entries show an accent-colored "fatura" label. Both auto-detection (description matching) and manual tags feed the Overview's faturas total.
+- **Balance snapshots** (`balance_snapshots` table): records the Pluggy-reported bank balance at each sync. Historical months use the nearest snapshot as anchor for opening-balance calculations, staying accurate even after Pluggy ages out old transactions.
 
 ### Changed
 
-- App routing: Overview (landing) → CashFlow or Dashboard (both with back buttons). Was: CashFlow → Overview → Dashboard.
+- App routing: Overview (landing) → CashFlow or Dashboard (both with back buttons).
+- Main content area widened from 960px to 1120px for more room in the CashFlow ledger.
+- Saídas in the Caixa section now excludes faturas (shown separately) to avoid double-counting.
 
 ### Fixed
 
-- **Caixa saldo** now reflects realized balance (opening + past bank transactions only), not a projection including future entries.
-- **Caixa faturas** includes credit card bill payments already made (detected from bank transaction descriptions) in addition to projected future bills.
-- Opening balance calculation uses the closest balance snapshot (before or after target month) instead of only looking forward, fixing a ~R$ 346 drift on older months where Pluggy's transaction history was incomplete.
+- Caixa saldo reflects realized balance only (opening + past bank transactions), not projections.
+- Opening balance uses the closest balance snapshot (before or after target month), fixing ~R$ 346 drift on older months.
 
 ## [0.2.0] - 2026-04-12
 
