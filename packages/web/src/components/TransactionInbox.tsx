@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'motion/react';
 import { api, type Transaction } from '../lib/api';
@@ -132,6 +132,44 @@ export function TransactionInbox({
     );
   }
 
+  // ── Manual transaction mutations ──
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+
+  const createManualMut = useMutation({
+    mutationFn: (body: Parameters<typeof api.createManualTransaction>[0]) =>
+      api.createManualTransaction(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      setShowAddForm(false);
+    },
+  });
+
+  const updateManualMut = useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: Parameters<typeof api.updateManualTransaction>[1];
+    }) => api.updateManualTransaction(id, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      setEditingTx(null);
+    },
+  });
+
+  const deleteManualMut = useMutation({
+    mutationFn: (id: string) => api.deleteManualTransaction(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      toast.show({ message: 'Lançamento manual excluído' });
+    },
+  });
+
   const bulkMut = useMutation({
     mutationFn: ({
       txIds,
@@ -199,21 +237,64 @@ export function TransactionInbox({
         title="A categorizar"
         count={uncategorized.length}
         right={
-          uncategorized.length > 0 && (
+          <div className="flex items-center gap-4">
             <button
               type="button"
-              onClick={() => toggleAll(uncategorized.map((t) => t.id))}
-              className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-accent)]"
+              onClick={() => {
+                setEditingTx(null);
+                setShowAddForm((v) => !v);
+              }}
+              className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)]"
             >
-              {uncategorized.every((t) => selected.has(t.id))
-                ? 'desmarcar'
-                : 'selecionar todas'}
+              {showAddForm ? 'cancelar' : '+ lançamento'}
             </button>
-          )
+            {uncategorized.length > 0 && (
+              <button
+                type="button"
+                onClick={() => toggleAll(uncategorized.map((t) => t.id))}
+                className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-accent)]"
+              >
+                {uncategorized.every((t) => selected.has(t.id))
+                  ? 'desmarcar'
+                  : 'selecionar todas'}
+              </button>
+            )}
+          </div>
         }
       >
+        {showAddForm && (
+          <ManualTransactionForm
+            accountId={accountId}
+            periodStart={periodStart}
+            periodEnd={periodEnd}
+            onSubmit={(body) => createManualMut.mutate(body)}
+            onCancel={() => setShowAddForm(false)}
+            busy={createManualMut.isPending}
+          />
+        )}
+        {editingTx && (
+          <ManualTransactionForm
+            accountId={accountId}
+            periodStart={periodStart}
+            periodEnd={periodEnd}
+            initial={editingTx}
+            onSubmit={(body) =>
+              updateManualMut.mutate({
+                id: editingTx.id,
+                body: {
+                  date: body.date,
+                  description: body.description,
+                  amount: body.amount,
+                  cardLast4: body.cardLast4 ?? null,
+                },
+              })
+            }
+            onCancel={() => setEditingTx(null)}
+            busy={updateManualMut.isPending}
+          />
+        )}
         {txsQ.isLoading && <EmptyLine>Carregando lançamentos…</EmptyLine>}
-        {txsQ.isSuccess && uncategorized.length === 0 && (
+        {txsQ.isSuccess && uncategorized.length === 0 && !showAddForm && (
           <EmptyLine>
             Tudo categorizado nesta fatura. Bom trabalho.
           </EmptyLine>
@@ -231,6 +312,19 @@ export function TransactionInbox({
               }
               onClear={() => clearMut.mutate(tx.id)}
               onShift={(shift) => runShift(tx.id, shift)}
+              onEditManual={
+                tx.source === 'manual'
+                  ? () => {
+                      setShowAddForm(false);
+                      setEditingTx(tx);
+                    }
+                  : undefined
+              }
+              onDeleteManual={
+                tx.source === 'manual'
+                  ? () => deleteManualMut.mutate(tx.id)
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -263,6 +357,19 @@ export function TransactionInbox({
                 }
                 onClear={() => clearMut.mutate(tx.id)}
                 onShift={(shift) => runShift(tx.id, shift)}
+                onEditManual={
+                  tx.source === 'manual'
+                    ? () => {
+                        setShowAddForm(false);
+                        setEditingTx(tx);
+                      }
+                    : undefined
+                }
+                onDeleteManual={
+                  tx.source === 'manual'
+                    ? () => deleteManualMut.mutate(tx.id)
+                    : undefined
+                }
               />
             ))}
             {categorized.length === 0 && (
@@ -347,5 +454,134 @@ function EmptyLine({ children }: { children: React.ReactNode }) {
     <p className="py-6 font-body text-sm italic text-[color:var(--color-ink-faint)]">
       {children}
     </p>
+  );
+}
+
+/**
+ * Inline form for creating or editing a manual bill transaction.
+ * Matches the editorial/broadsheet visual language — no card, no rounded
+ * corners, just fields on paper with a border-bottom rule.
+ */
+function ManualTransactionForm({
+  accountId,
+  periodStart,
+  periodEnd,
+  initial,
+  onSubmit,
+  onCancel,
+  busy,
+}: {
+  accountId: string;
+  periodStart: string;
+  periodEnd: string;
+  initial?: Transaction;
+  onSubmit: (body: {
+    accountId: string;
+    date: string;
+    description: string;
+    amount: number;
+    cardLast4?: string;
+  }) => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  const descRef = useRef<HTMLInputElement>(null);
+  const [date, setDate] = useState(initial?.date ?? periodEnd.slice(0, 10));
+  const [description, setDescription] = useState(initial?.description ?? '');
+  const [amount, setAmount] = useState(
+    initial ? String(Math.abs(initial.amount)) : '',
+  );
+  const [cardLast4, setCardLast4] = useState(initial?.cardLast4 ?? '');
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const parsed = parseFloat(amount.replace(',', '.'));
+    if (!description.trim() || isNaN(parsed) || parsed <= 0) return;
+    onSubmit({
+      accountId,
+      date,
+      description: description.trim(),
+      amount: parsed,
+      cardLast4: cardLast4.trim() || undefined,
+    });
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="mb-4 border-b border-[color:var(--color-paper-rule)] pb-4"
+    >
+      <div className="grid grid-cols-[80px_1fr_120px_80px] items-end gap-3">
+        <div>
+          <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
+            Data
+          </label>
+          <input
+            type="date"
+            value={date}
+            min={periodStart}
+            max={periodEnd}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 font-mono text-xs text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
+            Descrição
+          </label>
+          <input
+            ref={descRef}
+            type="text"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Ex: UBER *EATS"
+            autoFocus
+            className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 font-body text-[15px] text-[color:var(--color-ink)] outline-none placeholder:text-[color:var(--color-ink-faint)] focus:border-[color:var(--color-accent)]"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
+            Valor (R$)
+          </label>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0,00"
+            className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 font-mono text-[15px] tabular-nums text-[color:var(--color-ink)] outline-none placeholder:text-[color:var(--color-ink-faint)] focus:border-[color:var(--color-accent)]"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
+            Cartão
+          </label>
+          <input
+            type="text"
+            maxLength={20}
+            value={cardLast4}
+            onChange={(e) => setCardLast4(e.target.value)}
+            placeholder="1234"
+            className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 font-mono text-xs text-[color:var(--color-ink)] outline-none placeholder:text-[color:var(--color-ink-faint)] focus:border-[color:var(--color-accent)]"
+          />
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={busy}
+          className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)] disabled:opacity-50"
+        >
+          {initial ? 'salvar' : 'adicionar'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-ink)]"
+        >
+          cancelar
+        </button>
+      </div>
+    </form>
   );
 }

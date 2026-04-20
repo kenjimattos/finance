@@ -24,6 +24,8 @@ export function TransactionRow({
   onAssign,
   onClear,
   onShift,
+  onEditManual,
+  onDeleteManual,
 }: {
   tx: Transaction;
   categories: Category[];
@@ -32,6 +34,8 @@ export function TransactionRow({
   onAssign: (categoryId: number) => void;
   onClear: () => void;
   onShift: (shift: -1 | 0 | 1) => void;
+  onEditManual?: () => void;
+  onDeleteManual?: () => void;
 }) {
   // Sign convention (from Meu Pluggy for credit card accounts):
   //   DEBIT  = purchase     → amount positive  → outflow (ink)
@@ -45,6 +49,7 @@ export function TransactionRow({
   // capped at ±1. This means clicking "anterior" on a shift=+1 transaction
   // naturally restores it to 0 instead of jumping to -1.
   const currentShift = tx.billShift ?? 0;
+  const isManual = tx.source === 'manual';
   const actions: RowAction[] = [
     {
       label: currentShift === -1 ? '→ Restaurar para esta fatura' : '→ Próxima fatura',
@@ -57,6 +62,19 @@ export function TransactionRow({
       disabled: currentShift <= -1,
     },
   ];
+  if (isManual && onEditManual) {
+    actions.push({
+      label: 'Editar lançamento',
+      onClick: onEditManual,
+    });
+  }
+  if (isManual && onDeleteManual) {
+    actions.push({
+      label: 'Excluir lançamento',
+      onClick: onDeleteManual,
+      tone: 'danger',
+    });
+  }
 
   return (
     <div
@@ -92,6 +110,11 @@ export function TransactionRow({
           {tx.cardLast4 && (
             <span className="font-mono text-[10px] tracking-wider text-[color:var(--color-ink-faint)]">
               {formatCardLabel(tx.cardLast4)}
+            </span>
+          )}
+          {isManual && (
+            <span className="font-body text-[10px] italic text-[color:var(--color-accent)]">
+              manual
             </span>
           )}
         </div>
