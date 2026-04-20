@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Manual bill transactions**: users can now add, edit, and delete manual transactions directly in the credit card bill inbox when Pluggy fails to return them. Manual entries participate in all existing bill window queries, categorization, shifts, and breakdown totals. Marked with an orange "manual" badge. Edit/delete available via the ⋯ menu. API: `POST/PUT/DELETE /transactions/manual`.
+
 ## [1.0.0] - 2026-04-13
 
 The app now covers both sides of personal finance — credit card bills (categorization, multi-bank) and checking account cash flow (realized + projected) — in a single Overview landing page.
