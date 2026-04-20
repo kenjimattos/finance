@@ -486,7 +486,10 @@ function ManualTransactionForm({
   busy: boolean;
 }) {
   const descRef = useRef<HTMLInputElement>(null);
-  const [date, setDate] = useState(initial?.date ?? periodEnd.slice(0, 10));
+  // Extract day/month from the initial date or default to periodEnd.
+  const refDate = initial?.date ?? periodEnd.slice(0, 10);
+  const [day, setDay] = useState(String(parseInt(refDate.slice(8, 10), 10)));
+  const [month, setMonth] = useState(String(parseInt(refDate.slice(5, 7), 10)));
   const [description, setDescription] = useState(initial?.description ?? '');
   const [amount, setAmount] = useState(
     initial ? String(Math.abs(initial.amount)) : '',
@@ -497,9 +500,15 @@ function ManualTransactionForm({
     e.preventDefault();
     const parsed = parseFloat(amount.replace(',', '.'));
     if (!description.trim() || isNaN(parsed) || parsed <= 0) return;
+    const d = parseInt(day, 10);
+    const m = parseInt(month, 10);
+    if (isNaN(d) || d < 1 || d > 31 || isNaN(m) || m < 1 || m > 12) return;
+    // Derive year from the bill period end date.
+    const year = periodEnd.slice(0, 4);
+    const fullDate = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     onSubmit({
       accountId,
-      date,
+      date: fullDate,
       description: description.trim(),
       amount: parsed,
       cardLast4: cardLast4.trim() || undefined,
@@ -511,19 +520,36 @@ function ManualTransactionForm({
       onSubmit={handleSubmit}
       className="mb-4 border-b border-[color:var(--color-paper-rule)] pb-4"
     >
-      <div className="grid grid-cols-[80px_1fr_120px_80px] items-end gap-3">
-        <div>
-          <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
-            Data
-          </label>
-          <input
-            type="date"
-            value={date}
-            min={periodStart}
-            max={periodEnd}
-            onChange={(e) => setDate(e.target.value)}
-            className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 font-mono text-xs text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
-          />
+      <div className="grid grid-cols-[72px_1fr_120px_80px] items-end gap-3">
+        <div className="flex gap-1.5">
+          <div>
+            <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
+              Dia
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={2}
+              value={day}
+              onChange={(e) => setDay(e.target.value.replace(/\D/g, ''))}
+              placeholder="15"
+              className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 text-center font-mono text-xs text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
+              Mês
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={2}
+              value={month}
+              onChange={(e) => setMonth(e.target.value.replace(/\D/g, ''))}
+              placeholder="04"
+              className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 text-center font-mono text-xs text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
+            />
+          </div>
         </div>
         <div>
           <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
