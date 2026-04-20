@@ -133,6 +133,8 @@ export interface Transaction {
   cardLast4: string | null;
   /** -1 = pulled from next cycle, +1 = pushed from previous cycle, null = unshifted */
   billShift: -1 | 1 | null;
+  /** 'pluggy' for synced transactions, 'manual' for user-created entries */
+  source: 'pluggy' | 'manual';
   userCategory: UserCategoryRef | null;
 }
 
@@ -391,6 +393,38 @@ export const api = {
         body: JSON.stringify({ shift }),
       },
     ),
+
+  createManualTransaction: (body: {
+    accountId: string;
+    date: string;
+    description: string;
+    amount: number;
+    cardLast4?: string;
+    categoryId?: number;
+  }) =>
+    request<{ ok: true; id: string }>('/transactions/manual', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateManualTransaction: (
+    id: string,
+    body: Partial<{
+      date: string;
+      description: string;
+      amount: number;
+      cardLast4: string | null;
+    }>,
+  ) =>
+    request<{ ok: true }>(`/transactions/manual/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deleteManualTransaction: (id: string) =>
+    request<void>(`/transactions/manual/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 
   bulkCategorize: (transactionIds: string[], categoryId: number) =>
     request<{ ok: true; applied: number; total: number }>(
