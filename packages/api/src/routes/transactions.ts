@@ -571,9 +571,18 @@ async function syncItem(itemId: string) {
       }
     }
 
-    // Transactions — fetch for all account types.
-    const txPage = await pluggy.fetchTransactions(account.id, { pageSize: 500 });
-    upsertTxBatch(txPage.results, account.id);
+    // Transactions — fetch ALL pages for each account type.
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const txPage = await pluggy.fetchTransactions(account.id, {
+        pageSize: 500,
+        page,
+      });
+      upsertTxBatch(txPage.results, account.id);
+      totalPages = txPage.totalPages;
+      page++;
+    } while (page <= totalPages);
   }
 
   // Apply learned rules to transactions that don't yet have a user category.
