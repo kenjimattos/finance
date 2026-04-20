@@ -298,6 +298,11 @@ db.exec(`
   )
 `);
 
+// Source column distinguishes Pluggy-synced transactions from manual entries
+// added by the user. Manual entries persist across re-syncs and can be
+// edited/deleted via the API.
+addColumnIfMissing('transactions', 'source', "TEXT DEFAULT 'pluggy'");
+
 // Re-enable all category rules that were auto-disabled by the old
 // "2 overrides = disabled" logic. Rules now stay active regardless of
 // override_count — the user corrects minority cases manually.

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Transaction, CreditCardMetadata } from 'pluggy-sdk';
 import { pluggy } from '../services/pluggy.js';
@@ -51,6 +52,7 @@ interface TransactionRow {
   user_category_color: string | null;
   assigned_by: string | null;
   bill_shift: number | null;
+  source: string | null;
 }
 
 /**
@@ -119,7 +121,7 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
                 COALESCE(t.amount_in_account_currency, t.amount) AS amount,
                 t.currency_code, t.pluggy_category, t.pluggy_category_id,
                 t.type, t.status, t.installment_number, t.total_installments,
-                t.bill_id, t.card_last4,
+                t.bill_id, t.card_last4, t.source,
                 uc.id    AS user_category_id,
                 uc.name  AS user_category_name,
                 uc.color AS user_category_color,
@@ -248,6 +250,134 @@ transactionsRouter.delete('/transactions/:id/description', (req, res, next) => {
     db.prepare(
       'DELETE FROM transaction_description_overrides WHERE transaction_id = ?',
     ).run(txId);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Manual bill transactions ──────────────────────────────────────────
+// These let the user add transactions that Pluggy missed (e.g. the
+// connector didn't return them) directly into the transactions table
+// with source='manual'. They participate in all bill window queries,
+// categorization, and shifts exactly like Pluggy-synced rows.
+
+const manualTxSchema = z.object({
+  accountId: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  description: z.string().min(1),
+  amount: z.number(),
+  cardLast4: z.string().optional(),
+  categoryId: z.number().int().positive().optional(),
+});
+
+// POST /transactions/manual — create a manual transaction
+transactionsRouter.post('/transactions/manual', (req, res, next) => {
+  try {
+    const body = manualTxSchema.parse(req.body);
+    const id = randomUUID();
+
+    // Look up item_id from the account.
+    const account = db
+      .prepare('SELECT item_id FROM accounts WHERE id = ?')
+      .get(body.accountId) as { item_id: string } | undefined;
+    if (!account) {
+      res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+
+    db.prepare(
+      `INSERT INTO transactions
+        (id, account_id, item_id, date, description, amount, currency_code,
+         type, source, raw_json, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'BRL', 'DEBIT', 'manual', '{}', datetime('now'))`,
+    ).run(id, body.accountId, account.item_id, body.date, body.description, body.amount);
+
+    if (body.cardLast4) {
+      db.prepare('UPDATE transactions SET card_last4 = ? WHERE id = ?').run(
+        body.cardLast4,
+        id,
+      );
+    }
+
+    if (body.categoryId) {
+      db.prepare(
+        `INSERT INTO transaction_categories (transaction_id, user_category_id, assigned_by)
+         VALUES (?, ?, 'manual')`,
+      ).run(id, body.categoryId);
+    }
+
+    res.status(201).json({ ok: true, id });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /transactions/manual/:id — update a manual transaction
+const manualTxUpdateSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  description: z.string().min(1).optional(),
+  amount: z.number().optional(),
+  cardLast4: z.string().nullable().optional(),
+});
+
+transactionsRouter.put('/transactions/manual/:id', (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const body = manualTxUpdateSchema.parse(req.body);
+
+    // Only allow editing manual transactions.
+    const tx = db
+      .prepare("SELECT id FROM transactions WHERE id = ? AND source = 'manual'")
+      .get(id);
+    if (!tx) {
+      res.status(404).json({ error: 'Manual transaction not found' });
+      return;
+    }
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (body.date !== undefined) {
+      sets.push('date = ?');
+      params.push(body.date);
+    }
+    if (body.description !== undefined) {
+      sets.push('description = ?');
+      params.push(body.description);
+    }
+    if (body.amount !== undefined) {
+      sets.push('amount = ?');
+      params.push(body.amount);
+    }
+    if (body.cardLast4 !== undefined) {
+      sets.push('card_last4 = ?');
+      params.push(body.cardLast4);
+    }
+
+    if (sets.length > 0) {
+      params.push(id);
+      db.prepare(`UPDATE transactions SET ${sets.join(', ')} WHERE id = ?`).run(
+        ...params,
+      );
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /transactions/manual/:id — delete a manual transaction
+transactionsRouter.delete('/transactions/manual/:id', (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const result = db
+      .prepare("DELETE FROM transactions WHERE id = ? AND source = 'manual'")
+      .run(id);
+    if (result.changes === 0) {
+      res.status(404).json({ error: 'Manual transaction not found' });
+      return;
+    }
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -514,6 +644,7 @@ function shapeRow(r: TransactionRow) {
     billId: r.bill_id,
     cardLast4: r.card_last4,
     billShift: r.bill_shift,
+    source: r.source ?? 'pluggy',
     userCategory:
       r.user_category_id == null
         ? null
