@@ -14,6 +14,8 @@ Multi-bank support: multiple Pluggy items (bank connections) are fully supported
 
 Cash flow: the CashFlow screen is the **top-level landing page**, showing a multi-month ledger from April 2026 through the current month + 2, all on one scrollable page. Past days display actual BANK transactions from Pluggy (editable descriptions). Future days show manual recurring entries (salary, rent) and credit card bill outflows on their due dates. Running balance carries across months. Clicking a credit card bill entry drills into the Overview for that month's bill detail.
 
+Manual bill transactions: when Pluggy fails to return transactions (connector gaps), the user can add manual entries directly in the bill inbox. Manual entries are stored in the `transactions` table with `source='manual'` and participate in all bill window queries, categorization, and shifts. They can be edited/deleted via the `⋯` menu and are marked with an orange "manual" badge.
+
 55 tests covering `billWindow` (including `findOffsetForDueMonth`), `merchantSlug`, and `applyLearnedRules`.
 
 ## Repository layout
@@ -62,7 +64,7 @@ Both dev servers bind to `0.0.0.0`, so other devices on the local network can ac
 
 Three independent domains in SQLite, deliberately not merged:
 
-1. **Pluggy cache** (`items`, `accounts`, `transactions`, `bills`) — read-through cache of what Pluggy returns. `accounts` is populated during sync from `fetchAccounts(itemId, 'CREDIT')` and `fetchAccounts(itemId, 'BANK')`. BANK accounts carry `balance` and `subtype` (e.g. `CHECKING_ACCOUNT`). `raw_json` on each row keeps the full payload so new fields can surface later without a backfill. Can be wiped and re-synced without losing user work.
+1. **Pluggy cache** (`items`, `accounts`, `transactions`, `bills`) — read-through cache of what Pluggy returns. `accounts` is populated during sync from `fetchAccounts(itemId, 'CREDIT')` and `fetchAccounts(itemId, 'BANK')`. BANK accounts carry `balance` and `subtype` (e.g. `CHECKING_ACCOUNT`). `raw_json` on each row keeps the full payload so new fields can surface later without a backfill. The `transactions.source` column distinguishes `'pluggy'` (synced) from `'manual'` (user-created). Manual transactions persist across re-syncs; Pluggy-sourced rows can be wiped and re-synced without losing user work.
 2. **User configuration** (`account_settings`, `card_groups`, `card_group_members`) — per-account closing/due days (Pluggy does not expose these), plus the user's grouping of physical cards by `card_last4` scoped per account. One card belongs to at most one group (composite primary key enforces exclusivity). Legacy `card_settings` (per-item) table remains for backward compat but the frontend writes to `account_settings`.
 3. **User work** (`user_categories`, `transaction_categories`, `category_rules`, `transaction_bill_overrides`, `transaction_description_overrides`) — categorization, learned rules, manual bill-cycle shifts, and description overrides. These are **separate join tables**, not columns on `transactions`, so a Pluggy re-sync never wipes them.
 4. **Cash flow** (`manual_entries`) — monthly recurring entries (salary, rent, etc.) with `day_of_month` for placement. These are independent of Pluggy data and persist across re-syncs.
@@ -124,7 +126,8 @@ Bulk categorize feeds the same engine — selecting 15 Uber Eats rows once train
 11. `PUT /transactions/:id/category { categoryId }` / `POST /transactions/bulk-categorize` / `DELETE /transactions/:id/category` — the user's main interaction.
 12. `PUT /transactions/:id/bill-shift { shift: -1 | 0 | 1 }` — shift (or restore with 0) a single transaction.
 13. `PUT /transactions/:id/description { description }` / `DELETE /transactions/:id/description` — override or restore a bank transaction's display description.
-14. `GET /manual-entries` / `POST /manual-entries` / `PUT /manual-entries/:id` / `DELETE /manual-entries/:id` — CRUD for monthly recurring cash-flow entries.
+14. `POST /transactions/manual` / `PUT /transactions/manual/:id` / `DELETE /transactions/manual/:id` — CRUD for manual bill transactions (when Pluggy misses them). Stored in the `transactions` table with `source='manual'`. Edit/delete are guarded to only affect manual entries.
+15. `GET /manual-entries` / `POST /manual-entries` / `PUT /manual-entries/:id` / `DELETE /manual-entries/:id` — CRUD for monthly recurring cash-flow entries.
 15. `GET /cashflow` — day-by-day timeline for the current month. Past days: actual BANK transactions. Future days: manual entries + credit card bill outflows on due dates.
 
 ### Frontend design language
