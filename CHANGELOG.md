@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- **Bill splitting (Splitwise prep)**: mark transactions as shared with a partner — "½" (50/50) or "→dela" (partner owes 100%). Per-row actions in the ⋯ menu plus bulk split buttons in the selection bar. Collapsible split summary panel in the Dashboard shows partner debt total, per-type breakdown, transaction list, and "copiar para Splitwise" button that formats the summary as clipboard text. Backend: `PUT/DELETE /transactions/:id/split`, `POST /transactions/bulk-split`, `POST /transactions/bulk-unsplit`, `GET /bills/current/split-summary`. Data stored in `transaction_splits` join table (survives re-syncs).
+
 ## [1.1.0] - 2026-04-21
 
 ### Added
