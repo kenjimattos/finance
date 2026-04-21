@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { api } from '../lib/api';
@@ -199,6 +199,21 @@ export function CashFlow({
     onSuccess: invalidateAll,
   });
 
+  // ── Sync ──
+  const [syncing, setSyncing] = useState(false);
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      await api.syncCashFlow();
+      qc.invalidateQueries({ queryKey: ['cashflow'] });
+      qc.invalidateQueries({ queryKey: ['cashflow-range'] });
+    } catch (err) {
+      console.error('[CashFlow sync] failed:', err);
+    } finally {
+      setSyncing(false);
+    }
+  }, [qc]);
+
   const anyLoading = rangeQ.isLoading || queries.some((q) => q.isLoading);
   const firstData = queries.find((q) => q.data)?.data;
 
@@ -220,7 +235,17 @@ export function CashFlow({
             ← voltar
           </button>
         )}
-        <div className="eyebrow uppercase">fluxo de caixa</div>
+        <div className="flex items-center gap-4">
+          <span className="eyebrow uppercase">fluxo de caixa</span>
+          <button
+            type="button"
+            onClick={handleSync}
+            disabled={syncing}
+            className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
+          >
+            {syncing ? 'sincronizando…' : 'sincronizar ↻'}
+          </button>
+        </div>
 
         <h1 className="mt-3 font-display text-[72px] leading-[0.9] tracking-[-0.03em] text-[color:var(--color-ink)] md:text-[96px]">
           {anyLoading && !firstData ? (

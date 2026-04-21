@@ -374,6 +374,12 @@ export const api = {
       { method: 'POST' },
     ),
 
+  syncCashFlow: () =>
+    request<{ ok: true; transactions: number }>(
+      '/cashflow/sync',
+      { method: 'POST' },
+    ),
+
   assignCategory: (transactionId: string, categoryId: number) =>
     request<unknown>(`/transactions/${transactionId}/category`, {
       method: 'PUT',
