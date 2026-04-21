@@ -53,6 +53,7 @@ interface TransactionRow {
   assigned_by: string | null;
   bill_shift: number | null;
   source: string | null;
+  split_type: string | null;
 }
 
 /**
@@ -126,12 +127,14 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
                 uc.name  AS user_category_name,
                 uc.color AS user_category_color,
                 tc.assigned_by,
-                o.shift  AS bill_shift
+                o.shift  AS bill_shift,
+                sp.split_type
          FROM transactions t
          LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
          LEFT JOIN user_categories       uc ON uc.id = tc.user_category_id
          LEFT JOIN card_group_members    m  ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
          LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+         LEFT JOIN transaction_splits    sp ON sp.transaction_id = t.id
          WHERE t.item_id = ?
            AND (? = 0 OR t.account_id = ?)
            ${dateClause}
@@ -654,6 +657,7 @@ function shapeRow(r: TransactionRow) {
     cardLast4: r.card_last4,
     billShift: r.bill_shift,
     source: r.source ?? 'pluggy',
+    split: r.split_type as 'half' | 'theirs' | null,
     userCategory:
       r.user_category_id == null
         ? null

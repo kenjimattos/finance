@@ -239,6 +239,16 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
   );
+
+  -- Bill-splitting: marks a transaction as shared with a partner.
+  -- 'half' = 50/50 split (partner owes half), 'theirs' = partner owes 100%.
+  -- Unmarked transactions are 100% the user's (no Splitwise entry needed).
+  CREATE TABLE IF NOT EXISTS transaction_splits (
+    transaction_id TEXT PRIMARY KEY,
+    split_type TEXT NOT NULL CHECK(split_type IN ('half', 'theirs')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
 `);
 
 // -----------------------------------------------------------------------------
