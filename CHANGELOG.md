@@ -6,9 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-21
+
 ### Added
 
-- **Manual bill transactions**: users can now add, edit, and delete manual transactions directly in the credit card bill inbox when Pluggy fails to return them. Manual entries participate in all existing bill window queries, categorization, shifts, and breakdown totals. Marked with an orange "manual" badge. Edit/delete available via the ⋯ menu. API: `POST/PUT/DELETE /transactions/manual`.
+- **Manual bill transactions**: add, edit, and delete manual transactions directly in the credit card bill inbox when Pluggy fails to return them. Manual entries participate in all bill window queries, categorization, shifts, and breakdown totals. Marked with an orange "manual" badge; edit/delete via the ⋯ menu. API: `POST/PUT/DELETE /transactions/manual`.
+- **Cashflow-only sync button**: sync bank account transactions without triggering a full credit card sync, for faster balance updates on the CashFlow screen.
+
+### Changed
+
+- **Compact date fields**: replaced native date input with compact day/month fields for manual bill transaction entry.
+
+### Fixed
+
+- **Paginated transaction fetch**: sync now fetches all pages from Pluggy's `fetchTransactions`, fixing incomplete data when accounts have more than one page of transactions.
+- **Cashflow cutoff boundary**: uses the data coverage boundary (last transaction date) instead of today's date to determine the realized/projected cutoff, preventing gaps when Pluggy data lags behind.
+- **Vite dev server port**: updated from 5173 to 5174 to avoid conflicts.
 
 ## [1.0.0] - 2026-04-13
 
