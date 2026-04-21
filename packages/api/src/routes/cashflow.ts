@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import type { Transaction } from 'pluggy-sdk';
+import { pluggy } from '../services/pluggy.js';
 import { db } from '../db/index.js';
 import {
   computeBillWindowAtOffset,
@@ -430,6 +432,144 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
       })),
       days,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Helpers for sync ──
+
+function toYmd(d: Date | string): string {
+  if (typeof d === 'string') return d.slice(0, 10);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * POST /cashflow/sync — sync only BANK accounts and their transactions.
+ * Lighter than the full /transactions/sync which also pulls credit accounts,
+ * bills, and credit card transactions.
+ */
+cashflowRouter.post('/cashflow/sync', async (_req, res, next) => {
+  try {
+    const items = db
+      .prepare('SELECT id FROM items')
+      .all() as Array<{ id: string }>;
+
+    let txCount = 0;
+
+    const upsertAccount = db.prepare(`
+      INSERT INTO accounts
+        (id, item_id, name, number, type, subtype, balance, raw_json, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        item_id   = excluded.item_id,
+        name      = excluded.name,
+        number    = excluded.number,
+        type      = excluded.type,
+        subtype   = excluded.subtype,
+        balance   = excluded.balance,
+        raw_json  = excluded.raw_json,
+        synced_at = datetime('now')
+    `);
+
+    const snapshotBalance = db.prepare(`
+      INSERT INTO balance_snapshots (account_id, date, balance)
+      VALUES (?, ?, ?)
+      ON CONFLICT(account_id, date) DO UPDATE SET
+        balance = excluded.balance,
+        created_at = datetime('now')
+    `);
+
+    const insertTx = db.prepare(`
+      INSERT INTO transactions
+        (id, account_id, item_id, date, description, amount, amount_in_account_currency,
+         currency_code, pluggy_category, pluggy_category_id, type, status,
+         installment_number, total_installments, bill_id, card_last4, raw_json, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        account_id                  = excluded.account_id,
+        item_id                     = excluded.item_id,
+        date                        = excluded.date,
+        description                 = excluded.description,
+        amount                      = excluded.amount,
+        amount_in_account_currency  = excluded.amount_in_account_currency,
+        currency_code               = excluded.currency_code,
+        pluggy_category             = excluded.pluggy_category,
+        pluggy_category_id          = excluded.pluggy_category_id,
+        type                        = excluded.type,
+        status                      = excluded.status,
+        installment_number          = excluded.installment_number,
+        total_installments          = excluded.total_installments,
+        bill_id                     = excluded.bill_id,
+        card_last4                  = excluded.card_last4,
+        raw_json                    = excluded.raw_json,
+        synced_at                   = datetime('now')
+    `);
+
+    const upsertTxBatch = db.transaction((txs: Transaction[], accountId: string, itemId: string) => {
+      for (const t of txs) {
+        insertTx.run(
+          t.id,
+          accountId,
+          itemId,
+          toYmd(t.date),
+          t.description ?? null,
+          t.amount,
+          t.amountInAccountCurrency ?? null,
+          t.currencyCode ?? null,
+          t.category ?? null,
+          t.categoryId ?? null,
+          t.type ?? null,
+          t.status ?? null,
+          null, null, null, null, // no credit card metadata for bank txs
+          JSON.stringify(t),
+        );
+        txCount++;
+      }
+    });
+
+    const now = new Date();
+    const todayYmd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    for (const item of items) {
+      let bankAccounts: Awaited<ReturnType<typeof pluggy.fetchAccounts>>['results'] = [];
+      try {
+        const r = await pluggy.fetchAccounts(item.id, 'BANK');
+        bankAccounts = r.results;
+      } catch {
+        continue; // item may not have bank accounts
+      }
+
+      for (const account of bankAccounts) {
+        upsertAccount.run(
+          account.id, item.id,
+          account.name ?? null, account.number ?? null,
+          account.type ?? null, account.subtype ?? null,
+          account.balance ?? null, JSON.stringify(account),
+        );
+
+        if (account.balance != null) {
+          snapshotBalance.run(account.id, todayYmd, account.balance);
+        }
+
+        let page = 1;
+        let totalPages = 1;
+        do {
+          const txPage = await pluggy.fetchTransactions(account.id, {
+            pageSize: 500,
+            page,
+          });
+          upsertTxBatch(txPage.results, account.id, item.id);
+          totalPages = txPage.totalPages;
+          page++;
+        } while (page <= totalPages);
+      }
+    }
+
+    res.json({ ok: true, transactions: txCount });
   } catch (err) {
     next(err);
   }
