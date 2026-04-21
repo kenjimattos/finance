@@ -135,6 +135,8 @@ export interface Transaction {
   billShift: -1 | 1 | null;
   /** 'pluggy' for synced transactions, 'manual' for user-created entries */
   source: 'pluggy' | 'manual';
+  /** 'half' = 50/50 split, 'theirs' = partner owes 100%, null = not split */
+  split: 'half' | 'theirs' | null;
   userCategory: UserCategoryRef | null;
 }
 
@@ -236,6 +238,34 @@ export interface CashFlowResponse {
   month: string;
   bankAccounts: CashFlowBankAccount[];
   days: CashFlowDay[];
+}
+
+// ---------- Split Summary ----------
+
+export interface SplitSummaryTransaction {
+  id: string;
+  date: string;
+  description: string | null;
+  amount: number;
+  splitType: 'half' | 'theirs';
+  owes: number;
+  installmentNumber: number | null;
+  totalInstallments: number | null;
+}
+
+export interface SplitSummary {
+  accountId: string;
+  offset: number;
+  periodStart: string;
+  periodEnd: string;
+  dueDate: string;
+  totalSplitTransactions: number;
+  partnerOwes: number;
+  breakdown: {
+    half: { count: number; total: number; owes: number };
+    theirs: { count: number; total: number; owes: number };
+  };
+  transactions: SplitSummaryTransaction[];
 }
 
 // ---------- Endpoints ----------
@@ -501,4 +531,36 @@ export const api = {
       `/transactions/${encodeURIComponent(transactionId)}/description`,
       { method: 'DELETE' },
     ),
+
+  // ── Splits ──
+
+  splitTransaction: (transactionId: string, splitType: 'half' | 'theirs') =>
+    request<{ transactionId: string; splitType: string }>(
+      `/transactions/${encodeURIComponent(transactionId)}/split`,
+      { method: 'PUT', body: JSON.stringify({ splitType }) },
+    ),
+
+  unsplitTransaction: (transactionId: string) =>
+    request<void>(
+      `/transactions/${encodeURIComponent(transactionId)}/split`,
+      { method: 'DELETE' },
+    ),
+
+  bulkSplit: (transactionIds: string[], splitType: 'half' | 'theirs') =>
+    request<{ applied: number }>('/transactions/bulk-split', {
+      method: 'POST',
+      body: JSON.stringify({ transactionIds, splitType }),
+    }),
+
+  bulkUnsplit: (transactionIds: string[]) =>
+    request<{ removed: number }>('/transactions/bulk-unsplit', {
+      method: 'POST',
+      body: JSON.stringify({ transactionIds }),
+    }),
+
+  getSplitSummary: (accountId: string, offset?: number) => {
+    const qs = new URLSearchParams({ accountId });
+    if (offset !== undefined && offset !== 0) qs.set('offset', String(offset));
+    return request<SplitSummary>(`/bills/current/split-summary?${qs}`);
+  },
 };

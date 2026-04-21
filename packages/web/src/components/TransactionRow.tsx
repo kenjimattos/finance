@@ -24,6 +24,7 @@ export function TransactionRow({
   onAssign,
   onClear,
   onShift,
+  onSplit,
   onEditManual,
   onDeleteManual,
 }: {
@@ -34,6 +35,7 @@ export function TransactionRow({
   onAssign: (categoryId: number) => void;
   onClear: () => void;
   onShift: (shift: -1 | 0 | 1) => void;
+  onSplit: (splitType: 'half' | 'theirs' | null) => void;
   onEditManual?: () => void;
   onDeleteManual?: () => void;
 }) {
@@ -62,6 +64,26 @@ export function TransactionRow({
       disabled: currentShift <= -1,
     },
   ];
+  // Split actions
+  if (tx.split !== 'half') {
+    actions.push({
+      label: tx.split === 'theirs' ? '½ Dividir 50/50' : '½ Dividir 50/50',
+      onClick: () => onSplit('half'),
+    });
+  }
+  if (tx.split !== 'theirs') {
+    actions.push({
+      label: '→ Pago por ela',
+      onClick: () => onSplit('theirs'),
+    });
+  }
+  if (tx.split) {
+    actions.push({
+      label: '× Remover divisão',
+      onClick: () => onSplit(null),
+    });
+  }
+
   if (isManual && onEditManual) {
     actions.push({
       label: 'Editar lançamento',
@@ -115,6 +137,11 @@ export function TransactionRow({
           {isManual && (
             <span className="font-body text-[10px] italic text-[color:var(--color-accent)]">
               manual
+            </span>
+          )}
+          {tx.split && (
+            <span className="font-mono text-[10px] font-semibold text-[color:var(--color-accent)]">
+              {tx.split === 'half' ? '½' : '→dela'}
             </span>
           )}
         </div>
