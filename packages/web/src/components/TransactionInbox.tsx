@@ -186,6 +186,51 @@ export function TransactionInbox({
     },
   });
 
+  // ── Split mutations ──
+  const splitMut = useMutation({
+    mutationFn: ({ txId, splitType }: { txId: string; splitType: 'half' | 'theirs' }) =>
+      api.splitTransaction(txId, splitType),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['splitSummary'] });
+    },
+  });
+
+  const unsplitMut = useMutation({
+    mutationFn: (txId: string) => api.unsplitTransaction(txId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['splitSummary'] });
+    },
+  });
+
+  const bulkSplitMut = useMutation({
+    mutationFn: ({ txIds, splitType }: { txIds: string[]; splitType: 'half' | 'theirs' }) =>
+      api.bulkSplit(txIds, splitType),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['splitSummary'] });
+      setSelected(new Set());
+    },
+  });
+
+  const bulkUnsplitMut = useMutation({
+    mutationFn: (txIds: string[]) => api.bulkUnsplit(txIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['splitSummary'] });
+      setSelected(new Set());
+    },
+  });
+
+  function runSplit(txId: string, splitType: 'half' | 'theirs' | null) {
+    if (splitType === null) {
+      unsplitMut.mutate(txId);
+    } else {
+      splitMut.mutate({ txId, splitType });
+    }
+  }
+
   // Apply the category tab filter on top of whatever came back from the
   // backend (which is already card-group-filtered). Filtering client-side
   // keeps /transactions simple and avoids an extra query parameter.
@@ -312,6 +357,7 @@ export function TransactionInbox({
               }
               onClear={() => clearMut.mutate(tx.id)}
               onShift={(shift) => runShift(tx.id, shift)}
+              onSplit={(splitType) => runSplit(tx.id, splitType)}
               onEditManual={
                 tx.source === 'manual'
                   ? () => {
@@ -357,6 +403,7 @@ export function TransactionInbox({
                 }
                 onClear={() => clearMut.mutate(tx.id)}
                 onShift={(shift) => runShift(tx.id, shift)}
+                onSplit={(splitType) => runSplit(tx.id, splitType)}
                 onEditManual={
                   tx.source === 'manual'
                     ? () => {
@@ -405,6 +452,44 @@ export function TransactionInbox({
                   })
                 }
               />
+              <span className="mx-1 text-[color:var(--color-ink-faint)]">|</span>
+              <span className="font-body text-xs text-[color:var(--color-ink-faint)]">
+                dividir
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  bulkSplitMut.mutate({
+                    txIds: Array.from(selected),
+                    splitType: 'half',
+                  })
+                }
+                className="font-mono text-xs font-semibold text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)]"
+              >
+                ½
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  bulkSplitMut.mutate({
+                    txIds: Array.from(selected),
+                    splitType: 'theirs',
+                  })
+                }
+                className="font-body text-xs text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)]"
+              >
+                dela
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  bulkUnsplitMut.mutate(Array.from(selected))
+                }
+                className="font-body text-xs text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-accent)]"
+              >
+                nenhum
+              </button>
+              <span className="mx-1 text-[color:var(--color-ink-faint)]">|</span>
               <button
                 type="button"
                 onClick={() => setSelected(new Set())}
