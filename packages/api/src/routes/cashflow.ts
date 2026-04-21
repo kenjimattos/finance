@@ -132,12 +132,10 @@ const BANK_TX_EXCLUDE_PARAMS = BANK_TX_EXCLUDE_DESCRIPTIONS.map((d) => `%${d}%`)
 /**
  * GET /cashflow?month=YYYY-MM — day-by-day cash-flow view for a given month.
  *
- * Past days (up to yesterday): actual BANK transactions from Pluggy.
- * Future days (today onward): manual entries + credit card bill outflows.
- *
- * Opening balance = Pluggy's current balance minus all transactions from
- * the target month's first day through today. For past months everything
- * is "past"; for future months everything is "future".
+ * Days covered by real data (up to last bank transaction date): actual
+ * BANK transactions from Pluggy. Days beyond that: manual entries +
+ * credit card bill outflows. The boundary is data-driven, not tied to
+ * today's date.
  */
 cashflowRouter.get('/cashflow', (req, res, next) => {
   try {
@@ -146,7 +144,6 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
       .parse(req.query);
 
     const now = new Date();
-    const realTodayDay = now.getDate();
     const realYear = now.getFullYear();
     const realMonth = now.getMonth() + 1;
 
@@ -159,23 +156,6 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
     const firstDay = `${monthStr}-01`;
     const lastDay = `${monthStr}-${pad(monthDays)}`;
 
-    // "today" in the context of the target month:
-    // - past month: today = day after last day (everything is past)
-    // - current month: today = real today
-    // - future month: today = 1st (everything is future)
-    const realToday = `${realYear}-${pad(realMonth)}-${pad(realTodayDay)}`;
-    const today = monthStr < `${realYear}-${pad(realMonth)}`
-      ? `${monthStr}-${pad(monthDays + 1)}` // past month: everything is past
-      : monthStr > `${realYear}-${pad(realMonth)}`
-        ? `${monthStr}-01` // future month: everything is future
-        : realToday; // current month: real today
-
-    const todayDay = monthStr === `${realYear}-${pad(realMonth)}`
-      ? realTodayDay
-      : monthStr < `${realYear}-${pad(realMonth)}`
-        ? monthDays + 1 // past: all days are "past"
-        : 0; // future: no days are "past"
-
     // ── Find ALL BANK accounts ──
     const bankAccounts = db
       .prepare(
@@ -184,6 +164,38 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
       .all() as AccountRow[];
 
     const bankAccountIds = bankAccounts.map((a) => a.id);
+
+    // ── Data coverage boundary ──
+    // The cutoff between "real data" and "projections" is driven by the
+    // last date that has actual bank transactions, not by today's date.
+    // Days up to that date show bank transactions; days after show manual
+    // entries and credit card bill outflows.
+    let dataBoundary: string; // first date NOT covered by real data
+    if (bankAccountIds.length > 0) {
+      const ph = bankAccountIds.map(() => '?').join(',');
+      const maxRow = db
+        .prepare(
+          `SELECT MAX(t.date) AS max_date
+           FROM transactions t
+           WHERE t.account_id IN (${ph})
+             AND t.date >= ? AND t.date <= ?
+             AND ${BANK_TX_EXCLUDE_SQL}`,
+        )
+        .get(...bankAccountIds, firstDay, lastDay, ...BANK_TX_EXCLUDE_PARAMS) as {
+        max_date: string | null;
+      };
+      dataBoundary = maxRow.max_date
+        ? addDaysIso(maxRow.max_date, 1)
+        : firstDay;
+    } else {
+      dataBoundary = firstDay;
+    }
+
+    const dataBoundaryDay = dataBoundary <= firstDay
+      ? 0
+      : dataBoundary > lastDay
+        ? monthDays + 1
+        : Number(dataBoundary.split('-')[2]);
 
     // ── Compute opening balance per bank account ──
     // Find the best anchor: the closest balance snapshot to the target month.
@@ -263,8 +275,8 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
 
     // ── Past days: actual bank transactions (all bank accounts) ──
     let pastTxRows: BankTxRow[] = [];
-    if (bankAccountIds.length > 0 && todayDay > 1) {
-      const yesterday = `${monthStr}-${pad(todayDay - 1)}`;
+    if (bankAccountIds.length > 0 && dataBoundaryDay > 1) {
+      const yesterday = `${monthStr}-${pad(dataBoundaryDay - 1)}`;
       const placeholders = bankAccountIds.map(() => '?').join(',');
       pastTxRows = db
         .prepare(
@@ -312,7 +324,7 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
 
       const dueDay = acct.due_day;
       // Only include if due date falls in the future portion of the month.
-      if (dueDay < todayDay) continue;
+      if (dueDay < dataBoundaryDay) continue;
 
       // Compute bill total using the same shift-aware logic as bills.ts.
       const current = computeBillWindowAtOffset(settings, offset);
@@ -362,7 +374,7 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
 
     for (let d = 1; d <= monthDays; d++) {
       const date = `${monthStr}-${pad(d)}`;
-      const isPast = date < today;
+      const isPast = date < dataBoundary;
       const entries: CashFlowEntry[] = [];
 
       if (isPast) {
