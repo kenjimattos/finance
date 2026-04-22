@@ -35,7 +35,7 @@ export function TransactionRow({
   onAssign: (categoryId: number) => void;
   onClear: () => void;
   onShift: (shift: -1 | 0 | 1) => void;
-  onSplit: (splitType: 'half' | 'theirs' | null) => void;
+  onSplit: (splitType: 'half' | 'theirs' | 'mine' | null) => void;
   onEditManual?: () => void;
   onDeleteManual?: () => void;
 }) {
@@ -67,7 +67,7 @@ export function TransactionRow({
   // Split actions
   if (tx.split !== 'half') {
     actions.push({
-      label: tx.split === 'theirs' ? '½ Dividir 50/50' : '½ Dividir 50/50',
+      label: '½ Dividir 50/50',
       onClick: () => onSplit('half'),
     });
   }
@@ -75,6 +75,12 @@ export function TransactionRow({
     actions.push({
       label: '→ Pago por ela',
       onClick: () => onSplit('theirs'),
+    });
+  }
+  if (tx.split !== 'mine') {
+    actions.push({
+      label: '← Meu',
+      onClick: () => onSplit('mine'),
     });
   }
   if (tx.split) {
@@ -141,7 +147,7 @@ export function TransactionRow({
           )}
           {tx.split && (
             <span className="font-mono text-[10px] font-semibold text-[color:var(--color-accent)]">
-              {tx.split === 'half' ? '½' : '→dela'}
+              {tx.split === 'half' ? '½' : tx.split === 'theirs' ? '→dela' : '←meu'}
             </span>
           )}
         </div>
