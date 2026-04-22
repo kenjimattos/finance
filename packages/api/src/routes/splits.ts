@@ -197,27 +197,33 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
 
     const round2 = (n: number) => Math.round(n * 100) / 100;
 
-    // Category breakdown: group by category, sum the partner-owes amount
-    const categoryMap = new Map<number, { id: number; name: string; color: string; total: number }>();
+    // Category breakdown: group by category, split into half/theirs columns
+    const categoryMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number }>();
     for (const r of rows) {
       if (r.user_category_id == null) continue;
-      const owes = r.split_type === 'half'
-        ? r.amount / 2
-        : r.amount;
       const existing = categoryMap.get(r.user_category_id);
       if (existing) {
-        existing.total += owes;
+        if (r.split_type === 'half') existing.halfTotal += r.amount / 2;
+        else existing.theirsTotal += r.amount;
       } else {
         categoryMap.set(r.user_category_id, {
           id: r.user_category_id,
           name: r.user_category_name!,
           color: r.user_category_color!,
-          total: owes,
+          halfTotal: r.split_type === 'half' ? r.amount / 2 : 0,
+          theirsTotal: r.split_type === 'theirs' ? r.amount : 0,
         });
       }
     }
     const categories = Array.from(categoryMap.values())
-      .map((c) => ({ ...c, total: round2(c.total) }))
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        color: c.color,
+        halfTotal: round2(c.halfTotal),
+        theirsTotal: round2(c.theirsTotal),
+        total: round2(c.halfTotal + c.theirsTotal),
+      }))
       .sort((a, b) => b.total - a.total);
 
     // Installments: split transactions that are parceladas
