@@ -74,7 +74,7 @@ export function SplitSummaryCard({
   }
 
   return (
-    <div className="relative flex flex-col border border-[color:var(--color-paper-rule)] p-5 text-left">
+    <div className="mt-10 border-t border-[color:var(--color-paper-rule)] pt-6 text-left">
       {/* Eyebrow: "Divisão" with accent dot */}
       <div className="mb-3 flex items-center gap-2">
         <span

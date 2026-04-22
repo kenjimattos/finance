@@ -52,7 +52,6 @@ export function BillCardGrid({
   onChangeOffset,
   onManageCards,
   onManageRules,
-  splitCard,
 }: {
   breakdown: BillBreakdown;
   itemId: string;
@@ -64,8 +63,6 @@ export function BillCardGrid({
   onChangeOffset: (nextOffset: number) => void;
   onManageCards: () => void;
   onManageRules: () => void;
-  /** Optional split summary card rendered at the end of the grid. */
-  splitCard?: React.ReactNode;
 }) {
   const queryClient = useQueryClient();
   const sync = useMutation({
@@ -243,7 +240,6 @@ export function BillCardGrid({
               />
             );
           })}
-          {splitCard}
         </div>
       )}
     </motion.section>
