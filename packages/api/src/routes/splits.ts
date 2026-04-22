@@ -197,20 +197,21 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
 
     const round2 = (n: number) => Math.round(n * 100) / 100;
 
-    // Category breakdown: group by category, split into half/theirs columns
+    // Category breakdown: group by category, full amounts (not halved).
+    // The split math (÷2 for half) only applies to the top-level totals.
     const categoryMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number }>();
     for (const r of rows) {
       if (r.user_category_id == null) continue;
       const existing = categoryMap.get(r.user_category_id);
       if (existing) {
-        if (r.split_type === 'half') existing.halfTotal += r.amount / 2;
+        if (r.split_type === 'half') existing.halfTotal += r.amount;
         else existing.theirsTotal += r.amount;
       } else {
         categoryMap.set(r.user_category_id, {
           id: r.user_category_id,
           name: r.user_category_name!,
           color: r.user_category_color!,
-          halfTotal: r.split_type === 'half' ? r.amount / 2 : 0,
+          halfTotal: r.split_type === 'half' ? r.amount : 0,
           theirsTotal: r.split_type === 'theirs' ? r.amount : 0,
         });
       }
@@ -226,14 +227,14 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
       }))
       .sort((a, b) => b.total - a.total);
 
-    // Installments: split transactions that are parceladas
+    // Installments: full amounts (not halved)
     const installments = rows
       .filter((r) => r.installment_number != null && r.total_installments != null)
       .map((r) => ({
         id: r.id,
         date: r.date,
         description: r.description,
-        amount: round2(r.split_type === 'half' ? r.amount / 2 : r.amount),
+        amount: round2(r.amount),
         splitType: r.split_type as 'half' | 'theirs',
         installmentNumber: r.installment_number!,
         totalInstallments: r.total_installments!,
