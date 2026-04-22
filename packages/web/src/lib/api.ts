@@ -135,8 +135,8 @@ export interface Transaction {
   billShift: -1 | 1 | null;
   /** 'pluggy' for synced transactions, 'manual' for user-created entries */
   source: 'pluggy' | 'manual';
-  /** 'half' = 50/50 split, 'theirs' = partner owes 100%, 'mine' = 100% mine, null = not split */
-  split: 'half' | 'theirs' | 'mine' | null;
+  /** 'half' = 50/50 split, 'theirs' = partner owes 100%, null = not split (implicitly mine) */
+  split: 'half' | 'theirs' | null;
   userCategory: UserCategoryRef | null;
 }
 
@@ -247,7 +247,7 @@ export interface SplitSummaryTransaction {
   date: string;
   description: string | null;
   amount: number;
-  splitType: 'half' | 'theirs' | 'mine' | 'mine';
+  splitType: 'half' | 'theirs';
   owes: number;
   installmentNumber: number | null;
   totalInstallments: number | null;
@@ -268,7 +268,7 @@ export interface SplitInstallmentBreakdown {
   date: string;
   description: string | null;
   amount: number;
-  splitType: 'half' | 'theirs' | 'mine' | 'mine';
+  splitType: 'half' | 'theirs' | 'mine';
   installmentNumber: number;
   totalInstallments: number;
 }
@@ -557,7 +557,7 @@ export const api = {
 
   // ── Splits ──
 
-  splitTransaction: (transactionId: string, splitType: 'half' | 'theirs' | 'mine') =>
+  splitTransaction: (transactionId: string, splitType: 'half' | 'theirs') =>
     request<{ transactionId: string; splitType: string }>(
       `/transactions/${encodeURIComponent(transactionId)}/split`,
       { method: 'PUT', body: JSON.stringify({ splitType }) },
@@ -569,7 +569,7 @@ export const api = {
       { method: 'DELETE' },
     ),
 
-  bulkSplit: (transactionIds: string[], splitType: 'half' | 'theirs' | 'mine') =>
+  bulkSplit: (transactionIds: string[], splitType: 'half' | 'theirs') =>
     request<{ applied: number }>('/transactions/bulk-split', {
       method: 'POST',
       body: JSON.stringify({ transactionIds, splitType }),
