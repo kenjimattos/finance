@@ -241,12 +241,11 @@ db.exec(`
   );
 
   -- Bill-splitting: marks a transaction as shared with a partner.
-  -- 'half' = 50/50 split (partner owes half), 'theirs' = partner owes 100%,
-  -- 'mine' = 100% mine (partner owes nothing, but tracked for Splitwise).
-  -- Unmarked transactions don't appear in the split summary at all.
+  -- 'half' = 50/50 split (partner owes half), 'theirs' = partner owes 100%.
+  -- Categorized transactions WITHOUT a split row are implicitly "mine".
   CREATE TABLE IF NOT EXISTS transaction_splits (
     transaction_id TEXT PRIMARY KEY,
-    split_type TEXT NOT NULL CHECK(split_type IN ('half', 'theirs', 'mine')),
+    split_type TEXT NOT NULL CHECK(split_type IN ('half', 'theirs')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
   );
@@ -396,18 +395,19 @@ db.exec(`
   WHERE account_id IS NULL
 `);
 
-// Migration: widen transaction_splits CHECK constraint to include 'mine'.
-// SQLite can't ALTER CHECK constraints, so we recreate the table if needed.
+// Migration: if transaction_splits has the old 'mine' CHECK constraint,
+// recreate without it and delete any 'mine' rows (they are now implicit).
 {
   const checkSql = db
     .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='transaction_splits'")
     .get() as { sql: string } | undefined;
-  if (checkSql && !checkSql.sql.includes("'mine'")) {
+  if (checkSql && checkSql.sql.includes("'mine'")) {
     db.exec(`
+      DELETE FROM transaction_splits WHERE split_type = 'mine';
       ALTER TABLE transaction_splits RENAME TO _transaction_splits_old;
       CREATE TABLE transaction_splits (
         transaction_id TEXT PRIMARY KEY,
-        split_type TEXT NOT NULL CHECK(split_type IN ('half', 'theirs', 'mine')),
+        split_type TEXT NOT NULL CHECK(split_type IN ('half', 'theirs')),
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
       );

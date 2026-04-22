@@ -6,7 +6,7 @@ import { computeBillWindowAtOffset } from '../services/billWindow.js';
 export const splitsRouter = Router();
 
 const splitTypeSchema = z.object({
-  splitType: z.enum(['half', 'theirs', 'mine']),
+  splitType: z.enum(['half', 'theirs']),
 });
 
 // PUT /transactions/:id/split — mark a transaction as shared
@@ -46,7 +46,7 @@ splitsRouter.delete('/transactions/:id/split', (req, res) => {
 });
 
 const bulkSplitSchema = z.object({
-  splitType: z.enum(['half', 'theirs', 'mine']),
+  splitType: z.enum(['half', 'theirs']),
   transactionIds: z.array(z.string().min(1)).min(1).max(500),
 });
 
@@ -143,6 +143,22 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
     const previous = computeBillWindowAtOffset(s, offset - 1);
     const next = computeBillWindowAtOffset(s, offset + 1);
 
+    const windowParams = [
+      accountId,
+      current.periodStart, current.periodEnd,
+      previous.periodStart, previous.periodEnd,
+      next.periodStart, next.periodEnd,
+    ];
+
+    const windowClause = `
+      t.account_id = ?
+      AND (
+           (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
+        OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
+        OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+      )`;
+
+    // Split-marked transactions (half / theirs)
     const rows = db
       .prepare(
         `SELECT t.id, t.date, t.description,
@@ -157,20 +173,30 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
          LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
          LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
          LEFT JOIN user_categories       uc ON uc.id = tc.user_category_id
-         WHERE t.account_id = ?
-           AND (
-                (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
-             OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
-             OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
-           )
+         WHERE ${windowClause}
          ORDER BY t.date ASC, t.id ASC`,
       )
-      .all(
-        accountId,
-        current.periodStart, current.periodEnd,
-        previous.periodStart, previous.periodEnd,
-        next.periodStart, next.periodEnd,
-      ) as SplitSummaryRow[];
+      .all(...windowParams) as SplitSummaryRow[];
+
+    // "Mine" = categorized transactions WITHOUT a split row
+    const mineRows = db
+      .prepare(
+        `SELECT t.id, t.date, t.description,
+                COALESCE(t.amount_in_account_currency, t.amount) AS amount,
+                t.installment_number, t.total_installments,
+                uc.id    AS user_category_id,
+                uc.name  AS user_category_name,
+                uc.color AS user_category_color
+         FROM transactions t
+         INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
+         INNER JOIN user_categories       uc ON uc.id = tc.user_category_id
+         LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+         LEFT JOIN transaction_splits     sp ON sp.transaction_id = t.id
+         WHERE ${windowClause}
+           AND sp.transaction_id IS NULL
+         ORDER BY t.date ASC, t.id ASC`,
+      )
+      .all(...windowParams) as Array<Omit<SplitSummaryRow, 'split_type'>>;
 
     let halfTotal = 0;
     let theirsTotal = 0;
@@ -183,45 +209,50 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
       const owes =
         r.split_type === 'half'
           ? Math.round((r.amount / 2) * 100) / 100
-          : r.split_type === 'theirs'
-            ? amt
-            : 0;
+          : amt;
       if (r.split_type === 'half') halfTotal += amt;
-      else if (r.split_type === 'theirs') theirsTotal += amt;
-      else mineTotal += amt;
+      else theirsTotal += amt;
       return {
         id: r.id,
         date: r.date,
         description: r.description,
         amount: amt,
-        splitType: r.split_type as 'half' | 'theirs' | 'mine',
+        splitType: r.split_type as 'half' | 'theirs',
         owes,
         installmentNumber: r.installment_number,
         totalInstallments: r.total_installments,
       };
     });
 
+    for (const r of mineRows) {
+      mineTotal += Math.round(r.amount * 100) / 100;
+    }
+
     // Category breakdown: group by category, full amounts (not halved).
-    // The split math (÷2 for half) only applies to the top-level totals.
     const categoryMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number; mineTotal: number }>();
-    for (const r of rows) {
-      if (r.user_category_id == null) continue;
-      const existing = categoryMap.get(r.user_category_id);
+
+    function addToCatMap(catId: number | null, catName: string | null, catColor: string | null, amount: number, type: 'half' | 'theirs' | 'mine') {
+      if (catId == null) return;
+      const existing = categoryMap.get(catId);
       if (existing) {
-        if (r.split_type === 'half') existing.halfTotal += r.amount;
-        else if (r.split_type === 'theirs') existing.theirsTotal += r.amount;
-        else existing.mineTotal += r.amount;
+        if (type === 'half') existing.halfTotal += amount;
+        else if (type === 'theirs') existing.theirsTotal += amount;
+        else existing.mineTotal += amount;
       } else {
-        categoryMap.set(r.user_category_id, {
-          id: r.user_category_id,
-          name: r.user_category_name!,
-          color: r.user_category_color!,
-          halfTotal: r.split_type === 'half' ? r.amount : 0,
-          theirsTotal: r.split_type === 'theirs' ? r.amount : 0,
-          mineTotal: r.split_type === 'mine' ? r.amount : 0,
+        categoryMap.set(catId, {
+          id: catId,
+          name: catName!,
+          color: catColor!,
+          halfTotal: type === 'half' ? amount : 0,
+          theirsTotal: type === 'theirs' ? amount : 0,
+          mineTotal: type === 'mine' ? amount : 0,
         });
       }
     }
+
+    for (const r of rows) addToCatMap(r.user_category_id, r.user_category_name, r.user_category_color, r.amount, r.split_type as 'half' | 'theirs');
+    for (const r of mineRows) addToCatMap(r.user_category_id, r.user_category_name, r.user_category_color, r.amount, 'mine');
+
     const categories = Array.from(categoryMap.values())
       .map((c) => ({
         id: c.id,
@@ -234,18 +265,27 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
       }))
       .sort((a, b) => b.total - a.total);
 
-    // Installments: full amounts (not halved)
-    const installments = rows
-      .filter((r) => r.installment_number != null && r.total_installments != null)
-      .map((r) => ({
-        id: r.id,
-        date: r.date,
-        description: r.description,
-        amount: round2(r.amount),
-        splitType: r.split_type as 'half' | 'theirs' | 'mine',
-        installmentNumber: r.installment_number!,
-        totalInstallments: r.total_installments!,
-      }));
+    // Installments: from split rows + mine rows
+    const installments = [
+      ...rows
+        .filter((r) => r.installment_number != null && r.total_installments != null)
+        .map((r) => ({
+          id: r.id, date: r.date, description: r.description,
+          amount: round2(r.amount),
+          splitType: r.split_type as 'half' | 'theirs',
+          installmentNumber: r.installment_number!,
+          totalInstallments: r.total_installments!,
+        })),
+      ...mineRows
+        .filter((r) => r.installment_number != null && r.total_installments != null)
+        .map((r) => ({
+          id: r.id, date: r.date, description: r.description,
+          amount: round2(r.amount),
+          splitType: 'mine' as const,
+          installmentNumber: r.installment_number!,
+          totalInstallments: r.total_installments!,
+        })),
+    ];
 
     res.json({
       accountId,
@@ -258,7 +298,7 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
       breakdown: {
         half: { count: rows.filter((r) => r.split_type === 'half').length, total: round2(halfTotal), owes: round2(halfTotal / 2) },
         theirs: { count: rows.filter((r) => r.split_type === 'theirs').length, total: round2(theirsTotal), owes: round2(theirsTotal) },
-        mine: { count: rows.filter((r) => r.split_type === 'mine').length, total: round2(mineTotal) },
+        mine: { count: mineRows.length, total: round2(mineTotal) },
       },
       categories,
       installments,
