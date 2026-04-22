@@ -898,34 +898,53 @@ function SplitSection({
           {split.totalCount} {split.totalCount === 1 ? 'transação dividida' : 'transações divididas'}
         </p>
 
-        {/* Three columns: ½, dela, meu */}
-        <div className="mt-8 grid grid-cols-3 gap-8">
-          <OverviewSplitColumn
-            label="½"
-            total={formatBRL(split.breakdown.half.owes)}
-            subtitle={`${split.breakdown.half.count}x — total ${formatBRL(split.breakdown.half.total)}`}
-            categories={halfCategories}
-            installments={halfInstallments}
-            show={split.breakdown.half.count > 0}
-          />
-          <OverviewSplitColumn
-            label="dela"
-            total={formatBRL(split.breakdown.theirs.owes)}
-            subtitle={`${split.breakdown.theirs.count}x — total ${formatBRL(split.breakdown.theirs.total)}`}
-            categories={theirsCategories}
-            installments={theirsInstallments}
-            accent
-            show={split.breakdown.theirs.count > 0}
-          />
-          <OverviewSplitColumn
-            label="meu"
-            total={formatBRL(split.breakdown.mine.total)}
-            subtitle={`${split.breakdown.mine.count}x`}
-            categories={mineCategories}
-            installments={mineInstallments}
-            show={split.breakdown.mine.count > 0}
-          />
-        </div>
+        {/* Columns: ½, dela, meu — only those with data */}
+        {(() => {
+          const columns: React.ReactNode[] = [];
+          if (split.breakdown.half.count > 0) {
+            columns.push(
+              <OverviewSplitColumn
+                key="half"
+                label="½"
+                total={formatBRL(split.breakdown.half.owes)}
+                subtitle={`${split.breakdown.half.count}x — total ${formatBRL(split.breakdown.half.total)}`}
+                categories={halfCategories}
+                installments={halfInstallments}
+              />,
+            );
+          }
+          if (split.breakdown.theirs.count > 0) {
+            columns.push(
+              <OverviewSplitColumn
+                key="theirs"
+                label="dela"
+                total={formatBRL(split.breakdown.theirs.owes)}
+                subtitle={`${split.breakdown.theirs.count}x — total ${formatBRL(split.breakdown.theirs.total)}`}
+                categories={theirsCategories}
+                installments={theirsInstallments}
+                accent
+              />,
+            );
+          }
+          if (split.breakdown.mine.count > 0) {
+            columns.push(
+              <OverviewSplitColumn
+                key="mine"
+                label="meu"
+                total={formatBRL(split.breakdown.mine.total)}
+                subtitle={`${split.breakdown.mine.count}x`}
+                categories={mineCategories}
+                installments={mineInstallments}
+              />,
+            );
+          }
+          const cols = columns.length === 1 ? 'grid-cols-1' : columns.length === 2 ? 'grid-cols-2' : 'grid-cols-3';
+          return (
+            <div className={`mt-8 grid ${cols} gap-8`}>
+              {columns}
+            </div>
+          );
+        })()}
 
         {/* Copy button */}
         <div className="mt-6">
@@ -949,7 +968,6 @@ function OverviewSplitColumn({
   categories,
   installments,
   accent,
-  show,
 }: {
   label: string;
   total: string;
@@ -963,9 +981,7 @@ function OverviewSplitColumn({
     totalInstallments: number;
   }>;
   accent?: boolean;
-  show: boolean;
 }) {
-  if (!show) return null;
   return (
     <div>
       <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
