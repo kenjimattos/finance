@@ -234,6 +234,7 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
         date: r.date,
         description: r.description,
         amount: round2(r.split_type === 'half' ? r.amount / 2 : r.amount),
+        splitType: r.split_type as 'half' | 'theirs',
         installmentNumber: r.installment_number!,
         totalInstallments: r.total_installments!,
       }));

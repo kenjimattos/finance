@@ -267,6 +267,7 @@ export interface SplitInstallmentBreakdown {
   date: string;
   description: string | null;
   amount: number;
+  splitType: 'half' | 'theirs';
   installmentNumber: number;
   totalInstallments: number;
 }
