@@ -807,7 +807,7 @@ function UnconfiguredCard({
 
 // ─── Split section ─────────────────────────────────────────────────
 
-const SPLIT_CATEGORY_LIMIT = 6;
+const SPLIT_CAT_LIMIT = 6;
 const SPLIT_INSTALLMENT_LIMIT = 4;
 
 function SplitSection({
@@ -843,20 +843,19 @@ function SplitSection({
   year: number;
   month: number;
 }) {
-  const [categoriesExpanded, setCategoriesExpanded] = useState(false);
   const [installmentsExpanded, setInstallmentsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const categoriesSum = split.categories.reduce(
-    (acc, c) => acc + Math.max(0, c.total),
-    0,
-  );
-  const denominator = categoriesSum > 0 ? categoriesSum : 1;
-
-  const visibleCategories = categoriesExpanded
-    ? split.categories
-    : split.categories.slice(0, SPLIT_CATEGORY_LIMIT);
-  const hiddenCategoryCount = split.categories.length - SPLIT_CATEGORY_LIMIT;
+  // Separate categories into two independent lists
+  const halfCategories = split.categories
+    .filter((c) => c.halfTotal > 0)
+    .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.halfTotal }))
+    .sort((a, b) => b.total - a.total);
+  const theirsCategories = split.categories
+    .filter((c) => c.theirsTotal > 0)
+    .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.theirsTotal }))
+    .sort((a, b) => b.total - a.total);
+  const hasCategories = halfCategories.length > 0 || theirsCategories.length > 0;
 
   const visibleInstallments = installmentsExpanded
     ? split.installments
@@ -916,46 +915,13 @@ function SplitSection({
         </div>
 
         {/* Category breakdown */}
-        {split.categories.length > 0 && (
-          <div className="mt-8">
-            {/* Column headers */}
-            <div className="mb-1 grid grid-cols-[1fr_auto_auto] items-baseline gap-4 font-body text-[10px] uppercase tracking-[0.1em] text-[color:var(--color-ink-faint)]">
-              <span />
-              <span className="w-[80px] text-right">½</span>
-              <span className="w-[80px] text-right">dela</span>
-            </div>
-            <ul className="space-y-2.5">
-              {visibleCategories.map((cat) => (
-                <li key={cat.id}>
-                  <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-4 font-body text-[12px]">
-                    <span className="truncate text-[color:var(--color-ink-soft)]">{cat.name}</span>
-                    <span className="w-[80px] text-right font-mono tabular-nums text-[color:var(--color-ink-muted)]">
-                      {cat.halfTotal > 0 ? formatBRL(cat.halfTotal) : '—'}
-                    </span>
-                    <span className="w-[80px] text-right font-mono tabular-nums text-[color:var(--color-accent)]">
-                      {cat.theirsTotal > 0 ? formatBRL(cat.theirsTotal) : '—'}
-                    </span>
-                  </div>
-                  <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
-                    <div
-                      className="h-full"
-                      style={{
-                        background: cat.color,
-                        width: `${Math.round((Math.max(0, cat.total) / denominator) * 100)}%`,
-                      }}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
-            {hiddenCategoryCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setCategoriesExpanded((e) => !e)}
-                className="mt-3 font-body text-[11px] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
-              >
-                {categoriesExpanded ? '− recolher' : `+ ${hiddenCategoryCount} mais`}
-              </button>
+        {hasCategories && (
+          <div className="mt-8 grid grid-cols-2 gap-8">
+            {halfCategories.length > 0 && (
+              <OverviewSplitCategoryList label="½" categories={halfCategories} />
+            )}
+            {theirsCategories.length > 0 && (
+              <OverviewSplitCategoryList label="dela" categories={theirsCategories} accent />
             )}
           </div>
         )}
@@ -1007,6 +973,62 @@ function SplitSection({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function OverviewSplitCategoryList({
+  label,
+  categories,
+  accent,
+}: {
+  label: string;
+  categories: Array<{ id: number; name: string; color: string; total: number }>;
+  accent?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? categories : categories.slice(0, SPLIT_CAT_LIMIT);
+  const hiddenCount = categories.length - SPLIT_CAT_LIMIT;
+  const denominator = categories.reduce((acc, c) => acc + Math.max(0, c.total), 0) || 1;
+
+  return (
+    <div>
+      <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+        {label}
+      </div>
+      <ul className="mt-2 space-y-2.5">
+        {visible.map((cat) => (
+          <li key={cat.id}>
+            <div className="flex items-baseline justify-between gap-4 font-body text-[12px]">
+              <span className="truncate text-[color:var(--color-ink-soft)]">{cat.name}</span>
+              <span
+                className="shrink-0 font-mono tabular-nums"
+                style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
+              >
+                {formatBRL(cat.total)}
+              </span>
+            </div>
+            <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
+              <div
+                className="h-full"
+                style={{
+                  background: cat.color,
+                  width: `${Math.round((Math.max(0, cat.total) / denominator) * 100)}%`,
+                }}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-3 font-body text-[11px] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+        >
+          {expanded ? '− recolher' : `+ ${hiddenCount} mais`}
+        </button>
+      )}
     </div>
   );
 }
