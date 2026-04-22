@@ -95,40 +95,53 @@ export function SplitSummaryCard({
         {formatBRL(summary.partnerOwes)}
       </div>
 
-      {/* Three columns: ½, dela, meu */}
-      <div className="mt-6 grid grid-cols-3 gap-4">
-        {/* ½ column */}
-        {summary.breakdown.half.count > 0 && (
-          <SplitColumn
-            label="½"
-            total={formatBRL(summary.breakdown.half.owes)}
-            subtitle={`${summary.breakdown.half.count}x — total ${formatBRL(summary.breakdown.half.total)}`}
-            categories={halfCategories}
-            installments={halfInstallments}
-          />
-        )}
-        {/* dela column */}
-        {summary.breakdown.theirs.count > 0 && (
-          <SplitColumn
-            label="dela"
-            total={formatBRL(summary.breakdown.theirs.owes)}
-            subtitle={`${summary.breakdown.theirs.count}x — total ${formatBRL(summary.breakdown.theirs.total)}`}
-            categories={theirsCategories}
-            installments={theirsInstallments}
-            accent
-          />
-        )}
-        {/* meu column */}
-        {summary.breakdown.mine.count > 0 && (
-          <SplitColumn
-            label="meu"
-            total={formatBRL(summary.breakdown.mine.total)}
-            subtitle={`${summary.breakdown.mine.count}x`}
-            categories={mineCategories}
-            installments={mineInstallments}
-          />
-        )}
-      </div>
+      {/* Columns: ½, dela, meu — only those with data */}
+      {(() => {
+        const columns: React.ReactNode[] = [];
+        if (summary.breakdown.half.count > 0) {
+          columns.push(
+            <SplitColumn
+              key="half"
+              label="½"
+              total={formatBRL(summary.breakdown.half.owes)}
+              subtitle={`${summary.breakdown.half.count}x — total ${formatBRL(summary.breakdown.half.total)}`}
+              categories={halfCategories}
+              installments={halfInstallments}
+            />,
+          );
+        }
+        if (summary.breakdown.theirs.count > 0) {
+          columns.push(
+            <SplitColumn
+              key="theirs"
+              label="dela"
+              total={formatBRL(summary.breakdown.theirs.owes)}
+              subtitle={`${summary.breakdown.theirs.count}x — total ${formatBRL(summary.breakdown.theirs.total)}`}
+              categories={theirsCategories}
+              installments={theirsInstallments}
+              accent
+            />,
+          );
+        }
+        if (summary.breakdown.mine.count > 0) {
+          columns.push(
+            <SplitColumn
+              key="mine"
+              label="meu"
+              total={formatBRL(summary.breakdown.mine.total)}
+              subtitle={`${summary.breakdown.mine.count}x`}
+              categories={mineCategories}
+              installments={mineInstallments}
+            />,
+          );
+        }
+        const cols = columns.length === 1 ? 'grid-cols-1' : columns.length === 2 ? 'grid-cols-2' : 'grid-cols-3';
+        return (
+          <div className={`mt-6 grid ${cols} gap-6`}>
+            {columns}
+          </div>
+        );
+      })()}
 
       {/* Copy to clipboard */}
       <div className="mt-6 border-t border-[color:var(--color-paper-rule)] pt-4">
