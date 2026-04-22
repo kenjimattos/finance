@@ -521,14 +521,39 @@ async function syncItem(itemId: string) {
       synced_at       = datetime('now')
   `);
 
+  // Detect recycled IDs: if Pluggy reuses a transaction ID for a completely
+  // different transaction (different date or description), any user-data
+  // (categories, bill overrides, splits) attached to the old transaction is
+  // now dangling. We clear it before upserting so it doesn't silently
+  // corrupt the user's work.
+  const existingTx = db.prepare(
+    'SELECT id, date, description FROM transactions WHERE id = ?',
+  );
+  const clearRecycled = db.transaction((txId: string) => {
+    db.prepare('DELETE FROM transaction_categories WHERE transaction_id = ?').run(txId);
+    db.prepare('DELETE FROM transaction_bill_overrides WHERE transaction_id = ?').run(txId);
+    db.prepare('DELETE FROM transaction_splits WHERE transaction_id = ?').run(txId);
+  });
+
   const upsertTxBatch = db.transaction((txs: Transaction[], accountId: string) => {
     for (const t of txs) {
       const metadata: CreditCardMetadata | null = t.creditCardMetadata ?? null;
+      const newDate = toYmd(t.date);
+
+      // Check if this ID already exists with different content (recycled ID).
+      const old = existingTx.get(t.id) as { id: string; date: string; description: string | null } | undefined;
+      if (old && (old.date !== newDate || old.description !== (t.description ?? null))) {
+        console.warn(
+          `[sync] Recycled ID detected: ${t.id} was "${old.description}" @ ${old.date}, now "${t.description}" @ ${newDate}. Clearing user-data.`,
+        );
+        clearRecycled(t.id);
+      }
+
       insertTx.run(
         t.id,
         accountId,
         itemId,
-        toYmd(t.date),
+        newDate,
         t.description ?? null,
         t.amount,
         t.amountInAccountCurrency ?? null,
