@@ -258,7 +258,7 @@ export function Overview({
     let theirsCount = 0;
     let theirsTotal = 0;
     let theirsOwes = 0;
-    const catMap = new Map<number, { id: number; name: string; color: string; total: number }>();
+    const catMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number }>();
     const installments: Array<{
       id: string;
       date: string;
@@ -282,8 +282,18 @@ export function Overview({
       theirsOwes += s.breakdown.theirs.owes;
       for (const cat of s.categories) {
         const existing = catMap.get(cat.id);
-        if (existing) existing.total += cat.total;
-        else catMap.set(cat.id, { ...cat });
+        if (existing) {
+          existing.halfTotal += cat.halfTotal;
+          existing.theirsTotal += cat.theirsTotal;
+        } else {
+          catMap.set(cat.id, {
+            id: cat.id,
+            name: cat.name,
+            color: cat.color,
+            halfTotal: cat.halfTotal,
+            theirsTotal: cat.theirsTotal,
+          });
+        }
       }
       installments.push(...s.installments);
       allTxs.push(...s.transactions);
@@ -300,7 +310,12 @@ export function Overview({
         theirs: { count: theirsCount, total: round2(theirsTotal), owes: round2(theirsOwes) },
       },
       categories: Array.from(catMap.values())
-        .map((c) => ({ ...c, total: round2(c.total) }))
+        .map((c) => ({
+          ...c,
+          halfTotal: round2(c.halfTotal),
+          theirsTotal: round2(c.theirsTotal),
+          total: round2(c.halfTotal + c.theirsTotal),
+        }))
         .sort((a, b) => b.total - a.total),
       installments,
       transactions: allTxs,
@@ -807,7 +822,7 @@ function SplitSection({
       half: { count: number; total: number; owes: number };
       theirs: { count: number; total: number; owes: number };
     };
-    categories: Array<{ id: number; name: string; color: string; total: number }>;
+    categories: Array<{ id: number; name: string; color: string; halfTotal: number; theirsTotal: number; total: number }>;
     installments: Array<{
       id: string;
       date: string;
@@ -903,13 +918,22 @@ function SplitSection({
         {/* Category breakdown */}
         {split.categories.length > 0 && (
           <div className="mt-8">
+            {/* Column headers */}
+            <div className="mb-1 grid grid-cols-[1fr_auto_auto] items-baseline gap-4 font-body text-[10px] uppercase tracking-[0.1em] text-[color:var(--color-ink-faint)]">
+              <span />
+              <span className="w-[80px] text-right">½</span>
+              <span className="w-[80px] text-right">dela</span>
+            </div>
             <ul className="space-y-2.5">
               {visibleCategories.map((cat) => (
                 <li key={cat.id}>
-                  <div className="flex items-baseline justify-between gap-4 font-body text-[12px]">
+                  <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-4 font-body text-[12px]">
                     <span className="truncate text-[color:var(--color-ink-soft)]">{cat.name}</span>
-                    <span className="shrink-0 font-mono tabular-nums text-[color:var(--color-ink-muted)]">
-                      {formatBRL(cat.total)}
+                    <span className="w-[80px] text-right font-mono tabular-nums text-[color:var(--color-ink-muted)]">
+                      {cat.halfTotal > 0 ? formatBRL(cat.halfTotal) : '—'}
+                    </span>
+                    <span className="w-[80px] text-right font-mono tabular-nums text-[color:var(--color-accent)]">
+                      {cat.theirsTotal > 0 ? formatBRL(cat.theirsTotal) : '—'}
                     </span>
                   </div>
                   <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">

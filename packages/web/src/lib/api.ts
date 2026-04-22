@@ -257,6 +257,8 @@ export interface SplitCategoryBreakdown {
   id: number;
   name: string;
   color: string;
+  halfTotal: number;
+  theirsTotal: number;
   total: number;
 }
 

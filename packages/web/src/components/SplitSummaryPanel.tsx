@@ -123,19 +123,28 @@ export function SplitSummaryCard({
         )}
       </div>
 
-      {/* Category breakdown — same pattern as BillCard */}
+      {/* Category breakdown — two columns: ½ and dela */}
       {summary.categories.length > 0 && (
         <div className="mt-6">
           <SubsectionLabel>Categorias</SubsectionLabel>
-          <ul className="mt-2 space-y-2.5">
+          {/* Column headers */}
+          <div className="mt-2 mb-1 grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[10px] uppercase tracking-[0.1em] text-[color:var(--color-ink-faint)]">
+            <span />
+            <span className="w-[68px] text-right">½</span>
+            <span className="w-[68px] text-right">dela</span>
+          </div>
+          <ul className="space-y-2.5">
             {visibleCategories.map((cat) => (
               <li key={cat.id}>
-                <div className="flex items-baseline justify-between gap-3 font-body text-[12px]">
+                <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]">
                   <span className="truncate text-[color:var(--color-ink-soft)]">
                     {cat.name}
                   </span>
-                  <span className="font-mono tabular-nums text-[color:var(--color-ink-muted)]">
-                    {formatBRL(cat.total)}
+                  <span className="w-[68px] text-right font-mono tabular-nums text-[color:var(--color-ink-muted)]">
+                    {cat.halfTotal > 0 ? formatBRL(cat.halfTotal) : '—'}
+                  </span>
+                  <span className="w-[68px] text-right font-mono tabular-nums text-[color:var(--color-accent)]">
+                    {cat.theirsTotal > 0 ? formatBRL(cat.theirsTotal) : '—'}
                   </span>
                 </div>
                 <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
