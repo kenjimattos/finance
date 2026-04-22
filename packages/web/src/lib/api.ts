@@ -253,6 +253,22 @@ export interface SplitSummaryTransaction {
   totalInstallments: number | null;
 }
 
+export interface SplitCategoryBreakdown {
+  id: number;
+  name: string;
+  color: string;
+  total: number;
+}
+
+export interface SplitInstallmentBreakdown {
+  id: string;
+  date: string;
+  description: string | null;
+  amount: number;
+  installmentNumber: number;
+  totalInstallments: number;
+}
+
 export interface SplitSummary {
   accountId: string;
   offset: number;
@@ -265,6 +281,8 @@ export interface SplitSummary {
     half: { count: number; total: number; owes: number };
     theirs: { count: number; total: number; owes: number };
   };
+  categories: SplitCategoryBreakdown[];
+  installments: SplitInstallmentBreakdown[];
   transactions: SplitSummaryTransaction[];
 }
 
