@@ -2,7 +2,14 @@ import { useState, useMemo } from 'react';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PluggyConnect } from 'react-pluggy-connect';
 import { motion } from 'motion/react';
-import { api, type Item, type Account, type AccountSettings, type BillBreakdown } from '../lib/api';
+import {
+  api,
+  type Item,
+  type Account,
+  type AccountSettings,
+  type BillBreakdown,
+  type SplitSummary,
+} from '../lib/api';
 import { formatBRL, formatDateLong, formatDelta } from '../lib/format';
 import { findOffsetForDueMonth, currentDueMonth } from '../lib/billWindow';
 
@@ -228,6 +235,77 @@ export function Overview({
       };
     }),
   });
+
+  // ── Split summaries across all configured accounts ──
+
+  const splitQueries = useQueries({
+    queries: configured.map(({ account }, i) => {
+      const offset = accountOffsets[i];
+      return {
+        queryKey: ['splitSummary', account.id, offset],
+        queryFn: () => api.getSplitSummary(account.id, offset ?? 0),
+        enabled: offset !== null,
+      };
+    }),
+  });
+
+  const aggregatedSplit = useMemo(() => {
+    let partnerOwes = 0;
+    let totalCount = 0;
+    let halfCount = 0;
+    let halfTotal = 0;
+    let halfOwes = 0;
+    let theirsCount = 0;
+    let theirsTotal = 0;
+    let theirsOwes = 0;
+    const catMap = new Map<number, { id: number; name: string; color: string; total: number }>();
+    const installments: Array<{
+      id: string;
+      date: string;
+      description: string | null;
+      amount: number;
+      installmentNumber: number;
+      totalInstallments: number;
+    }> = [];
+    const allTxs: SplitSummary['transactions'] = [];
+
+    for (const q of splitQueries) {
+      const s = q.data;
+      if (!s) continue;
+      partnerOwes += s.partnerOwes;
+      totalCount += s.totalSplitTransactions;
+      halfCount += s.breakdown.half.count;
+      halfTotal += s.breakdown.half.total;
+      halfOwes += s.breakdown.half.owes;
+      theirsCount += s.breakdown.theirs.count;
+      theirsTotal += s.breakdown.theirs.total;
+      theirsOwes += s.breakdown.theirs.owes;
+      for (const cat of s.categories) {
+        const existing = catMap.get(cat.id);
+        if (existing) existing.total += cat.total;
+        else catMap.set(cat.id, { ...cat });
+      }
+      installments.push(...s.installments);
+      allTxs.push(...s.transactions);
+    }
+
+    if (totalCount === 0) return null;
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    return {
+      partnerOwes: round2(partnerOwes),
+      totalCount,
+      breakdown: {
+        half: { count: halfCount, total: round2(halfTotal), owes: round2(halfOwes) },
+        theirs: { count: theirsCount, total: round2(theirsTotal), owes: round2(theirsOwes) },
+      },
+      categories: Array.from(catMap.values())
+        .map((c) => ({ ...c, total: round2(c.total) }))
+        .sort((a, b) => b.total - a.total),
+      installments,
+      transactions: allTxs,
+    };
+  }, [splitQueries]);
 
   // ── Grand total (categorized only — matches per-account totals) ──
 
@@ -474,6 +552,15 @@ export function Overview({
           <AddBankCard />
         </div>
       </div>
+
+      {/* ═══ DIVISÃO ═══ */}
+      {aggregatedSplit && (
+        <SplitSection
+          split={aggregatedSplit}
+          year={year}
+          month={month}
+        />
+      )}
     </motion.section>
   );
 }
@@ -701,6 +788,210 @@ function UnconfiguredCard({
       </span>
     </button>
   );
+}
+
+// ─── Split section ─────────────────────────────────────────────────
+
+const SPLIT_CATEGORY_LIMIT = 6;
+const SPLIT_INSTALLMENT_LIMIT = 4;
+
+function SplitSection({
+  split,
+  year,
+  month,
+}: {
+  split: {
+    partnerOwes: number;
+    totalCount: number;
+    breakdown: {
+      half: { count: number; total: number; owes: number };
+      theirs: { count: number; total: number; owes: number };
+    };
+    categories: Array<{ id: number; name: string; color: string; total: number }>;
+    installments: Array<{
+      id: string;
+      date: string;
+      description: string | null;
+      amount: number;
+      installmentNumber: number;
+      totalInstallments: number;
+    }>;
+    transactions: Array<{
+      id: string;
+      date: string;
+      description: string | null;
+      amount: number;
+      splitType: 'half' | 'theirs';
+      owes: number;
+    }>;
+  };
+  year: number;
+  month: number;
+}) {
+  const [categoriesExpanded, setCategoriesExpanded] = useState(false);
+  const [installmentsExpanded, setInstallmentsExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const categoriesSum = split.categories.reduce(
+    (acc, c) => acc + Math.max(0, c.total),
+    0,
+  );
+  const denominator = categoriesSum > 0 ? categoriesSum : 1;
+
+  const visibleCategories = categoriesExpanded
+    ? split.categories
+    : split.categories.slice(0, SPLIT_CATEGORY_LIMIT);
+  const hiddenCategoryCount = split.categories.length - SPLIT_CATEGORY_LIMIT;
+
+  const visibleInstallments = installmentsExpanded
+    ? split.installments
+    : split.installments.slice(0, SPLIT_INSTALLMENT_LIMIT);
+  const hiddenInstallmentCount =
+    split.installments.length - SPLIT_INSTALLMENT_LIMIT;
+
+  function copyToClipboard() {
+    const label = `${MONTH_NAMES[month - 1]} ${year}`;
+    const lines: string[] = [];
+    lines.push(`Divisão ${label} — Todos os cartões`);
+    lines.push('');
+    for (const tx of split.transactions) {
+      const desc = (tx.description ?? '—').padEnd(30);
+      const amt = formatBRL(tx.amount);
+      const tag = tx.splitType === 'half' ? '50/50' : 'dela';
+      const owes = formatBRL(tx.owes);
+      lines.push(
+        `${tx.date.slice(8, 10)}/${tx.date.slice(5, 7)}  ${desc}  ${amt}  (${tag} → ${owes})`,
+      );
+    }
+    lines.push('');
+    lines.push(`Total que deve: ${formatBRL(split.partnerOwes)}`);
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="mt-14">
+      <div className="eyebrow mb-6 uppercase">divisão</div>
+
+      {/* Total headline */}
+      <div className="mb-6">
+        <div className="font-display text-[48px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[56px]">
+          {formatBRL(split.partnerOwes)}
+        </div>
+        <p className="mt-2 font-body text-sm text-[color:var(--color-ink-muted)]">
+          {split.totalCount} {split.totalCount === 1 ? 'transação dividida' : 'transações divididas'}
+        </p>
+
+        {/* Half / Theirs badges */}
+        <div className="mt-3 flex items-center gap-4 font-body text-xs text-[color:var(--color-ink-muted)]">
+          {split.breakdown.half.count > 0 && (
+            <span>
+              <span className="font-mono font-semibold text-[color:var(--color-ink)]">½</span>
+              {' '}{split.breakdown.half.count}x = {formatBRL(split.breakdown.half.owes)}
+            </span>
+          )}
+          {split.breakdown.theirs.count > 0 && (
+            <span>
+              <span className="font-mono font-semibold text-[color:var(--color-accent)]">dela</span>
+              {' '}{split.breakdown.theirs.count}x = {formatBRL(split.breakdown.theirs.owes)}
+            </span>
+          )}
+        </div>
+
+        {/* Category breakdown */}
+        {split.categories.length > 0 && (
+          <div className="mt-8">
+            <ul className="space-y-2.5">
+              {visibleCategories.map((cat) => (
+                <li key={cat.id}>
+                  <div className="flex items-baseline justify-between gap-4 font-body text-[12px]">
+                    <span className="truncate text-[color:var(--color-ink-soft)]">{cat.name}</span>
+                    <span className="shrink-0 font-mono tabular-nums text-[color:var(--color-ink-muted)]">
+                      {formatBRL(cat.total)}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
+                    <div
+                      className="h-full"
+                      style={{
+                        background: cat.color,
+                        width: `${Math.round((Math.max(0, cat.total) / denominator) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {hiddenCategoryCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setCategoriesExpanded((e) => !e)}
+                className="mt-3 font-body text-[11px] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+              >
+                {categoriesExpanded ? '− recolher' : `+ ${hiddenCategoryCount} mais`}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Installments */}
+        {split.installments.length > 0 && (
+          <div className="mt-8 border-t border-[color:var(--color-paper-rule)] pt-4">
+            <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+              Parceladas
+            </div>
+            <ul className="mt-2 space-y-2">
+              {visibleInstallments.map((inst) => (
+                <li
+                  key={inst.id}
+                  className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]"
+                >
+                  <span className="truncate text-[color:var(--color-ink-soft)]">
+                    {stripInstallmentSuffix(inst.description)}
+                  </span>
+                  <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
+                    {inst.installmentNumber}/{inst.totalInstallments}
+                  </span>
+                  <span className="font-mono tabular-nums text-[color:var(--color-ink-muted)]">
+                    {formatBRL(inst.amount)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {hiddenInstallmentCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setInstallmentsExpanded((e) => !e)}
+                className="mt-3 font-body text-[11px] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+              >
+                {installmentsExpanded ? '− recolher' : `+ ${hiddenInstallmentCount} mais`}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Copy button */}
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={copyToClipboard}
+            className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-accent)] transition-colors hover:text-[color:var(--color-ink)]"
+          >
+            {copied ? 'copiado!' : 'copiar para splitwise'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const INSTALLMENT_SUFFIX = /\s*PARC\d{1,2}\/\d{1,2}\s*$/i;
+
+function stripInstallmentSuffix(description: string | null): string {
+  if (!description) return '—';
+  return description.replace(INSTALLMENT_SUFFIX, '').trim() || '—';
 }
 
 // ─── Add bank card ──────────────────────────────────────────────────
