@@ -110,6 +110,9 @@ interface SplitSummaryRow {
   split_type: string;
   installment_number: number | null;
   total_installments: number | null;
+  user_category_id: number | null;
+  user_category_name: string | null;
+  user_category_color: string | null;
 }
 
 /**
@@ -145,10 +148,15 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
         `SELECT t.id, t.date, t.description,
                 COALESCE(t.amount_in_account_currency, t.amount) AS amount,
                 sp.split_type,
-                t.installment_number, t.total_installments
+                t.installment_number, t.total_installments,
+                uc.id    AS user_category_id,
+                uc.name  AS user_category_name,
+                uc.color AS user_category_color
          FROM transactions t
          INNER JOIN transaction_splits sp ON sp.transaction_id = t.id
          LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+         LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
+         LEFT JOIN user_categories       uc ON uc.id = tc.user_category_id
          WHERE t.account_id = ?
            AND (
                 (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
@@ -189,6 +197,41 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
 
     const round2 = (n: number) => Math.round(n * 100) / 100;
 
+    // Category breakdown: group by category, sum the partner-owes amount
+    const categoryMap = new Map<number, { id: number; name: string; color: string; total: number }>();
+    for (const r of rows) {
+      if (r.user_category_id == null) continue;
+      const owes = r.split_type === 'half'
+        ? r.amount / 2
+        : r.amount;
+      const existing = categoryMap.get(r.user_category_id);
+      if (existing) {
+        existing.total += owes;
+      } else {
+        categoryMap.set(r.user_category_id, {
+          id: r.user_category_id,
+          name: r.user_category_name!,
+          color: r.user_category_color!,
+          total: owes,
+        });
+      }
+    }
+    const categories = Array.from(categoryMap.values())
+      .map((c) => ({ ...c, total: round2(c.total) }))
+      .sort((a, b) => b.total - a.total);
+
+    // Installments: split transactions that are parceladas
+    const installments = rows
+      .filter((r) => r.installment_number != null && r.total_installments != null)
+      .map((r) => ({
+        id: r.id,
+        date: r.date,
+        description: r.description,
+        amount: round2(r.split_type === 'half' ? r.amount / 2 : r.amount),
+        installmentNumber: r.installment_number!,
+        totalInstallments: r.total_installments!,
+      }));
+
     res.json({
       accountId,
       offset,
@@ -201,6 +244,8 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
         half: { count: rows.filter((r) => r.split_type === 'half').length, total: round2(halfTotal), owes: round2(halfTotal / 2) },
         theirs: { count: rows.filter((r) => r.split_type === 'theirs').length, total: round2(theirsTotal), owes: round2(theirsTotal) },
       },
+      categories,
+      installments,
       transactions,
     });
   } catch (err) {

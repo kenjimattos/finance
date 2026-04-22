@@ -13,7 +13,7 @@ import { CategoryTabs, type CategoryTabFilter } from '../components/CategoryTabs
 import { TransactionInbox } from '../components/TransactionInbox';
 import { CardGroupsManager } from '../components/CardGroupsManager';
 import { RulesManager } from '../components/RulesManager';
-import { SplitSummaryPanel } from '../components/SplitSummaryPanel';
+import { SplitSummaryCard } from '../components/SplitSummaryPanel';
 
 /**
  * The main screen, once a card is linked.
@@ -218,12 +218,14 @@ function AccountDashboard({
         }}
         onManageCards={() => setManagerOpen(true)}
         onManageRules={() => setRulesOpen(true)}
-      />
-      <SplitSummaryPanel
-        accountId={accountId}
-        offset={billOffset}
-        displayName={breakdownQ.data.displayName}
-        dueDate={breakdownQ.data.dueDate}
+        splitCard={
+          <SplitSummaryCard
+            accountId={accountId}
+            offset={billOffset}
+            displayName={breakdownQ.data.displayName}
+            dueDate={breakdownQ.data.dueDate}
+          />
+        }
       />
       <CategoryTabs
         categories={selectedGroup?.categories ?? []}
