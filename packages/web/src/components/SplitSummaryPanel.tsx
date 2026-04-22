@@ -96,51 +96,53 @@ export function SplitSummaryCard({
         {formatBRL(summary.partnerOwes)}
       </div>
 
-      {/* Half / Theirs badges */}
-      <div className="mt-3 flex items-center gap-4 font-body text-xs text-[color:var(--color-ink-muted)]">
+      {/* Two columns: ½ and dela — each with total, categories, installments */}
+      <div className="mt-6 grid grid-cols-2 gap-4">
+        {/* ½ column */}
         {summary.breakdown.half.count > 0 && (
-          <span>
-            <span className="font-mono font-semibold text-[color:var(--color-ink)]">
-              ½
-            </span>{' '}
-            {summary.breakdown.half.count}x ={' '}
-            {formatBRL(summary.breakdown.half.owes)}
-          </span>
+          <div>
+            <SubsectionLabel>½</SubsectionLabel>
+            <div className="mt-1 font-display text-[28px] leading-none tracking-[-0.02em] text-[color:var(--color-ink)]">
+              {formatBRL(summary.breakdown.half.owes)}
+            </div>
+            <div className="mt-1 font-body text-[10px] text-[color:var(--color-ink-faint)]">
+              {summary.breakdown.half.count}x — total {formatBRL(summary.breakdown.half.total)}
+            </div>
+            {halfCategories.length > 0 && (
+              <div className="mt-4">
+                <SplitCategoryList categories={halfCategories} />
+              </div>
+            )}
+            {halfInstallments.length > 0 && (
+              <div className="mt-4 border-t border-[color:var(--color-paper-rule)] pt-3">
+                <SplitInstallmentList installments={halfInstallments} />
+              </div>
+            )}
+          </div>
         )}
+        {/* dela column */}
         {summary.breakdown.theirs.count > 0 && (
-          <span>
-            <span className="font-mono font-semibold text-[color:var(--color-accent)]">
-              dela
-            </span>{' '}
-            {summary.breakdown.theirs.count}x ={' '}
-            {formatBRL(summary.breakdown.theirs.owes)}
-          </span>
+          <div>
+            <SubsectionLabel>dela</SubsectionLabel>
+            <div className="mt-1 font-display text-[28px] leading-none tracking-[-0.02em] text-[color:var(--color-accent)]">
+              {formatBRL(summary.breakdown.theirs.owes)}
+            </div>
+            <div className="mt-1 font-body text-[10px] text-[color:var(--color-ink-faint)]">
+              {summary.breakdown.theirs.count}x — total {formatBRL(summary.breakdown.theirs.total)}
+            </div>
+            {theirsCategories.length > 0 && (
+              <div className="mt-4">
+                <SplitCategoryList categories={theirsCategories} accent />
+              </div>
+            )}
+            {theirsInstallments.length > 0 && (
+              <div className="mt-4 border-t border-[color:var(--color-paper-rule)] pt-3">
+                <SplitInstallmentList installments={theirsInstallments} accent />
+              </div>
+            )}
+          </div>
         )}
       </div>
-
-      {/* Category breakdown — two independent lists side by side */}
-      {hasCategories && (
-        <div className="mt-6 grid grid-cols-2 gap-4">
-          {halfCategories.length > 0 && (
-            <SplitCategoryList label="½" categories={halfCategories} />
-          )}
-          {theirsCategories.length > 0 && (
-            <SplitCategoryList label="dela" categories={theirsCategories} accent />
-          )}
-        </div>
-      )}
-
-      {/* Installments — two side-by-side lists */}
-      {hasInstallments && (
-        <div className="mt-6 border-t border-[color:var(--color-paper-rule)] pt-4 grid grid-cols-2 gap-4">
-          {halfInstallments.length > 0 && (
-            <SplitInstallmentList label="½" installments={halfInstallments} />
-          )}
-          {theirsInstallments.length > 0 && (
-            <SplitInstallmentList label="dela" installments={theirsInstallments} accent />
-          )}
-        </div>
-      )}
 
       {/* Copy to clipboard */}
       <div className="mt-6 border-t border-[color:var(--color-paper-rule)] pt-4">
@@ -157,11 +159,9 @@ export function SplitSummaryCard({
 }
 
 function SplitCategoryList({
-  label,
   categories,
   accent,
 }: {
-  label: string;
   categories: Array<{ id: number; name: string; color: string; total: number }>;
   accent?: boolean;
 }) {
@@ -172,8 +172,7 @@ function SplitCategoryList({
 
   return (
     <div>
-      <SubsectionLabel>{label}</SubsectionLabel>
-      <ul className="mt-2 space-y-2.5">
+      <ul className="space-y-2.5">
         {visible.map((cat) => (
           <li key={cat.id}>
             <div className="flex items-baseline justify-between gap-2 font-body text-[12px]">
@@ -211,11 +210,9 @@ function SplitCategoryList({
 }
 
 function SplitInstallmentList({
-  label,
   installments,
   accent,
 }: {
-  label: string;
   installments: Array<{
     id: string;
     description: string | null;
@@ -231,8 +228,7 @@ function SplitInstallmentList({
 
   return (
     <div>
-      <SubsectionLabel>{label}</SubsectionLabel>
-      <ul className="mt-2 space-y-2">
+      <ul className="space-y-2">
         {visible.map((inst) => (
           <li
             key={inst.id}
