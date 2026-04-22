@@ -37,21 +37,20 @@ export function SplitSummaryCard({
 
   const dueDateLabel = formatDueDateLabel(dueDate);
 
-  // Separate categories into two independent lists
-  const halfCategories = summary.categories
-    .filter((c) => c.halfTotal > 0)
-    .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.halfTotal }))
-    .sort((a, b) => b.total - a.total);
-  const theirsCategories = summary.categories
-    .filter((c) => c.theirsTotal > 0)
-    .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.theirsTotal }))
-    .sort((a, b) => b.total - a.total);
-  const hasCategories = halfCategories.length > 0 || theirsCategories.length > 0;
+  // Separate categories into three independent lists
+  const makeCatList = (key: 'halfTotal' | 'theirsTotal' | 'mineTotal') =>
+    summary.categories
+      .filter((c) => c[key] > 0)
+      .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c[key] }))
+      .sort((a, b) => b.total - a.total);
+  const halfCategories = makeCatList('halfTotal');
+  const theirsCategories = makeCatList('theirsTotal');
+  const mineCategories = makeCatList('mineTotal');
 
-  // Separate installments into two lists
+  // Separate installments into three lists
   const halfInstallments = summary.installments.filter((i) => i.splitType === 'half');
   const theirsInstallments = summary.installments.filter((i) => i.splitType === 'theirs');
-  const hasInstallments = halfInstallments.length > 0 || theirsInstallments.length > 0;
+  const mineInstallments = summary.installments.filter((i) => i.splitType === 'mine');
 
   function copyToClipboard(s: SplitSummary) {
     const lines: string[] = [];
@@ -60,7 +59,7 @@ export function SplitSummaryCard({
     for (const tx of s.transactions) {
       const desc = (tx.description ?? '—').padEnd(30);
       const amt = formatBRL(tx.amount);
-      const label = tx.splitType === 'half' ? '50/50' : 'dela';
+      const label = tx.splitType === 'half' ? '50/50' : tx.splitType === 'theirs' ? 'dela' : 'meu';
       const owes = formatBRL(tx.owes);
       lines.push(
         `${formatDay(tx.date)}  ${desc}  ${amt}  (${label} → ${owes})`,
@@ -96,51 +95,38 @@ export function SplitSummaryCard({
         {formatBRL(summary.partnerOwes)}
       </div>
 
-      {/* Two columns: ½ and dela — each with total, categories, installments */}
-      <div className="mt-6 grid grid-cols-2 gap-4">
+      {/* Three columns: ½, dela, meu */}
+      <div className="mt-6 grid grid-cols-3 gap-4">
         {/* ½ column */}
         {summary.breakdown.half.count > 0 && (
-          <div>
-            <SubsectionLabel>½</SubsectionLabel>
-            <div className="mt-1 font-display text-[28px] leading-none tracking-[-0.02em] text-[color:var(--color-ink)]">
-              {formatBRL(summary.breakdown.half.owes)}
-            </div>
-            <div className="mt-1 font-body text-[10px] text-[color:var(--color-ink-faint)]">
-              {summary.breakdown.half.count}x — total {formatBRL(summary.breakdown.half.total)}
-            </div>
-            {halfCategories.length > 0 && (
-              <div className="mt-4">
-                <SplitCategoryList categories={halfCategories} />
-              </div>
-            )}
-            {halfInstallments.length > 0 && (
-              <div className="mt-4 border-t border-[color:var(--color-paper-rule)] pt-3">
-                <SplitInstallmentList installments={halfInstallments} />
-              </div>
-            )}
-          </div>
+          <SplitColumn
+            label="½"
+            total={formatBRL(summary.breakdown.half.owes)}
+            subtitle={`${summary.breakdown.half.count}x — total ${formatBRL(summary.breakdown.half.total)}`}
+            categories={halfCategories}
+            installments={halfInstallments}
+          />
         )}
         {/* dela column */}
         {summary.breakdown.theirs.count > 0 && (
-          <div>
-            <SubsectionLabel>dela</SubsectionLabel>
-            <div className="mt-1 font-display text-[28px] leading-none tracking-[-0.02em] text-[color:var(--color-accent)]">
-              {formatBRL(summary.breakdown.theirs.owes)}
-            </div>
-            <div className="mt-1 font-body text-[10px] text-[color:var(--color-ink-faint)]">
-              {summary.breakdown.theirs.count}x — total {formatBRL(summary.breakdown.theirs.total)}
-            </div>
-            {theirsCategories.length > 0 && (
-              <div className="mt-4">
-                <SplitCategoryList categories={theirsCategories} accent />
-              </div>
-            )}
-            {theirsInstallments.length > 0 && (
-              <div className="mt-4 border-t border-[color:var(--color-paper-rule)] pt-3">
-                <SplitInstallmentList installments={theirsInstallments} accent />
-              </div>
-            )}
-          </div>
+          <SplitColumn
+            label="dela"
+            total={formatBRL(summary.breakdown.theirs.owes)}
+            subtitle={`${summary.breakdown.theirs.count}x — total ${formatBRL(summary.breakdown.theirs.total)}`}
+            categories={theirsCategories}
+            installments={theirsInstallments}
+            accent
+          />
+        )}
+        {/* meu column */}
+        {summary.breakdown.mine.count > 0 && (
+          <SplitColumn
+            label="meu"
+            total={formatBRL(summary.breakdown.mine.total)}
+            subtitle={`${summary.breakdown.mine.count}x`}
+            categories={mineCategories}
+            installments={mineInstallments}
+          />
         )}
       </div>
 
@@ -154,6 +140,55 @@ export function SplitSummaryCard({
           {copied ? 'copiado!' : 'copiar para splitwise'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function SplitColumn({
+  label,
+  total,
+  subtitle,
+  categories,
+  installments,
+  accent,
+}: {
+  label: string;
+  total: string;
+  subtitle: string;
+  categories: Array<{ id: number; name: string; color: string; total: number }>;
+  installments: Array<{
+    id: string;
+    description: string | null;
+    amount: number;
+    installmentNumber: number;
+    totalInstallments: number;
+  }>;
+  accent?: boolean;
+}) {
+  return (
+    <div>
+      <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+        {label}
+      </div>
+      <div
+        className="mt-1 font-display text-[28px] leading-none tracking-[-0.02em]"
+        style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink)' }}
+      >
+        {total}
+      </div>
+      <div className="mt-1 font-body text-[10px] text-[color:var(--color-ink-faint)]">
+        {subtitle}
+      </div>
+      {categories.length > 0 && (
+        <div className="mt-4">
+          <SplitCategoryList categories={categories} accent={accent} />
+        </div>
+      )}
+      {installments.length > 0 && (
+        <div className="mt-4 border-t border-[color:var(--color-paper-rule)] pt-3">
+          <SplitInstallmentList installments={installments} accent={accent} />
+        </div>
+      )}
     </div>
   );
 }
@@ -256,14 +291,6 @@ function SplitInstallmentList({
           onToggle={() => setExpanded((e) => !e)}
         />
       )}
-    </div>
-  );
-}
-
-function SubsectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
-      {children}
     </div>
   );
 }

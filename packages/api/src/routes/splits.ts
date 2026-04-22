@@ -6,7 +6,7 @@ import { computeBillWindowAtOffset } from '../services/billWindow.js';
 export const splitsRouter = Router();
 
 const splitTypeSchema = z.object({
-  splitType: z.enum(['half', 'theirs']),
+  splitType: z.enum(['half', 'theirs', 'mine']),
 });
 
 // PUT /transactions/:id/split — mark a transaction as shared
@@ -46,7 +46,7 @@ splitsRouter.delete('/transactions/:id/split', (req, res) => {
 });
 
 const bulkSplitSchema = z.object({
-  splitType: z.enum(['half', 'theirs']),
+  splitType: z.enum(['half', 'theirs', 'mine']),
   transactionIds: z.array(z.string().min(1)).min(1).max(500),
 });
 
@@ -174,38 +174,43 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
 
     let halfTotal = 0;
     let theirsTotal = 0;
+    let mineTotal = 0;
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
 
     const transactions = rows.map((r) => {
       const amt = Math.round(r.amount * 100) / 100;
       const owes =
         r.split_type === 'half'
           ? Math.round((r.amount / 2) * 100) / 100
-          : amt;
+          : r.split_type === 'theirs'
+            ? amt
+            : 0;
       if (r.split_type === 'half') halfTotal += amt;
-      else theirsTotal += amt;
+      else if (r.split_type === 'theirs') theirsTotal += amt;
+      else mineTotal += amt;
       return {
         id: r.id,
         date: r.date,
         description: r.description,
         amount: amt,
-        splitType: r.split_type as 'half' | 'theirs',
+        splitType: r.split_type as 'half' | 'theirs' | 'mine',
         owes,
         installmentNumber: r.installment_number,
         totalInstallments: r.total_installments,
       };
     });
 
-    const round2 = (n: number) => Math.round(n * 100) / 100;
-
     // Category breakdown: group by category, full amounts (not halved).
     // The split math (÷2 for half) only applies to the top-level totals.
-    const categoryMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number }>();
+    const categoryMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number; mineTotal: number }>();
     for (const r of rows) {
       if (r.user_category_id == null) continue;
       const existing = categoryMap.get(r.user_category_id);
       if (existing) {
         if (r.split_type === 'half') existing.halfTotal += r.amount;
-        else existing.theirsTotal += r.amount;
+        else if (r.split_type === 'theirs') existing.theirsTotal += r.amount;
+        else existing.mineTotal += r.amount;
       } else {
         categoryMap.set(r.user_category_id, {
           id: r.user_category_id,
@@ -213,6 +218,7 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
           color: r.user_category_color!,
           halfTotal: r.split_type === 'half' ? r.amount : 0,
           theirsTotal: r.split_type === 'theirs' ? r.amount : 0,
+          mineTotal: r.split_type === 'mine' ? r.amount : 0,
         });
       }
     }
@@ -223,7 +229,8 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
         color: c.color,
         halfTotal: round2(c.halfTotal),
         theirsTotal: round2(c.theirsTotal),
-        total: round2(c.halfTotal + c.theirsTotal),
+        mineTotal: round2(c.mineTotal),
+        total: round2(c.halfTotal + c.theirsTotal + c.mineTotal),
       }))
       .sort((a, b) => b.total - a.total);
 
@@ -235,7 +242,7 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
         date: r.date,
         description: r.description,
         amount: round2(r.amount),
-        splitType: r.split_type as 'half' | 'theirs',
+        splitType: r.split_type as 'half' | 'theirs' | 'mine',
         installmentNumber: r.installment_number!,
         totalInstallments: r.total_installments!,
       }));
@@ -251,6 +258,7 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
       breakdown: {
         half: { count: rows.filter((r) => r.split_type === 'half').length, total: round2(halfTotal), owes: round2(halfTotal / 2) },
         theirs: { count: rows.filter((r) => r.split_type === 'theirs').length, total: round2(theirsTotal), owes: round2(theirsTotal) },
+        mine: { count: rows.filter((r) => r.split_type === 'mine').length, total: round2(mineTotal) },
       },
       categories,
       installments,

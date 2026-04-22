@@ -135,8 +135,8 @@ export interface Transaction {
   billShift: -1 | 1 | null;
   /** 'pluggy' for synced transactions, 'manual' for user-created entries */
   source: 'pluggy' | 'manual';
-  /** 'half' = 50/50 split, 'theirs' = partner owes 100%, null = not split */
-  split: 'half' | 'theirs' | null;
+  /** 'half' = 50/50 split, 'theirs' = partner owes 100%, 'mine' = 100% mine, null = not split */
+  split: 'half' | 'theirs' | 'mine' | null;
   userCategory: UserCategoryRef | null;
 }
 
@@ -247,7 +247,7 @@ export interface SplitSummaryTransaction {
   date: string;
   description: string | null;
   amount: number;
-  splitType: 'half' | 'theirs';
+  splitType: 'half' | 'theirs' | 'mine' | 'mine';
   owes: number;
   installmentNumber: number | null;
   totalInstallments: number | null;
@@ -259,6 +259,7 @@ export interface SplitCategoryBreakdown {
   color: string;
   halfTotal: number;
   theirsTotal: number;
+  mineTotal: number;
   total: number;
 }
 
@@ -267,7 +268,7 @@ export interface SplitInstallmentBreakdown {
   date: string;
   description: string | null;
   amount: number;
-  splitType: 'half' | 'theirs';
+  splitType: 'half' | 'theirs' | 'mine' | 'mine';
   installmentNumber: number;
   totalInstallments: number;
 }
@@ -283,6 +284,7 @@ export interface SplitSummary {
   breakdown: {
     half: { count: number; total: number; owes: number };
     theirs: { count: number; total: number; owes: number };
+    mine: { count: number; total: number };
   };
   categories: SplitCategoryBreakdown[];
   installments: SplitInstallmentBreakdown[];
@@ -555,7 +557,7 @@ export const api = {
 
   // ── Splits ──
 
-  splitTransaction: (transactionId: string, splitType: 'half' | 'theirs') =>
+  splitTransaction: (transactionId: string, splitType: 'half' | 'theirs' | 'mine') =>
     request<{ transactionId: string; splitType: string }>(
       `/transactions/${encodeURIComponent(transactionId)}/split`,
       { method: 'PUT', body: JSON.stringify({ splitType }) },
@@ -567,7 +569,7 @@ export const api = {
       { method: 'DELETE' },
     ),
 
-  bulkSplit: (transactionIds: string[], splitType: 'half' | 'theirs') =>
+  bulkSplit: (transactionIds: string[], splitType: 'half' | 'theirs' | 'mine') =>
     request<{ applied: number }>('/transactions/bulk-split', {
       method: 'POST',
       body: JSON.stringify({ transactionIds, splitType }),

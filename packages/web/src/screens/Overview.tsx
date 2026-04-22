@@ -258,16 +258,10 @@ export function Overview({
     let theirsCount = 0;
     let theirsTotal = 0;
     let theirsOwes = 0;
-    const catMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number }>();
-    const installments: Array<{
-      id: string;
-      date: string;
-      description: string | null;
-      amount: number;
-      splitType: 'half' | 'theirs';
-      installmentNumber: number;
-      totalInstallments: number;
-    }> = [];
+    let mineCount = 0;
+    let mineTotal = 0;
+    const catMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number; mineTotal: number }>();
+    const installments: SplitSummary['installments'] = [];
     const allTxs: SplitSummary['transactions'] = [];
 
     for (const q of splitQueries) {
@@ -281,11 +275,14 @@ export function Overview({
       theirsCount += s.breakdown.theirs.count;
       theirsTotal += s.breakdown.theirs.total;
       theirsOwes += s.breakdown.theirs.owes;
+      mineCount += s.breakdown.mine.count;
+      mineTotal += s.breakdown.mine.total;
       for (const cat of s.categories) {
         const existing = catMap.get(cat.id);
         if (existing) {
           existing.halfTotal += cat.halfTotal;
           existing.theirsTotal += cat.theirsTotal;
+          existing.mineTotal += cat.mineTotal;
         } else {
           catMap.set(cat.id, {
             id: cat.id,
@@ -293,6 +290,7 @@ export function Overview({
             color: cat.color,
             halfTotal: cat.halfTotal,
             theirsTotal: cat.theirsTotal,
+            mineTotal: cat.mineTotal,
           });
         }
       }
@@ -309,13 +307,15 @@ export function Overview({
       breakdown: {
         half: { count: halfCount, total: round2(halfTotal), owes: round2(halfOwes) },
         theirs: { count: theirsCount, total: round2(theirsTotal), owes: round2(theirsOwes) },
+        mine: { count: mineCount, total: round2(mineTotal) },
       },
       categories: Array.from(catMap.values())
         .map((c) => ({
           ...c,
           halfTotal: round2(c.halfTotal),
           theirsTotal: round2(c.theirsTotal),
-          total: round2(c.halfTotal + c.theirsTotal),
+          mineTotal: round2(c.mineTotal),
+          total: round2(c.halfTotal + c.theirsTotal + c.mineTotal),
         }))
         .sort((a, b) => b.total - a.total),
       installments,
@@ -822,14 +822,15 @@ function SplitSection({
     breakdown: {
       half: { count: number; total: number; owes: number };
       theirs: { count: number; total: number; owes: number };
+      mine: { count: number; total: number };
     };
-    categories: Array<{ id: number; name: string; color: string; halfTotal: number; theirsTotal: number; total: number }>;
+    categories: Array<{ id: number; name: string; color: string; halfTotal: number; theirsTotal: number; mineTotal: number; total: number }>;
     installments: Array<{
       id: string;
       date: string;
       description: string | null;
       amount: number;
-      splitType: 'half' | 'theirs';
+      splitType: 'half' | 'theirs' | 'mine';
       installmentNumber: number;
       totalInstallments: number;
     }>;
@@ -838,7 +839,7 @@ function SplitSection({
       date: string;
       description: string | null;
       amount: number;
-      splitType: 'half' | 'theirs';
+      splitType: 'half' | 'theirs' | 'mine';
       owes: number;
     }>;
   };
@@ -847,19 +848,20 @@ function SplitSection({
 }) {
   const [copied, setCopied] = useState(false);
 
-  // Separate categories into two independent lists
-  const halfCategories = split.categories
-    .filter((c) => c.halfTotal > 0)
-    .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.halfTotal }))
-    .sort((a, b) => b.total - a.total);
-  const theirsCategories = split.categories
-    .filter((c) => c.theirsTotal > 0)
-    .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.theirsTotal }))
-    .sort((a, b) => b.total - a.total);
+  // Separate categories into three independent lists
+  const makeCatList = (key: 'halfTotal' | 'theirsTotal' | 'mineTotal') =>
+    split.categories
+      .filter((c) => c[key] > 0)
+      .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c[key] }))
+      .sort((a, b) => b.total - a.total);
+  const halfCategories = makeCatList('halfTotal');
+  const theirsCategories = makeCatList('theirsTotal');
+  const mineCategories = makeCatList('mineTotal');
 
-  // Separate installments into two lists
+  // Separate installments into three lists
   const halfInstallments = split.installments.filter((i) => i.splitType === 'half');
   const theirsInstallments = split.installments.filter((i) => i.splitType === 'theirs');
+  const mineInstallments = split.installments.filter((i) => i.splitType === 'mine');
 
   function copyToClipboard() {
     const label = `${MONTH_NAMES[month - 1]} ${year}`;
@@ -869,7 +871,7 @@ function SplitSection({
     for (const tx of split.transactions) {
       const desc = (tx.description ?? '—').padEnd(30);
       const amt = formatBRL(tx.amount);
-      const tag = tx.splitType === 'half' ? '50/50' : 'dela';
+      const tag = tx.splitType === 'half' ? '50/50' : tx.splitType === 'theirs' ? 'dela' : 'meu';
       const owes = formatBRL(tx.owes);
       lines.push(
         `${tx.date.slice(8, 10)}/${tx.date.slice(5, 7)}  ${desc}  ${amt}  (${tag} → ${owes})`,
@@ -896,52 +898,33 @@ function SplitSection({
           {split.totalCount} {split.totalCount === 1 ? 'transação dividida' : 'transações divididas'}
         </p>
 
-        {/* Two columns: ½ and dela — each with total, categories, installments */}
-        <div className="mt-8 grid grid-cols-2 gap-8">
-          {/* ½ column */}
-          {split.breakdown.half.count > 0 && (
-            <div>
-              <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">½</div>
-              <div className="mt-1 font-display text-[32px] leading-none tracking-[-0.02em] text-[color:var(--color-ink)]">
-                {formatBRL(split.breakdown.half.owes)}
-              </div>
-              <div className="mt-1 font-body text-[10px] text-[color:var(--color-ink-faint)]">
-                {split.breakdown.half.count}x — total {formatBRL(split.breakdown.half.total)}
-              </div>
-              {halfCategories.length > 0 && (
-                <div className="mt-5">
-                  <OverviewSplitCategoryList categories={halfCategories} />
-                </div>
-              )}
-              {halfInstallments.length > 0 && (
-                <div className="mt-5 border-t border-[color:var(--color-paper-rule)] pt-3">
-                  <OverviewSplitInstallmentList installments={halfInstallments} />
-                </div>
-              )}
-            </div>
-          )}
-          {/* dela column */}
-          {split.breakdown.theirs.count > 0 && (
-            <div>
-              <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">dela</div>
-              <div className="mt-1 font-display text-[32px] leading-none tracking-[-0.02em] text-[color:var(--color-accent)]">
-                {formatBRL(split.breakdown.theirs.owes)}
-              </div>
-              <div className="mt-1 font-body text-[10px] text-[color:var(--color-ink-faint)]">
-                {split.breakdown.theirs.count}x — total {formatBRL(split.breakdown.theirs.total)}
-              </div>
-              {theirsCategories.length > 0 && (
-                <div className="mt-5">
-                  <OverviewSplitCategoryList categories={theirsCategories} accent />
-                </div>
-              )}
-              {theirsInstallments.length > 0 && (
-                <div className="mt-5 border-t border-[color:var(--color-paper-rule)] pt-3">
-                  <OverviewSplitInstallmentList installments={theirsInstallments} accent />
-                </div>
-              )}
-            </div>
-          )}
+        {/* Three columns: ½, dela, meu */}
+        <div className="mt-8 grid grid-cols-3 gap-8">
+          <OverviewSplitColumn
+            label="½"
+            total={formatBRL(split.breakdown.half.owes)}
+            subtitle={`${split.breakdown.half.count}x — total ${formatBRL(split.breakdown.half.total)}`}
+            categories={halfCategories}
+            installments={halfInstallments}
+            show={split.breakdown.half.count > 0}
+          />
+          <OverviewSplitColumn
+            label="dela"
+            total={formatBRL(split.breakdown.theirs.owes)}
+            subtitle={`${split.breakdown.theirs.count}x — total ${formatBRL(split.breakdown.theirs.total)}`}
+            categories={theirsCategories}
+            installments={theirsInstallments}
+            accent
+            show={split.breakdown.theirs.count > 0}
+          />
+          <OverviewSplitColumn
+            label="meu"
+            total={formatBRL(split.breakdown.mine.total)}
+            subtitle={`${split.breakdown.mine.count}x`}
+            categories={mineCategories}
+            installments={mineInstallments}
+            show={split.breakdown.mine.count > 0}
+          />
         </div>
 
         {/* Copy button */}
@@ -955,6 +938,58 @@ function SplitSection({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function OverviewSplitColumn({
+  label,
+  total,
+  subtitle,
+  categories,
+  installments,
+  accent,
+  show,
+}: {
+  label: string;
+  total: string;
+  subtitle: string;
+  categories: Array<{ id: number; name: string; color: string; total: number }>;
+  installments: Array<{
+    id: string;
+    description: string | null;
+    amount: number;
+    installmentNumber: number;
+    totalInstallments: number;
+  }>;
+  accent?: boolean;
+  show: boolean;
+}) {
+  if (!show) return null;
+  return (
+    <div>
+      <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+        {label}
+      </div>
+      <div
+        className="mt-1 font-display text-[32px] leading-none tracking-[-0.02em]"
+        style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink)' }}
+      >
+        {total}
+      </div>
+      <div className="mt-1 font-body text-[10px] text-[color:var(--color-ink-faint)]">
+        {subtitle}
+      </div>
+      {categories.length > 0 && (
+        <div className="mt-5">
+          <OverviewSplitCategoryList categories={categories} accent={accent} />
+        </div>
+      )}
+      {installments.length > 0 && (
+        <div className="mt-5 border-t border-[color:var(--color-paper-rule)] pt-3">
+          <OverviewSplitInstallmentList installments={installments} accent={accent} />
+        </div>
+      )}
     </div>
   );
 }

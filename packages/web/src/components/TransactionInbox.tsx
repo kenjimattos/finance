@@ -188,7 +188,7 @@ export function TransactionInbox({
 
   // ── Split mutations ──
   const splitMut = useMutation({
-    mutationFn: ({ txId, splitType }: { txId: string; splitType: 'half' | 'theirs' }) =>
+    mutationFn: ({ txId, splitType }: { txId: string; splitType: 'half' | 'theirs' | 'mine' }) =>
       api.splitTransaction(txId, splitType),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
@@ -205,7 +205,7 @@ export function TransactionInbox({
   });
 
   const bulkSplitMut = useMutation({
-    mutationFn: ({ txIds, splitType }: { txIds: string[]; splitType: 'half' | 'theirs' }) =>
+    mutationFn: ({ txIds, splitType }: { txIds: string[]; splitType: 'half' | 'theirs' | 'mine' }) =>
       api.bulkSplit(txIds, splitType),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
@@ -223,7 +223,7 @@ export function TransactionInbox({
     },
   });
 
-  function runSplit(txId: string, splitType: 'half' | 'theirs' | null) {
+  function runSplit(txId: string, splitType: 'half' | 'theirs' | 'mine' | null) {
     if (splitType === null) {
       unsplitMut.mutate(txId);
     } else {
@@ -479,6 +479,18 @@ export function TransactionInbox({
                 className="font-body text-xs text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)]"
               >
                 dela
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  bulkSplitMut.mutate({
+                    txIds: Array.from(selected),
+                    splitType: 'mine',
+                  })
+                }
+                className="font-body text-xs text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)]"
+              >
+                meu
               </button>
               <button
                 type="button"
