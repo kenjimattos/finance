@@ -218,14 +218,12 @@ function AccountDashboard({
         }}
         onManageCards={() => setManagerOpen(true)}
         onManageRules={() => setRulesOpen(true)}
-        splitCard={
-          <SplitSummaryCard
-            accountId={accountId}
-            offset={billOffset}
-            displayName={breakdownQ.data.displayName}
-            dueDate={breakdownQ.data.dueDate}
-          />
-        }
+      />
+      <SplitSummaryCard
+        accountId={accountId}
+        offset={billOffset}
+        displayName={breakdownQ.data.displayName}
+        dueDate={breakdownQ.data.dueDate}
       />
       <CategoryTabs
         categories={selectedGroup?.categories ?? []}
