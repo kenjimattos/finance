@@ -264,6 +264,7 @@ export function Overview({
       date: string;
       description: string | null;
       amount: number;
+      splitType: 'half' | 'theirs';
       installmentNumber: number;
       totalInstallments: number;
     }> = [];
@@ -808,7 +809,7 @@ function UnconfiguredCard({
 // ─── Split section ─────────────────────────────────────────────────
 
 const SPLIT_CAT_LIMIT = 6;
-const SPLIT_INSTALLMENT_LIMIT = 4;
+const SPLIT_INST_LIMIT = 4;
 
 function SplitSection({
   split,
@@ -828,6 +829,7 @@ function SplitSection({
       date: string;
       description: string | null;
       amount: number;
+      splitType: 'half' | 'theirs';
       installmentNumber: number;
       totalInstallments: number;
     }>;
@@ -843,7 +845,6 @@ function SplitSection({
   year: number;
   month: number;
 }) {
-  const [installmentsExpanded, setInstallmentsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
   // Separate categories into two independent lists
@@ -857,11 +858,10 @@ function SplitSection({
     .sort((a, b) => b.total - a.total);
   const hasCategories = halfCategories.length > 0 || theirsCategories.length > 0;
 
-  const visibleInstallments = installmentsExpanded
-    ? split.installments
-    : split.installments.slice(0, SPLIT_INSTALLMENT_LIMIT);
-  const hiddenInstallmentCount =
-    split.installments.length - SPLIT_INSTALLMENT_LIMIT;
+  // Separate installments into two lists
+  const halfInstallments = split.installments.filter((i) => i.splitType === 'half');
+  const theirsInstallments = split.installments.filter((i) => i.splitType === 'theirs');
+  const hasInstallments = halfInstallments.length > 0 || theirsInstallments.length > 0;
 
   function copyToClipboard() {
     const label = `${MONTH_NAMES[month - 1]} ${year}`;
@@ -926,38 +926,14 @@ function SplitSection({
           </div>
         )}
 
-        {/* Installments */}
-        {split.installments.length > 0 && (
-          <div className="mt-8 border-t border-[color:var(--color-paper-rule)] pt-4">
-            <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
-              Parceladas
-            </div>
-            <ul className="mt-2 space-y-2">
-              {visibleInstallments.map((inst) => (
-                <li
-                  key={inst.id}
-                  className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]"
-                >
-                  <span className="truncate text-[color:var(--color-ink-soft)]">
-                    {stripInstallmentSuffix(inst.description)}
-                  </span>
-                  <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
-                    {inst.installmentNumber}/{inst.totalInstallments}
-                  </span>
-                  <span className="font-mono tabular-nums text-[color:var(--color-ink-muted)]">
-                    {formatBRL(inst.amount)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {hiddenInstallmentCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setInstallmentsExpanded((e) => !e)}
-                className="mt-3 font-body text-[11px] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
-              >
-                {installmentsExpanded ? '− recolher' : `+ ${hiddenInstallmentCount} mais`}
-              </button>
+        {/* Installments — two side-by-side lists */}
+        {hasInstallments && (
+          <div className="mt-8 border-t border-[color:var(--color-paper-rule)] pt-4 grid grid-cols-2 gap-8">
+            {halfInstallments.length > 0 && (
+              <OverviewSplitInstallmentList label="½" installments={halfInstallments} />
+            )}
+            {theirsInstallments.length > 0 && (
+              <OverviewSplitInstallmentList label="dela" installments={theirsInstallments} accent />
             )}
           </div>
         )}
@@ -1017,6 +993,64 @@ function OverviewSplitCategoryList({
                 }}
               />
             </div>
+          </li>
+        ))}
+      </ul>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-3 font-body text-[11px] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+        >
+          {expanded ? '− recolher' : `+ ${hiddenCount} mais`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function OverviewSplitInstallmentList({
+  label,
+  installments,
+  accent,
+}: {
+  label: string;
+  installments: Array<{
+    id: string;
+    description: string | null;
+    amount: number;
+    installmentNumber: number;
+    totalInstallments: number;
+  }>;
+  accent?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? installments : installments.slice(0, SPLIT_INST_LIMIT);
+  const hiddenCount = installments.length - SPLIT_INST_LIMIT;
+
+  return (
+    <div>
+      <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+        {label}
+      </div>
+      <ul className="mt-2 space-y-2">
+        {visible.map((inst) => (
+          <li
+            key={inst.id}
+            className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]"
+          >
+            <span className="truncate text-[color:var(--color-ink-soft)]">
+              {stripInstallmentSuffix(inst.description)}
+            </span>
+            <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
+              {inst.installmentNumber}/{inst.totalInstallments}
+            </span>
+            <span
+              className="font-mono tabular-nums"
+              style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
+            >
+              {formatBRL(inst.amount)}
+            </span>
           </li>
         ))}
       </ul>

@@ -4,7 +4,7 @@ import { api, type SplitSummary } from '../lib/api';
 import { formatBRL } from '../lib/format';
 
 const SPLIT_CAT_LIMIT = 4;
-const INSTALLMENT_COLLAPSE_LIMIT = 4;
+const SPLIT_INST_LIMIT = 4;
 
 /**
  * A card that mirrors the BillCard visual pattern but shows the split
@@ -26,7 +26,6 @@ export function SplitSummaryCard({
   dueDate: string;
 }) {
   const [copied, setCopied] = useState(false);
-  const [installmentsExpanded, setInstallmentsExpanded] = useState(false);
 
   const summaryQ = useQuery({
     queryKey: ['splitSummary', accountId, offset],
@@ -49,11 +48,10 @@ export function SplitSummaryCard({
     .sort((a, b) => b.total - a.total);
   const hasCategories = halfCategories.length > 0 || theirsCategories.length > 0;
 
-  const visibleInstallments = installmentsExpanded
-    ? summary.installments
-    : summary.installments.slice(0, INSTALLMENT_COLLAPSE_LIMIT);
-  const hiddenInstallmentCount =
-    summary.installments.length - visibleInstallments.length;
+  // Separate installments into two lists
+  const halfInstallments = summary.installments.filter((i) => i.splitType === 'half');
+  const theirsInstallments = summary.installments.filter((i) => i.splitType === 'theirs');
+  const hasInstallments = halfInstallments.length > 0 || theirsInstallments.length > 0;
 
   function copyToClipboard(s: SplitSummary) {
     const lines: string[] = [];
@@ -132,34 +130,14 @@ export function SplitSummaryCard({
         </div>
       )}
 
-      {/* Installments — parceladas that are split */}
-      {summary.installments.length > 0 && (
-        <div className="mt-6 border-t border-[color:var(--color-paper-rule)] pt-4">
-          <SubsectionLabel>Parceladas</SubsectionLabel>
-          <ul className="mt-2 space-y-2">
-            {visibleInstallments.map((inst) => (
-              <li
-                key={inst.id}
-                className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]"
-              >
-                <span className="truncate text-[color:var(--color-ink-soft)]">
-                  {stripInstallmentSuffix(inst.description)}
-                </span>
-                <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
-                  {inst.installmentNumber}/{inst.totalInstallments}
-                </span>
-                <span className="font-mono tabular-nums text-[color:var(--color-ink-muted)]">
-                  {formatBRL(inst.amount)}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {(hiddenInstallmentCount > 0 || installmentsExpanded) && (
-            <ExpandToggle
-              expanded={installmentsExpanded}
-              hiddenCount={hiddenInstallmentCount}
-              onToggle={() => setInstallmentsExpanded((e) => !e)}
-            />
+      {/* Installments — two side-by-side lists */}
+      {hasInstallments && (
+        <div className="mt-6 border-t border-[color:var(--color-paper-rule)] pt-4 grid grid-cols-2 gap-4">
+          {halfInstallments.length > 0 && (
+            <SplitInstallmentList label="½" installments={halfInstallments} />
+          )}
+          {theirsInstallments.length > 0 && (
+            <SplitInstallmentList label="dela" installments={theirsInstallments} accent />
           )}
         </div>
       )}
@@ -218,6 +196,60 @@ function SplitCategoryList({
                 }}
               />
             </div>
+          </li>
+        ))}
+      </ul>
+      {hiddenCount > 0 && (
+        <ExpandToggle
+          expanded={expanded}
+          hiddenCount={hiddenCount}
+          onToggle={() => setExpanded((e) => !e)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SplitInstallmentList({
+  label,
+  installments,
+  accent,
+}: {
+  label: string;
+  installments: Array<{
+    id: string;
+    description: string | null;
+    amount: number;
+    installmentNumber: number;
+    totalInstallments: number;
+  }>;
+  accent?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? installments : installments.slice(0, SPLIT_INST_LIMIT);
+  const hiddenCount = installments.length - SPLIT_INST_LIMIT;
+
+  return (
+    <div>
+      <SubsectionLabel>{label}</SubsectionLabel>
+      <ul className="mt-2 space-y-2">
+        {visible.map((inst) => (
+          <li
+            key={inst.id}
+            className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]"
+          >
+            <span className="truncate text-[color:var(--color-ink-soft)]">
+              {stripInstallmentSuffix(inst.description)}
+            </span>
+            <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
+              {inst.installmentNumber}/{inst.totalInstallments}
+            </span>
+            <span
+              className="font-mono tabular-nums"
+              style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
+            >
+              {formatBRL(inst.amount)}
+            </span>
           </li>
         ))}
       </ul>
