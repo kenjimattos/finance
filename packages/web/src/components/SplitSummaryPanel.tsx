@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, type SplitSummary } from '../lib/api';
 import { formatBRL } from '../lib/format';
 
-const CATEGORY_COLLAPSE_LIMIT = 4;
+const SPLIT_CAT_LIMIT = 4;
 const INSTALLMENT_COLLAPSE_LIMIT = 4;
 
 /**
@@ -26,7 +26,6 @@ export function SplitSummaryCard({
   dueDate: string;
 }) {
   const [copied, setCopied] = useState(false);
-  const [categoriesExpanded, setCategoriesExpanded] = useState(false);
   const [installmentsExpanded, setInstallmentsExpanded] = useState(false);
 
   const summaryQ = useQuery({
@@ -39,18 +38,16 @@ export function SplitSummaryCard({
 
   const dueDateLabel = formatDueDateLabel(dueDate);
 
-  // Category bar denominator — sum of positive category totals
-  const categoriesSum = summary.categories.reduce(
-    (acc, c) => acc + Math.max(0, c.total),
-    0,
-  );
-  const denominator = categoriesSum > 0 ? categoriesSum : 1;
-
-  const visibleCategories = categoriesExpanded
-    ? summary.categories
-    : summary.categories.slice(0, CATEGORY_COLLAPSE_LIMIT);
-  const hiddenCategoryCount =
-    summary.categories.length - visibleCategories.length;
+  // Separate categories into two independent lists
+  const halfCategories = summary.categories
+    .filter((c) => c.halfTotal > 0)
+    .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.halfTotal }))
+    .sort((a, b) => b.total - a.total);
+  const theirsCategories = summary.categories
+    .filter((c) => c.theirsTotal > 0)
+    .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.theirsTotal }))
+    .sort((a, b) => b.total - a.total);
+  const hasCategories = halfCategories.length > 0 || theirsCategories.length > 0;
 
   const visibleInstallments = installmentsExpanded
     ? summary.installments
@@ -123,48 +120,14 @@ export function SplitSummaryCard({
         )}
       </div>
 
-      {/* Category breakdown — two columns: ½ and dela */}
-      {summary.categories.length > 0 && (
-        <div className="mt-6">
-          <SubsectionLabel>Categorias</SubsectionLabel>
-          {/* Column headers */}
-          <div className="mt-2 mb-1 grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[10px] uppercase tracking-[0.1em] text-[color:var(--color-ink-faint)]">
-            <span />
-            <span className="w-[68px] text-right">½</span>
-            <span className="w-[68px] text-right">dela</span>
-          </div>
-          <ul className="space-y-2.5">
-            {visibleCategories.map((cat) => (
-              <li key={cat.id}>
-                <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]">
-                  <span className="truncate text-[color:var(--color-ink-soft)]">
-                    {cat.name}
-                  </span>
-                  <span className="w-[68px] text-right font-mono tabular-nums text-[color:var(--color-ink-muted)]">
-                    {cat.halfTotal > 0 ? formatBRL(cat.halfTotal) : '—'}
-                  </span>
-                  <span className="w-[68px] text-right font-mono tabular-nums text-[color:var(--color-accent)]">
-                    {cat.theirsTotal > 0 ? formatBRL(cat.theirsTotal) : '—'}
-                  </span>
-                </div>
-                <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
-                  <div
-                    className="h-full"
-                    style={{
-                      background: cat.color,
-                      width: `${Math.round((Math.max(0, cat.total) / denominator) * 100)}%`,
-                    }}
-                  />
-                </div>
-              </li>
-            ))}
-          </ul>
-          {(hiddenCategoryCount > 0 || categoriesExpanded) && (
-            <ExpandToggle
-              expanded={categoriesExpanded}
-              hiddenCount={hiddenCategoryCount}
-              onToggle={() => setCategoriesExpanded((e) => !e)}
-            />
+      {/* Category breakdown — two independent lists side by side */}
+      {hasCategories && (
+        <div className="mt-6 grid grid-cols-2 gap-4">
+          {halfCategories.length > 0 && (
+            <SplitCategoryList label="½" categories={halfCategories} />
+          )}
+          {theirsCategories.length > 0 && (
+            <SplitCategoryList label="dela" categories={theirsCategories} accent />
           )}
         </div>
       )}
@@ -211,6 +174,60 @@ export function SplitSummaryCard({
           {copied ? 'copiado!' : 'copiar para splitwise'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function SplitCategoryList({
+  label,
+  categories,
+  accent,
+}: {
+  label: string;
+  categories: Array<{ id: number; name: string; color: string; total: number }>;
+  accent?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? categories : categories.slice(0, SPLIT_CAT_LIMIT);
+  const hiddenCount = categories.length - SPLIT_CAT_LIMIT;
+  const denominator = categories.reduce((acc, c) => acc + Math.max(0, c.total), 0) || 1;
+
+  return (
+    <div>
+      <SubsectionLabel>{label}</SubsectionLabel>
+      <ul className="mt-2 space-y-2.5">
+        {visible.map((cat) => (
+          <li key={cat.id}>
+            <div className="flex items-baseline justify-between gap-2 font-body text-[12px]">
+              <span className="truncate text-[color:var(--color-ink-soft)]">
+                {cat.name}
+              </span>
+              <span
+                className="shrink-0 font-mono tabular-nums"
+                style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
+              >
+                {formatBRL(cat.total)}
+              </span>
+            </div>
+            <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
+              <div
+                className="h-full"
+                style={{
+                  background: cat.color,
+                  width: `${Math.round((Math.max(0, cat.total) / denominator) * 100)}%`,
+                }}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+      {hiddenCount > 0 && (
+        <ExpandToggle
+          expanded={expanded}
+          hiddenCount={hiddenCount}
+          onToggle={() => setExpanded((e) => !e)}
+        />
+      )}
     </div>
   );
 }
