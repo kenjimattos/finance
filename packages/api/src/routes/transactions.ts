@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { Transaction, CreditCardMetadata } from 'pluggy-sdk';
 import { pluggy } from '../services/pluggy.js';
 import { db } from '../db/index.js';
 import { applyLearnedRules } from '../services/applyLearnedRules.js';
+import { extractMerchantSlug } from '../services/merchantSlug.js';
 
 export const transactionsRouter = Router();
 
@@ -33,6 +34,7 @@ const querySchema = z.object({
 
 interface TransactionRow {
   id: string;
+  provider_transaction_id: string | null;
   account_id: string;
   item_id: string;
   date: string;
@@ -118,7 +120,7 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
 
     const rows = db
       .prepare(
-        `SELECT t.id, t.account_id, t.item_id, t.date, t.description,
+        `SELECT t.id, t.provider_transaction_id, t.account_id, t.item_id, t.date, t.description,
                 COALESCE(t.amount_in_account_currency, t.amount) AS amount,
                 t.currency_code, t.pluggy_category, t.pluggy_category_id,
                 t.type, t.status, t.installment_number, t.total_installments,
@@ -493,30 +495,47 @@ async function syncItem(itemId: string) {
   let txCount = 0;
   let billCount = 0;
 
+  // INSERT for a transaction that doesn't exist yet (or a recycled-ID new row).
   const insertTx = db.prepare(`
     INSERT INTO transactions
-      (id, account_id, item_id, date, description, amount, amount_in_account_currency,
-       currency_code, pluggy_category, pluggy_category_id, type, status,
-       installment_number, total_installments, bill_id, card_last4, raw_json, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT(id) DO UPDATE SET
-      account_id                  = excluded.account_id,
-      item_id                     = excluded.item_id,
-      date                        = excluded.date,
-      description                 = excluded.description,
-      amount                      = excluded.amount,
-      amount_in_account_currency  = excluded.amount_in_account_currency,
-      currency_code               = excluded.currency_code,
-      pluggy_category             = excluded.pluggy_category,
-      pluggy_category_id          = excluded.pluggy_category_id,
-      type                        = excluded.type,
-      status                      = excluded.status,
-      installment_number          = excluded.installment_number,
-      total_installments          = excluded.total_installments,
-      bill_id                     = excluded.bill_id,
-      card_last4                  = excluded.card_last4,
-      raw_json                    = excluded.raw_json,
-      synced_at                   = datetime('now')
+      (id, provider_transaction_id, account_id, item_id, date, description, amount,
+       amount_in_account_currency, currency_code, pluggy_category, pluggy_category_id,
+       type, status, installment_number, total_installments, bill_id, card_last4,
+       identity_hash, raw_json, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  `);
+
+  // UPDATE only the mutable fields on a known-good existing row.
+  // We deliberately do NOT update identity-stable fields (date, amount, description,
+  // card_last4, installment_*) so that user-applied overrides remain attached
+  // to the correct transaction even if Pluggy tweaks peripheral fields.
+  const updateTx = db.prepare(`
+    UPDATE transactions SET
+      status        = ?,
+      bill_id       = ?,
+      identity_hash = ?,
+      last_seen_at  = datetime('now'),
+      raw_json      = ?,
+      synced_at     = datetime('now')
+    WHERE id = ?
+  `);
+
+  // Look up the most-recently-inserted row for a given Pluggy ID.
+  // ORDER BY first_seen_at DESC means that after a recycle (two rows with the
+  // same provider_transaction_id), subsequent syncs match the newer row.
+  const findByProviderId = db.prepare(`
+    SELECT id, identity_hash, raw_json
+    FROM transactions
+    WHERE provider_transaction_id = ?
+    ORDER BY first_seen_at DESC
+    LIMIT 1
+  `);
+
+  const insertConflict = db.prepare(`
+    INSERT INTO transaction_sync_conflicts
+      (provider_transaction_id, kept_transaction_id, new_transaction_id,
+       old_payload_json, new_payload_json)
+    VALUES (?, ?, ?, ?, ?)
   `);
 
   const insertBill = db.prepare(`
@@ -535,53 +554,51 @@ async function syncItem(itemId: string) {
       synced_at       = datetime('now')
   `);
 
-  // Detect recycled IDs: if Pluggy reuses a transaction ID for a completely
-  // different transaction (different date or description), any user-data
-  // (categories, bill overrides, splits) attached to the old transaction is
-  // now dangling. We clear it before upserting so it doesn't silently
-  // corrupt the user's work.
-  const existingTx = db.prepare(
-    'SELECT id, date, description FROM transactions WHERE id = ?',
-  );
-  const clearRecycled = db.transaction((txId: string) => {
-    db.prepare('DELETE FROM transaction_categories WHERE transaction_id = ?').run(txId);
-    db.prepare('DELETE FROM transaction_bill_overrides WHERE transaction_id = ?').run(txId);
-    db.prepare('DELETE FROM transaction_splits WHERE transaction_id = ?').run(txId);
-  });
-
   const upsertTxBatch = db.transaction((txs: Transaction[], accountId: string) => {
     for (const t of txs) {
       const metadata: CreditCardMetadata | null = t.creditCardMetadata ?? null;
       const newDate = toYmd(t.date);
+      const newPayload = JSON.stringify(t);
+      const newHash = computeIdentityHash(accountId, newDate, t.amount, t.description ?? null);
 
-      // Check if this ID already exists with different content (recycled ID).
-      const old = existingTx.get(t.id) as { id: string; date: string; description: string | null } | undefined;
-      if (old && (old.date !== newDate || old.description !== (t.description ?? null))) {
-        console.warn(
-          `[sync] Recycled ID detected: ${t.id} was "${old.description}" @ ${old.date}, now "${t.description}" @ ${newDate}. Clearing user-data.`,
+      const existing = findByProviderId.get(t.id) as
+        | { id: string; identity_hash: string | null; raw_json: string }
+        | undefined;
+
+      if (!existing) {
+        // Brand-new provider ID — insert fresh row.
+        insertTx.run(
+          randomUUID(), t.id, accountId, itemId, newDate,
+          t.description ?? null, t.amount,
+          t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
+          t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
+          metadata?.installmentNumber ?? null, metadata?.totalInstallments ?? null,
+          metadata?.billId ?? null, lastFourDigits(metadata?.cardNumber),
+          newHash, newPayload,
         );
-        clearRecycled(t.id);
+      } else if (existing.identity_hash === null || existing.identity_hash === newHash) {
+        // Same transaction (or first sync after migration — hash was NULL).
+        // Only update fields that Pluggy legitimately changes over time.
+        updateTx.run(t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existing.id);
+      } else {
+        // Recycled Pluggy ID: the incoming payload is a materially different
+        // purchase. Keep the old row intact and insert the new one separately.
+        const newLocalId = randomUUID();
+        console.warn(
+          `[sync] Recycled provider ID ${t.id}: existing identity ${existing.identity_hash} ` +
+          `≠ incoming ${newHash}. Keeping old row, inserting new (${newLocalId}).`,
+        );
+        insertTx.run(
+          newLocalId, t.id, accountId, itemId, newDate,
+          t.description ?? null, t.amount,
+          t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
+          t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
+          metadata?.installmentNumber ?? null, metadata?.totalInstallments ?? null,
+          metadata?.billId ?? null, lastFourDigits(metadata?.cardNumber),
+          newHash, newPayload,
+        );
+        insertConflict.run(t.id, existing.id, newLocalId, existing.raw_json, newPayload);
       }
-
-      insertTx.run(
-        t.id,
-        accountId,
-        itemId,
-        newDate,
-        t.description ?? null,
-        t.amount,
-        t.amountInAccountCurrency ?? null,
-        t.currencyCode ?? null,
-        t.category ?? null,
-        t.categoryId ?? null,
-        t.type ?? null,
-        t.status ?? null,
-        metadata?.installmentNumber ?? null,
-        metadata?.totalInstallments ?? null,
-        metadata?.billId ?? null,
-        lastFourDigits(metadata?.cardNumber),
-        JSON.stringify(t),
-      );
       txCount++;
     }
   });
@@ -652,6 +669,29 @@ async function syncItem(itemId: string) {
  *      and trimmed, so it surfaces as a distinct "card" the user can assign
  *      to a group in the card manager
  */
+/**
+ * Stable fingerprint for a transaction: SHA-256 of account + date + amount +
+ * merchant slug. Used by sync to detect when Pluggy reuses an ID for a
+ * materially different purchase (ID recycling).
+ *
+ * The merchant slug normalises away installment suffixes, processor prefixes,
+ * and location noise, so minor description corrections don't look like recycles.
+ * The hash is hex-truncated to 32 chars (128 bits) — enough to rule out
+ * accidental collisions in any realistic dataset.
+ */
+function computeIdentityHash(
+  accountId: string,
+  date: string,
+  amount: number,
+  description: string | null,
+): string {
+  const slug = extractMerchantSlug(description) ?? '';
+  return createHash('sha256')
+    .update(`${accountId}|${date}|${amount}|${slug}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
 function lastFourDigits(raw: string | undefined | null): string | null {
   if (!raw || raw.trim() === '') return null;
   const digits = raw.replace(/\D/g, '');
@@ -681,6 +721,7 @@ function stripInstallmentSuffix(desc: string | null): string | null {
 function shapeRow(r: TransactionRow) {
   return {
     id: r.id,
+    providerTransactionId: r.provider_transaction_id,
     accountId: r.account_id,
     itemId: r.item_id,
     date: r.date,
