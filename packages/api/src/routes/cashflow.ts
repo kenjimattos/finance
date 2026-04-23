@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { Transaction } from 'pluggy-sdk';
 import { pluggy } from '../services/pluggy.js';
@@ -7,6 +8,7 @@ import {
   computeBillWindowAtOffset,
   findOffsetForDueMonth,
 } from '../services/billWindow.js';
+import { extractMerchantSlug } from '../services/merchantSlug.js';
 
 export const cashflowRouter = Router();
 
@@ -447,6 +449,19 @@ function toYmd(d: Date | string): string {
   return `${y}-${m}-${day}`;
 }
 
+function cashflowIdentityHash(
+  accountId: string,
+  date: string,
+  amount: number,
+  description: string | null,
+): string {
+  const slug = extractMerchantSlug(description) ?? '';
+  return createHash('sha256')
+    .update(`${accountId}|${date}|${amount}|${slug}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
 /**
  * POST /cashflow/sync — sync only BANK accounts and their transactions.
  * Lighter than the full /transactions/sync which also pulls credit accounts,
@@ -485,48 +500,72 @@ cashflowRouter.post('/cashflow/sync', async (_req, res, next) => {
 
     const insertTx = db.prepare(`
       INSERT INTO transactions
-        (id, account_id, item_id, date, description, amount, amount_in_account_currency,
-         currency_code, pluggy_category, pluggy_category_id, type, status,
-         installment_number, total_installments, bill_id, card_last4, raw_json, synced_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(id) DO UPDATE SET
-        account_id                  = excluded.account_id,
-        item_id                     = excluded.item_id,
-        date                        = excluded.date,
-        description                 = excluded.description,
-        amount                      = excluded.amount,
-        amount_in_account_currency  = excluded.amount_in_account_currency,
-        currency_code               = excluded.currency_code,
-        pluggy_category             = excluded.pluggy_category,
-        pluggy_category_id          = excluded.pluggy_category_id,
-        type                        = excluded.type,
-        status                      = excluded.status,
-        installment_number          = excluded.installment_number,
-        total_installments          = excluded.total_installments,
-        bill_id                     = excluded.bill_id,
-        card_last4                  = excluded.card_last4,
-        raw_json                    = excluded.raw_json,
-        synced_at                   = datetime('now')
+        (id, provider_transaction_id, account_id, item_id, date, description, amount,
+         amount_in_account_currency, currency_code, pluggy_category, pluggy_category_id,
+         type, status, identity_hash, raw_json, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `);
+
+    const updateTx = db.prepare(`
+      UPDATE transactions SET
+        status        = ?,
+        identity_hash = ?,
+        last_seen_at  = datetime('now'),
+        raw_json      = ?,
+        synced_at     = datetime('now')
+      WHERE id = ?
+    `);
+
+    const findByProviderId = db.prepare(`
+      SELECT id, identity_hash, raw_json
+      FROM transactions
+      WHERE provider_transaction_id = ?
+      ORDER BY first_seen_at DESC
+      LIMIT 1
+    `);
+
+    const insertConflict = db.prepare(`
+      INSERT INTO transaction_sync_conflicts
+        (provider_transaction_id, kept_transaction_id, new_transaction_id,
+         old_payload_json, new_payload_json)
+      VALUES (?, ?, ?, ?, ?)
     `);
 
     const upsertTxBatch = db.transaction((txs: Transaction[], accountId: string, itemId: string) => {
       for (const t of txs) {
-        insertTx.run(
-          t.id,
-          accountId,
-          itemId,
-          toYmd(t.date),
-          t.description ?? null,
-          t.amount,
-          t.amountInAccountCurrency ?? null,
-          t.currencyCode ?? null,
-          t.category ?? null,
-          t.categoryId ?? null,
-          t.type ?? null,
-          t.status ?? null,
-          null, null, null, null, // no credit card metadata for bank txs
-          JSON.stringify(t),
-        );
+        const newDate = toYmd(t.date);
+        const newPayload = JSON.stringify(t);
+        const newHash = cashflowIdentityHash(accountId, newDate, t.amount, t.description ?? null);
+
+        const existing = findByProviderId.get(t.id) as
+          | { id: string; identity_hash: string | null; raw_json: string }
+          | undefined;
+
+        if (!existing) {
+          insertTx.run(
+            randomUUID(), t.id, accountId, itemId, newDate,
+            t.description ?? null, t.amount,
+            t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
+            t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
+            newHash, newPayload,
+          );
+        } else if (existing.identity_hash === null || existing.identity_hash === newHash) {
+          updateTx.run(t.status ?? null, newHash, newPayload, existing.id);
+        } else {
+          const newLocalId = randomUUID();
+          console.warn(
+            `[cashflow-sync] Recycled provider ID ${t.id}: existing identity ` +
+            `${existing.identity_hash} ≠ incoming ${newHash}. Keeping old row, inserting new.`,
+          );
+          insertTx.run(
+            newLocalId, t.id, accountId, itemId, newDate,
+            t.description ?? null, t.amount,
+            t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
+            t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
+            newHash, newPayload,
+          );
+          insertConflict.run(t.id, existing.id, newLocalId, existing.raw_json, newPayload);
+        }
         txCount++;
       }
     });
