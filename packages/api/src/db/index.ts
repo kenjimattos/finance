@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 const DB_PATH = 'data/finance.sqlite';
 mkdirSync(dirname(DB_PATH), { recursive: true });
@@ -60,30 +61,42 @@ db.exec(`
 
   -- Raw transactions cache from Pluggy. raw_json keeps the full payload so
   -- new fields can be surfaced later without a backfill.
+  --
+  -- id is a local application UUID (stable, never changes). provider_transaction_id
+  -- holds the Pluggy-issued ID, which may be recycled across different purchases.
+  -- identity_hash is SHA-256(account+date+amount+merchant_slug) and lets sync
+  -- detect when Pluggy reuses an ID for a materially different transaction.
   CREATE TABLE IF NOT EXISTS transactions (
-    id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL,
-    item_id TEXT NOT NULL,
-    date TEXT NOT NULL,
-    description TEXT,
-    amount REAL NOT NULL,
-    currency_code TEXT,
-    pluggy_category TEXT,            -- Pluggy's auto-categorization (informational)
-    pluggy_category_id TEXT,
-    type TEXT,
-    status TEXT,
-    installment_number INTEGER,
-    total_installments INTEGER,
-    bill_id TEXT,                    -- only set once the bill closes (Pluggy limitation)
-    card_last4 TEXT,                 -- last 4 digits of the physical card (from creditCardMetadata.cardNumber)
-    raw_json TEXT NOT NULL,
-    synced_at TEXT NOT NULL DEFAULT (datetime('now'))
+    id                         TEXT PRIMARY KEY,
+    provider_transaction_id    TEXT,
+    account_id                 TEXT NOT NULL,
+    item_id                    TEXT NOT NULL,
+    date                       TEXT NOT NULL,
+    description                TEXT,
+    amount                     REAL NOT NULL,
+    currency_code              TEXT,
+    pluggy_category            TEXT,
+    pluggy_category_id         TEXT,
+    type                       TEXT,
+    status                     TEXT,
+    installment_number         INTEGER,
+    total_installments         INTEGER,
+    bill_id                    TEXT,
+    card_last4                 TEXT,
+    amount_in_account_currency REAL,
+    source                     TEXT NOT NULL DEFAULT 'pluggy',
+    identity_hash              TEXT,
+    first_seen_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at               TEXT NOT NULL DEFAULT (datetime('now')),
+    raw_json                   TEXT NOT NULL,
+    synced_at                  TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
-  CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id);
-  CREATE INDEX IF NOT EXISTS idx_tx_item ON transactions(item_id);
-  CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
-  CREATE INDEX IF NOT EXISTS idx_tx_bill ON transactions(bill_id);
+  CREATE INDEX IF NOT EXISTS idx_tx_account   ON transactions(account_id);
+  CREATE INDEX IF NOT EXISTS idx_tx_item      ON transactions(item_id);
+  CREATE INDEX IF NOT EXISTS idx_tx_date      ON transactions(date);
+  CREATE INDEX IF NOT EXISTS idx_tx_bill      ON transactions(bill_id);
+  CREATE INDEX IF NOT EXISTS idx_tx_provider  ON transactions(provider_transaction_id);
 
   -- Closed bills cache (open bills are computed, not stored).
   CREATE TABLE IF NOT EXISTS bills (
@@ -248,6 +261,19 @@ db.exec(`
     split_type TEXT NOT NULL CHECK(split_type IN ('half', 'theirs')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
+
+  -- Audit log for Pluggy ID recycling. Written when sync detects that a
+  -- provider_transaction_id was reused for a materially different purchase.
+  -- The old row is kept intact; the new payload is inserted as a separate row.
+  CREATE TABLE IF NOT EXISTS transaction_sync_conflicts (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_transaction_id TEXT NOT NULL,
+    kept_transaction_id     TEXT NOT NULL,
+    new_transaction_id      TEXT NOT NULL,
+    old_payload_json        TEXT NOT NULL,
+    new_payload_json        TEXT NOT NULL,
+    detected_at             TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
 
@@ -414,6 +440,135 @@ db.exec(`
       INSERT INTO transaction_splits SELECT * FROM _transaction_splits_old;
       DROP TABLE _transaction_splits_old;
     `);
+  }
+}
+
+// Migration: replace Pluggy UUID primary key with local application UUID.
+//
+// Pluggy recycles transaction IDs when old transactions fall off their cache,
+// silently mapping a new purchase to an old row — destroying categories, splits,
+// and bill overrides the user already applied. By making `id` a locally-generated
+// UUID and moving the Pluggy ID to `provider_transaction_id`, two rows can
+// legitimately coexist under the same external ID without corrupting each other.
+//
+// Guard: if `provider_transaction_id` already exists, migration is complete.
+{
+  const txCols = (db.prepare('PRAGMA table_info(transactions)').all() as { name: string }[]).map(
+    (r) => r.name,
+  );
+  if (!txCols.includes('provider_transaction_id')) {
+    // Step 1 — add a temporary column for the new local UUIDs.
+    if (!txCols.includes('_new_id')) {
+      db.exec('ALTER TABLE transactions ADD COLUMN _new_id TEXT');
+    }
+
+    // Step 2 — backfill _new_id for every row that doesn't have one yet.
+    // Done in JS so we get proper v4 UUIDs rather than SQLite's random bytes.
+    const missing = db
+      .prepare('SELECT id FROM transactions WHERE _new_id IS NULL')
+      .all() as { id: string }[];
+    if (missing.length > 0) {
+      const setId = db.prepare('UPDATE transactions SET _new_id = ? WHERE id = ?');
+      db.transaction(() => {
+        for (const row of missing) setId.run(randomUUID(), row.id);
+      })();
+    }
+
+    // Steps 3–5 require FK enforcement off: the FK tables will temporarily
+    // point to UUIDs that don't yet exist in the rebuilt `transactions` table.
+    db.pragma('foreign_keys = OFF');
+    try {
+      // Step 3 — repoint every FK table from the old Pluggy UUID → new local UUID.
+      db.exec(`
+        UPDATE transaction_categories
+        SET transaction_id = (
+          SELECT _new_id FROM transactions WHERE id = transaction_categories.transaction_id
+        )
+        WHERE transaction_id IN (SELECT id FROM transactions WHERE _new_id IS NOT NULL);
+
+        UPDATE transaction_bill_overrides
+        SET transaction_id = (
+          SELECT _new_id FROM transactions WHERE id = transaction_bill_overrides.transaction_id
+        )
+        WHERE transaction_id IN (SELECT id FROM transactions WHERE _new_id IS NOT NULL);
+
+        UPDATE transaction_description_overrides
+        SET transaction_id = (
+          SELECT _new_id FROM transactions WHERE id = transaction_description_overrides.transaction_id
+        )
+        WHERE transaction_id IN (SELECT id FROM transactions WHERE _new_id IS NOT NULL);
+
+        UPDATE bill_payment_tags
+        SET transaction_id = (
+          SELECT _new_id FROM transactions WHERE id = bill_payment_tags.transaction_id
+        )
+        WHERE transaction_id IN (SELECT id FROM transactions WHERE _new_id IS NOT NULL);
+
+        UPDATE transaction_splits
+        SET transaction_id = (
+          SELECT _new_id FROM transactions WHERE id = transaction_splits.transaction_id
+        )
+        WHERE transaction_id IN (SELECT id FROM transactions WHERE _new_id IS NOT NULL);
+      `);
+
+      // Step 4 — rebuild transactions with the new schema, then swap tables.
+      // _new_id becomes `id`; old `id` (Pluggy UUID) moves to provider_transaction_id
+      // (NULL for manual transactions, which were never keyed by a Pluggy ID).
+      db.exec(`
+        CREATE TABLE transactions_v2 (
+          id                         TEXT PRIMARY KEY,
+          provider_transaction_id    TEXT,
+          account_id                 TEXT NOT NULL,
+          item_id                    TEXT NOT NULL,
+          date                       TEXT NOT NULL,
+          description                TEXT,
+          amount                     REAL NOT NULL,
+          currency_code              TEXT,
+          pluggy_category            TEXT,
+          pluggy_category_id         TEXT,
+          type                       TEXT,
+          status                     TEXT,
+          installment_number         INTEGER,
+          total_installments         INTEGER,
+          bill_id                    TEXT,
+          card_last4                 TEXT,
+          amount_in_account_currency REAL,
+          source                     TEXT NOT NULL DEFAULT 'pluggy',
+          identity_hash              TEXT,
+          first_seen_at              TEXT NOT NULL DEFAULT (datetime('now')),
+          last_seen_at               TEXT NOT NULL DEFAULT (datetime('now')),
+          raw_json                   TEXT NOT NULL,
+          synced_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO transactions_v2
+          (id, provider_transaction_id, account_id, item_id, date, description,
+           amount, currency_code, pluggy_category, pluggy_category_id, type, status,
+           installment_number, total_installments, bill_id, card_last4,
+           amount_in_account_currency, source, raw_json, synced_at)
+        SELECT
+          _new_id,
+          CASE WHEN COALESCE(source, 'pluggy') = 'manual' THEN NULL ELSE id END,
+          account_id, item_id, date, description, amount, currency_code,
+          pluggy_category, pluggy_category_id, type, status,
+          installment_number, total_installments, bill_id, card_last4,
+          amount_in_account_currency, COALESCE(source, 'pluggy'),
+          raw_json, synced_at
+        FROM transactions;
+
+        DROP TABLE transactions;
+        ALTER TABLE transactions_v2 RENAME TO transactions;
+
+        CREATE INDEX IF NOT EXISTS idx_tx_account  ON transactions(account_id);
+        CREATE INDEX IF NOT EXISTS idx_tx_item     ON transactions(item_id);
+        CREATE INDEX IF NOT EXISTS idx_tx_date     ON transactions(date);
+        CREATE INDEX IF NOT EXISTS idx_tx_bill     ON transactions(bill_id);
+        CREATE INDEX IF NOT EXISTS idx_tx_provider ON transactions(provider_transaction_id);
+      `);
+    } finally {
+      // Always re-enable FK enforcement, even if migration fails midway.
+      db.pragma('foreign_keys = ON');
+    }
   }
 }
 
