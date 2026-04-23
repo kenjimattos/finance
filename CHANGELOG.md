@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-04-23
+
+### Added
+
+- **Tipo de transação manual**: formulário de lançamento manual aceita agora crédito ou débito. O campo "tipo" distingue compras (débito) de estornos/créditos, e o valor é armazenado com o sinal correto para que o saldo da fatura reflita a operação.
+- **Campo de ano editável**: o formulário de data de transações manuais inclui agora um campo de ano, permitindo registrar lançamentos em anos diferentes do corrente (útil para notas de anos anteriores ou ajustes retroativos).
+
 ## [1.2.0] - 2026-04-23
 
 ### Added
