@@ -450,14 +450,13 @@ function toYmd(d: Date | string): string {
 }
 
 function cashflowIdentityHash(
-  accountId: string,
   date: string,
   amount: number,
   description: string | null,
 ): string {
   const slug = extractMerchantSlug(description) ?? '';
   return createHash('sha256')
-    .update(`${accountId}|${date}|${amount}|${slug}`)
+    .update(`${date}|${amount}|${slug}`)
     .digest('hex')
     .slice(0, 32);
 }
@@ -524,6 +523,26 @@ cashflowRouter.post('/cashflow/sync', async (_req, res, next) => {
       LIMIT 1
     `);
 
+    const findByIdentityHash = db.prepare(`
+      SELECT id, identity_hash, raw_json
+      FROM transactions
+      WHERE identity_hash = ?
+        AND source = 'pluggy'
+      ORDER BY first_seen_at DESC
+      LIMIT 1
+    `);
+
+    const updateTxWithProvider = db.prepare(`
+      UPDATE transactions SET
+        provider_transaction_id = ?,
+        status        = ?,
+        identity_hash = ?,
+        last_seen_at  = datetime('now'),
+        raw_json      = ?,
+        synced_at     = datetime('now')
+      WHERE id = ?
+    `);
+
     const insertConflict = db.prepare(`
       INSERT INTO transaction_sync_conflicts
         (provider_transaction_id, kept_transaction_id, new_transaction_id,
@@ -535,20 +554,28 @@ cashflowRouter.post('/cashflow/sync', async (_req, res, next) => {
       for (const t of txs) {
         const newDate = toYmd(t.date);
         const newPayload = JSON.stringify(t);
-        const newHash = cashflowIdentityHash(accountId, newDate, t.amount, t.description ?? null);
+        const newHash = cashflowIdentityHash(newDate, t.amount, t.description ?? null);
 
         const existing = findByProviderId.get(t.id) as
           | { id: string; identity_hash: string | null; raw_json: string }
           | undefined;
 
         if (!existing) {
-          insertTx.run(
-            randomUUID(), t.id, accountId, itemId, newDate,
-            t.description ?? null, t.amount,
-            t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
-            t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
-            newHash, newPayload,
-          );
+          const existingByHash = findByIdentityHash.get(newHash) as
+            | { id: string; identity_hash: string | null; raw_json: string }
+            | undefined;
+          if (existingByHash) {
+            console.log(`[cashflow-sync] Hash match for new provider ID ${t.id} — updating existing row ${existingByHash.id}`);
+            updateTxWithProvider.run(t.id, t.status ?? null, newHash, newPayload, existingByHash.id);
+          } else {
+            insertTx.run(
+              randomUUID(), t.id, accountId, itemId, newDate,
+              t.description ?? null, t.amount,
+              t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
+              t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
+              newHash, newPayload,
+            );
+          }
         } else if (existing.identity_hash === null || existing.identity_hash === newHash) {
           updateTx.run(t.status ?? null, newHash, newPayload, existing.id);
         } else {

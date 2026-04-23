@@ -531,6 +531,33 @@ async function syncItem(itemId: string) {
     LIMIT 1
   `);
 
+  // Fallback lookup by content hash — used when provider_transaction_id is
+  // not found (e.g. bank reconnect where Pluggy issues new IDs for the same
+  // physical card). Matches only pluggy-sourced rows to avoid colliding with
+  // manual transactions that share a date/amount/slug.
+  const findByIdentityHash = db.prepare(`
+    SELECT id, identity_hash, raw_json
+    FROM transactions
+    WHERE identity_hash = ?
+      AND source = 'pluggy'
+    ORDER BY first_seen_at DESC
+    LIMIT 1
+  `);
+
+  // Like updateTx but also records the new provider_transaction_id.
+  // Used when a reconnect brings new Pluggy IDs for an existing transaction.
+  const updateTxWithProvider = db.prepare(`
+    UPDATE transactions SET
+      provider_transaction_id = ?,
+      status        = ?,
+      bill_id       = ?,
+      identity_hash = ?,
+      last_seen_at  = datetime('now'),
+      raw_json      = ?,
+      synced_at     = datetime('now')
+    WHERE id = ?
+  `);
+
   const insertConflict = db.prepare(`
     INSERT INTO transaction_sync_conflicts
       (provider_transaction_id, kept_transaction_id, new_transaction_id,
@@ -559,23 +586,33 @@ async function syncItem(itemId: string) {
       const metadata: CreditCardMetadata | null = t.creditCardMetadata ?? null;
       const newDate = toYmd(t.date);
       const newPayload = JSON.stringify(t);
-      const newHash = computeIdentityHash(accountId, newDate, t.amount, t.description ?? null);
+      const newHash = computeIdentityHash(newDate, t.amount, t.description ?? null);
 
       const existing = findByProviderId.get(t.id) as
         | { id: string; identity_hash: string | null; raw_json: string }
         | undefined;
 
       if (!existing) {
-        // Brand-new provider ID — insert fresh row.
-        insertTx.run(
-          randomUUID(), t.id, accountId, itemId, newDate,
-          t.description ?? null, t.amount,
-          t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
-          t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
-          metadata?.installmentNumber ?? null, metadata?.totalInstallments ?? null,
-          metadata?.billId ?? null, lastFourDigits(metadata?.cardNumber),
-          newHash, newPayload,
-        );
+        // Provider ID not found — check by content hash (reconnect case).
+        const existingByHash = findByIdentityHash.get(newHash) as
+          | { id: string; identity_hash: string | null; raw_json: string }
+          | undefined;
+        if (existingByHash) {
+          // Same purchase, new Pluggy connection — update with new provider ID.
+          console.log(`[sync] Hash match for new provider ID ${t.id} — updating existing row ${existingByHash.id}`);
+          updateTxWithProvider.run(t.id, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existingByHash.id);
+        } else {
+          // Brand-new transaction — insert fresh row.
+          insertTx.run(
+            randomUUID(), t.id, accountId, itemId, newDate,
+            t.description ?? null, t.amount,
+            t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
+            t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
+            metadata?.installmentNumber ?? null, metadata?.totalInstallments ?? null,
+            metadata?.billId ?? null, lastFourDigits(metadata?.cardNumber),
+            newHash, newPayload,
+          );
+        }
       } else if (existing.identity_hash === null || existing.identity_hash === newHash) {
         // Same transaction (or first sync after migration — hash was NULL).
         // Only update fields that Pluggy legitimately changes over time.
@@ -670,24 +707,22 @@ async function syncItem(itemId: string) {
  *      to a group in the card manager
  */
 /**
- * Stable fingerprint for a transaction: SHA-256 of account + date + amount +
- * merchant slug. Used by sync to detect when Pluggy reuses an ID for a
- * materially different purchase (ID recycling).
+ * Stable fingerprint for a transaction: SHA-256 of date + amount + merchant
+ * slug. Used by sync to detect Pluggy ID recycling AND to deduplicate across
+ * reconnects (same purchase, different Pluggy connection = new provider IDs
+ * but same content hash).
  *
- * The merchant slug normalises away installment suffixes, processor prefixes,
- * and location noise, so minor description corrections don't look like recycles.
- * The hash is hex-truncated to 32 chars (128 bits) — enough to rule out
- * accidental collisions in any realistic dataset.
+ * Account ID is intentionally excluded so the hash is portable across
+ * reconnections where Pluggy assigns new account IDs for the same physical card.
  */
 function computeIdentityHash(
-  accountId: string,
   date: string,
   amount: number,
   description: string | null,
 ): string {
   const slug = extractMerchantSlug(description) ?? '';
   return createHash('sha256')
-    .update(`${accountId}|${date}|${amount}|${slug}`)
+    .update(`${date}|${amount}|${slug}`)
     .digest('hex')
     .slice(0, 32);
 }
