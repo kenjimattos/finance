@@ -571,10 +571,11 @@ function ManualTransactionForm({
   busy: boolean;
 }) {
   const descRef = useRef<HTMLInputElement>(null);
-  // Extract day/month from the initial date or default to periodEnd.
+  // Extract day/month/year from the initial date or default to periodEnd.
   const refDate = initial?.date ?? periodEnd.slice(0, 10);
   const [day, setDay] = useState(String(parseInt(refDate.slice(8, 10), 10)));
   const [month, setMonth] = useState(String(parseInt(refDate.slice(5, 7), 10)));
+  const [year, setYear] = useState(refDate.slice(0, 4));
   const [description, setDescription] = useState(initial?.description ?? '');
   const [amount, setAmount] = useState(
     initial ? String(Math.abs(initial.amount)) : '',
@@ -587,10 +588,19 @@ function ManualTransactionForm({
     if (!description.trim() || isNaN(parsed) || parsed <= 0) return;
     const d = parseInt(day, 10);
     const m = parseInt(month, 10);
-    if (isNaN(d) || d < 1 || d > 31 || isNaN(m) || m < 1 || m > 12) return;
-    // Derive year from the bill period end date.
-    const year = periodEnd.slice(0, 4);
-    const fullDate = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const y = parseInt(year, 10);
+    if (
+      isNaN(d) ||
+      d < 1 ||
+      d > 31 ||
+      isNaN(m) ||
+      m < 1 ||
+      m > 12 ||
+      isNaN(y) ||
+      y < 2000 ||
+      y > 2100
+    ) return;
+    const fullDate = `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     onSubmit({
       accountId,
       date: fullDate,
@@ -605,11 +615,11 @@ function ManualTransactionForm({
       onSubmit={handleSubmit}
       className="mb-4 border-b border-[color:var(--color-paper-rule)] pb-4"
     >
-      <div className="grid grid-cols-[72px_1fr_120px_80px] items-end gap-3">
-        <div className="flex gap-1.5">
-          <div>
+      <div className="grid grid-cols-[116px_1fr_110px_72px] items-end gap-3">
+        <div className="grid grid-cols-[1fr_1fr_2fr] gap-1.5">
+          <div className="min-w-0">
             <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
-              Dia
+              D
             </label>
             <input
               type="text"
@@ -621,9 +631,9 @@ function ManualTransactionForm({
               className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 text-center font-mono text-xs text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
             />
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
-              Mês
+              M
             </label>
             <input
               type="text"
@@ -632,6 +642,20 @@ function ManualTransactionForm({
               value={month}
               onChange={(e) => setMonth(e.target.value.replace(/\D/g, ''))}
               placeholder="04"
+              className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 text-center font-mono text-xs text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
+            />
+          </div>
+          <div className="min-w-0">
+            <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
+              Ano
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={4}
+              value={year}
+              onChange={(e) => setYear(e.target.value.replace(/\D/g, ''))}
+              placeholder={periodEnd.slice(0, 4)}
               className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 text-center font-mono text-xs text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
             />
           </div>
