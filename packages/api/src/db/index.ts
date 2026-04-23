@@ -92,11 +92,10 @@ db.exec(`
     synced_at                  TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
-  CREATE INDEX IF NOT EXISTS idx_tx_account   ON transactions(account_id);
-  CREATE INDEX IF NOT EXISTS idx_tx_item      ON transactions(item_id);
-  CREATE INDEX IF NOT EXISTS idx_tx_date      ON transactions(date);
-  CREATE INDEX IF NOT EXISTS idx_tx_bill      ON transactions(bill_id);
-  CREATE INDEX IF NOT EXISTS idx_tx_provider  ON transactions(provider_transaction_id);
+  CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id);
+  CREATE INDEX IF NOT EXISTS idx_tx_item    ON transactions(item_id);
+  CREATE INDEX IF NOT EXISTS idx_tx_date    ON transactions(date);
+  CREATE INDEX IF NOT EXISTS idx_tx_bill    ON transactions(bill_id);
 
   -- Closed bills cache (open bills are computed, not stored).
   CREATE TABLE IF NOT EXISTS bills (
@@ -571,6 +570,15 @@ db.exec(`
     }
   }
 }
+
+// Create the provider_transaction_id index unconditionally after migration.
+// For existing DBs the migration just created it; for brand-new DBs the
+// initial CREATE TABLE already has the column and this is the first chance
+// to create the index (it can't live in the initial db.exec() block because
+// for existing DBs the column doesn't exist until migration runs).
+db.exec(
+  'CREATE INDEX IF NOT EXISTS idx_tx_provider ON transactions(provider_transaction_id)',
+);
 
 function addColumnIfMissing(table: string, column: string, decl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
