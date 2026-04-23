@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A **self-hosted, single-user** credit card spending manager backed by [Pluggy](https://pluggy.ai) (Brazilian Open Finance aggregator). The value is not just viewing transactions — it's **categorizing them** with user-defined categories that the system learns to auto-apply, and seeing the **currently open bill** broken down per physical card group. Each user runs their own copy with their own Pluggy credentials in `packages/api/.env`; there is no multi-tenant auth and adding one is not a goal.
 
+## Transaction identity model
+
+`transactions.id` is a **locally-generated UUID** (stable forever). `provider_transaction_id` holds the Pluggy-issued ID, which Pluggy may recycle for unrelated purchases. On every sync, a SHA-256 identity hash (`account_id + date + amount + merchant_slug`) is compared against the stored hash for that `provider_transaction_id`. Three outcomes:
+
+1. No existing row with that provider ID → insert (new local UUID).
+2. Hashes match (or stored hash is NULL — migrated rows before first sync) → update only mutable fields (`status`, `bill_id`, `raw_json`). User work (categories, splits, overrides) is untouched.
+3. Hash mismatch → **recycled ID**: keep old row intact, insert new row with a new local UUID, write audit entry to `transaction_sync_conflicts`.
+
+All five FK tables (`transaction_categories`, `transaction_bill_overrides`, `transaction_description_overrides`, `bill_payment_tags`, `transaction_splits`) reference `transactions.id` (local UUID). Manual transactions have `provider_transaction_id = NULL`.
+
 ## Current state
 
 Functional end-to-end: connect card via `react-pluggy-connect` → sync discovers credit accounts → configure `closing_day` / `due_day` per account → sync bills and transactions from Pluggy → categorize transactions (with learning, bulk, and undo) → group physical cards (titular, adicional, virtual…) per account → see per-group cards with category breakdowns and installment sub-sections → manually shift individual transactions to a neighboring bill cycle when the purchase date lies about when the charge actually lands → navigate between historical bill cycles via ←/→ arrows.
