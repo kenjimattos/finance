@@ -274,6 +274,10 @@ const manualTxSchema = z.object({
   categoryId: z.number().int().positive().optional(),
 });
 
+function manualTransactionType(amount: number): 'DEBIT' | 'CREDIT' {
+  return amount < 0 ? 'CREDIT' : 'DEBIT';
+}
+
 // POST /transactions/manual — create a manual transaction
 transactionsRouter.post('/transactions/manual', (req, res, next) => {
   try {
@@ -293,8 +297,16 @@ transactionsRouter.post('/transactions/manual', (req, res, next) => {
       `INSERT INTO transactions
         (id, account_id, item_id, date, description, amount, currency_code,
          type, source, raw_json, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'BRL', 'DEBIT', 'manual', '{}', datetime('now'))`,
-    ).run(id, body.accountId, account.item_id, body.date, body.description, body.amount);
+       VALUES (?, ?, ?, ?, ?, ?, 'BRL', ?, 'manual', '{}', datetime('now'))`,
+    ).run(
+      id,
+      body.accountId,
+      account.item_id,
+      body.date,
+      body.description,
+      body.amount,
+      manualTransactionType(body.amount),
+    );
 
     if (body.cardLast4) {
       db.prepare('UPDATE transactions SET card_last4 = ? WHERE id = ?').run(
@@ -351,6 +363,8 @@ transactionsRouter.put('/transactions/manual/:id', (req, res, next) => {
     if (body.amount !== undefined) {
       sets.push('amount = ?');
       params.push(body.amount);
+      sets.push('type = ?');
+      params.push(manualTransactionType(body.amount));
     }
     if (body.cardLast4 !== undefined) {
       sets.push('card_last4 = ?');
