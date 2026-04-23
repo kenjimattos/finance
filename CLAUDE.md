@@ -16,7 +16,7 @@ Cash flow: the CashFlow screen is the **top-level landing page**, showing a mult
 
 Manual bill transactions: when Pluggy fails to return transactions (connector gaps), the user can add manual entries directly in the bill inbox. Manual entries are stored in the `transactions` table with `source='manual'` and participate in all bill window queries, categorization, and shifts. They can be edited/deleted via the `⋯` menu and are marked with an orange "manual" badge.
 
-Bill splitting: transactions can be marked as shared with a partner — "½" (50/50) or "→dela" (partner owes 100%). Per-row actions in the ⋯ menu plus bulk split in the selection bar. The Dashboard shows a collapsible split summary panel with partner debt total, per-type breakdown, and a "copiar para Splitwise" button. Data lives in a `transaction_splits` join table (survives re-syncs). Future: Splitwise API integration.
+Bill splitting: transactions can be marked as shared with a partner — "½" (50/50) or "→dela" (partner owes 100%). Categorized transactions without a split row are implicitly "meu". Per-row actions in the ⋯ menu plus bulk split in the selection bar. The Dashboard shows a "Divisão" section below the card grid; the Overview shows an aggregated all-account "Divisão" section for the selected due month. Both separate ½, dela, and meu into dynamic columns with totals, category breakdowns, installments, and a "copiar para Splitwise" button. Data lives in a `transaction_splits` join table for explicit shared rows only (`'half'` / `'theirs'`) and survives re-syncs. Future: Splitwise API integration.
 
 55 tests covering `billWindow` (including `findOffsetForDueMonth`), `merchantSlug`, and `applyLearnedRules`.
 
@@ -35,7 +35,7 @@ Run from the repo root:
 
 ```bash
 npm install                           # install all workspace deps
-npm run dev                           # api (localhost:3333) + web (localhost:5173) in parallel
+npm run dev                           # api (localhost:3333) + web (localhost:5174) in parallel
 npm run dev:api                       # api only
 npm run dev:web                       # web only
 npm run build                         # tsc → api/dist, then vite build → web/dist
@@ -46,7 +46,7 @@ npm test                              # run api tests (node --test + tsx)
 npm run -w @finance/api test          # same, explicit workspace
 ```
 
-Both dev servers bind to `0.0.0.0`, so other devices on the local network can access the app via the host machine's IP (e.g. `http://192.168.1.x:5173`). Vite proxies `/api/*` → `http://localhost:3333` during dev so the frontend has no CORS dance. Tests use `node --test` with `tsx` as the ESM loader — no extra dependencies. Test files live next to the modules they cover (`*.test.ts`).
+Both dev servers bind to `0.0.0.0`, so other devices on the local network can access the app via the host machine's IP (e.g. `http://192.168.1.x:5174`). Vite proxies `/api/*` → `http://localhost:3333` during dev so the frontend has no CORS dance. Tests use `node --test` with `tsx` as the ESM loader — no extra dependencies. Test files live next to the modules they cover (`*.test.ts`).
 
 ## Working style in this repo
 
@@ -68,7 +68,7 @@ Three independent domains in SQLite, deliberately not merged:
 
 1. **Pluggy cache** (`items`, `accounts`, `transactions`, `bills`) — read-through cache of what Pluggy returns. `accounts` is populated during sync from `fetchAccounts(itemId, 'CREDIT')` and `fetchAccounts(itemId, 'BANK')`. BANK accounts carry `balance` and `subtype` (e.g. `CHECKING_ACCOUNT`). `raw_json` on each row keeps the full payload so new fields can surface later without a backfill. The `transactions.source` column distinguishes `'pluggy'` (synced) from `'manual'` (user-created). Manual transactions persist across re-syncs; Pluggy-sourced rows can be wiped and re-synced without losing user work.
 2. **User configuration** (`account_settings`, `card_groups`, `card_group_members`) — per-account closing/due days (Pluggy does not expose these), plus the user's grouping of physical cards by `card_last4` scoped per account. One card belongs to at most one group (composite primary key enforces exclusivity). Legacy `card_settings` (per-item) table remains for backward compat but the frontend writes to `account_settings`.
-3. **User work** (`user_categories`, `transaction_categories`, `category_rules`, `transaction_bill_overrides`, `transaction_description_overrides`, `transaction_splits`) — categorization, learned rules, manual bill-cycle shifts, description overrides, and bill splitting. These are **separate join tables**, not columns on `transactions`, so a Pluggy re-sync never wipes them. `transaction_splits` marks a transaction as shared (`'half'` = 50/50, `'theirs'` = partner owes 100%).
+3. **User work** (`user_categories`, `transaction_categories`, `category_rules`, `transaction_bill_overrides`, `transaction_description_overrides`, `transaction_splits`) — categorization, learned rules, manual bill-cycle shifts, description overrides, and bill splitting. These are **separate join tables**, not columns on `transactions`, so a Pluggy re-sync never wipes them. `transaction_splits` only stores explicit shared markings (`'half'` = 50/50, `'theirs'` = partner owes 100%); categorized transactions without a split row are implicitly mine in split summaries.
 4. **Cash flow** (`manual_entries`) — monthly recurring entries (salary, rent, etc.) with `day_of_month` for placement. These are independent of Pluggy data and persist across re-syncs.
 
 Column-level migrations use `addColumnIfMissing()` in [db/index.ts](packages/api/src/db/index.ts) — append-only, idempotent via `PRAGMA table_info`. New tables use `CREATE TABLE IF NOT EXISTS` directly.
@@ -119,7 +119,7 @@ Bulk categorize feeds the same engine — selecting 15 Uber Eats rows once train
 2. Frontend renders `<PluggyConnect>`. Rendering mounts the modal; unmounting closes it (no `isOpen` prop). `onSuccess({ item })` gives the `item.id`.
 3. `POST /items { itemId }` — backend validates via `pluggy.fetchItem()` and persists.
 4. `DELETE /items/:id` — removes a bank connection and all its data via cascade. Categories and rules are preserved.
-5. `POST /transactions/sync?itemId=...` — syncs CREDIT and BANK accounts, bills (CREDIT only), and transactions (both types), then runs `applyLearnedRules`. Upserts discovered accounts into the `accounts` table with `balance` and `subtype`. Also realigns `item_id` on existing transactions if the account moved between items (sandbox re-connection).
+5. `POST /transactions/sync?itemId=...` — syncs CREDIT and BANK accounts, bills (CREDIT only), and transactions (both types), then runs `applyLearnedRules`. Upserts discovered accounts into the `accounts` table with `balance` and `subtype`. Also realigns `item_id` on existing transactions if the account moved between items (sandbox re-connection). If Pluggy recycles a transaction ID for different content, sync clears dependent joins for the stale row before replacing it so old category/split work is not attached to the wrong transaction.
 6. `GET /accounts?itemId=...` — list accounts for the item. Frontend uses CREDIT accounts for billing and BANK accounts for cash flow.
 7. `GET /account-settings/:accountId` → 404 triggers the per-account setup form. In the Overview, unconfigured accounts render as "Configurar" cards.
 8. `PUT /account-settings/:accountId { closingDay, dueDay, displayName? }` — one-time config per account.
@@ -130,10 +130,10 @@ Bulk categorize feeds the same engine — selecting 15 Uber Eats rows once train
 13. `PUT /transactions/:id/description { description }` / `DELETE /transactions/:id/description` — override or restore a bank transaction's display description.
 14. `POST /transactions/manual` / `PUT /transactions/manual/:id` / `DELETE /transactions/manual/:id` — CRUD for manual bill transactions (when Pluggy misses them). Stored in the `transactions` table with `source='manual'`. Edit/delete are guarded to only affect manual entries.
 15. `GET /manual-entries` / `POST /manual-entries` / `PUT /manual-entries/:id` / `DELETE /manual-entries/:id` — CRUD for monthly recurring cash-flow entries.
-15. `GET /cashflow` — day-by-day timeline for the current month. Past days: actual BANK transactions. Future days: manual entries + credit card bill outflows on due dates.
-16. `PUT /transactions/:id/split { splitType }` / `DELETE /transactions/:id/split` — mark or unmark a transaction as shared with the partner (`'half'` or `'theirs'`).
-17. `POST /transactions/bulk-split { transactionIds, splitType }` / `POST /transactions/bulk-unsplit { transactionIds }` — bulk split/unsplit.
-18. `GET /bills/current/split-summary?accountId=...&offset=N` — split transactions in the bill window with partner debt total, per-type breakdown, and individual owes.
+16. `GET /cashflow` — day-by-day timeline for the current month. Past days: actual BANK transactions. Future days: manual entries + credit card bill outflows on due dates.
+17. `PUT /transactions/:id/split { splitType }` / `DELETE /transactions/:id/split` — mark or unmark a transaction as shared with the partner (`'half'` or `'theirs'`).
+18. `POST /transactions/bulk-split { transactionIds, splitType }` / `POST /transactions/bulk-unsplit { transactionIds }` — bulk split/unsplit.
+19. `GET /bills/current/split-summary?accountId=...&offset=N` — split transactions in the bill window with partner debt total, half/theirs/mine breakdowns, category totals, installments, and individual owes. Explicit split rows contribute to half/theirs; categorized rows without a split row contribute to mine.
 
 ### Frontend design language
 
@@ -147,13 +147,13 @@ Type system:
 
 Decoration: fixed CSS-only paper-grain noise overlay, fixed vertical margin rule at `left: 48px`, focus rings in the accent color, muted scrollbars. Motion is used sparingly — entrance fades for screens, slide-up for the bulk action bar and toast, card fade-in. No micro-animations scattered.
 
-The app has three screens in a drill-down hierarchy: **CashFlow** → **Overview** → **Dashboard**. **CashFlow** (`CashFlow.tsx`) is the top-level landing page: multi-month financial ledger with columns (origem | dia | descrição | débito | crédito | saldo), bank transactions for past days, manual entries + credit card bill outflows for future days, running balance across months, inline editing of descriptions/amounts/dates, ghost row for adding new entries. Clicking a credit card bill drills into Overview. **Overview** (`Overview.tsx`): "← voltar" to CashFlow → ←/→ month navigation → grand total with delta → aggregated category breakdown → grid of account cards + "adicionar banco" card. Clicking an account card drills into Dashboard. **Dashboard** (`Dashboard.tsx`): "← voltar" to Overview → account tabs (if multiple) → big headline → grid of per-group cards → `SplitSummaryPanel` (collapsible, shows partner debt + copy-to-clipboard) → `CategoryTabs` → `TransactionInbox`. App.tsx manages drill-down state: `overviewDrill` (year/month from CashFlow → Overview) and `drillDown` (itemId/accountId/offset from Overview → Dashboard).
+The app has three screens in a drill-down hierarchy: **CashFlow** → **Overview** → **Dashboard**. **CashFlow** (`CashFlow.tsx`) is the top-level landing page: multi-month financial ledger with columns (origem | dia | descrição | débito | crédito | saldo), bank transactions for past days, manual entries + credit card bill outflows for future days, running balance across months, inline editing of descriptions/amounts/dates, ghost row for adding new entries. Clicking a credit card bill drills into Overview. **Overview** (`Overview.tsx`): "← voltar" to CashFlow → ←/→ month navigation → grand total with delta → aggregated category breakdown → aggregated split section → grid of account cards + "adicionar banco" card. Clicking an account card drills into Dashboard. **Dashboard** (`Dashboard.tsx`): "← voltar" to Overview → account tabs (if multiple) → big headline → grid of per-group cards → `SplitSummaryPanel` (partner debt + copy-to-clipboard) → `CategoryTabs` → `TransactionInbox`. App.tsx manages drill-down state: `overviewDrill` (year/month from CashFlow → Overview) and `drillDown` (itemId/accountId/offset from Overview → Dashboard).
 
 ### Reusable UI patterns
 
 - **Portal for any overlay that needs to escape row stacking contexts.** Used by `CategoryPicker`, `RowActionsMenu`, `CardGroupsManager`, and `ToastLayer`. Common shape: `createPortal` into `document.body`, `getBoundingClientRect` via `useLayoutEffect` for position, `flip upward / right-align` when near edges, listeners for `mousedown` outside / `scroll` outside (scroll **inside** the overlay is explicitly allowed) / `resize` / `Escape`.
 - **`ToastProvider`** in [Toast.tsx](packages/web/src/components/Toast.tsx) exposes `useToast()` with `show({ message, undo?, durationMs? })`. One toast at a time; a new one replaces the previous. Hover pauses the 6s countdown. Used after a shift so the user has a recovery window (no historical bill navigation yet).
-- **`RowActionsMenu`** for rare per-row actions. Currently hosts the bill-shift commands on each transaction row. Add more actions here before cluttering the row visually.
+- **`RowActionsMenu`** for rare per-row actions. Currently hosts bill-shift, manual-entry edit/delete, and split commands on each transaction row. Add more actions here before cluttering the row visually.
 
 ### Config boundary
 
@@ -188,7 +188,6 @@ The app has three screens in a drill-down hierarchy: **CashFlow** → **Overview
 
 - Multi-user auth, hosted multi-tenant deployment
 - Docker, Fly, Vercel, or any deployment configs — user runs locally
-- Non-credit account types (checking accounts). Cash-flow is a planned feature but requires its own schema discussion first.
 - Graphs, charts, CSV export, full-text search
 - Category hierarchy (categories are flat)
 - Manual color picking for categories or card groups (system assigns from a curated palette)
