@@ -6,9 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-23
+
 ### Added
 
-- **Bill splitting (Splitwise prep)**: mark transactions as shared with a partner — "½" (50/50) or "→dela" (partner owes 100%). Per-row actions in the ⋯ menu plus bulk split buttons in the selection bar. Split summary card in the Dashboard grid (per-account) and aggregated "Divisão" section in the Overview (all accounts combined) — both show partner debt total, half/theirs badges, category breakdown with proportional bars, installments, and "copiar para Splitwise" button. Backend: `PUT/DELETE /transactions/:id/split`, `POST /transactions/bulk-split`, `POST /transactions/bulk-unsplit`, `GET /bills/current/split-summary` (with categories + installments). Data stored in `transaction_splits` join table (survives re-syncs).
+- **Bill splitting (Splitwise prep)**: mark transactions as shared with a partner — "½" (50/50) or "→dela" (partner owes 100%). Per-row actions in the ⋯ menu plus bulk split buttons in the selection bar. Backend: `PUT/DELETE /transactions/:id/split`, `POST /transactions/bulk-split`, `POST /transactions/bulk-unsplit`, `GET /bills/current/split-summary` (with categories + installments). Data stored in `transaction_splits` join table (survives re-syncs).
+- **Split summary in Dashboard**: per-account "Divisão" section below the card grid with partner debt total, half/theirs/meu columns, category breakdowns, installments, and "copiar para Splitwise" button.
+- **Aggregated split summary in Overview**: all-account "Divisão" section for the selected due month, combining split totals, categories, installments, and copy text across cards.
+
+### Changed
+
+- **Implicit "mine" split model**: categorized transactions without a split row are treated as "meu" in split summaries. The persisted split types are now only `half` and `theirs`; unmarking a split returns a transaction to implicit mine.
+- **Split summary layout**: categories and installments are grouped into separate ½, dela, and meu columns with column totals and full-amount breakdowns.
+- **Dynamic split columns**: split sections only render the columns that have data, keeping one- and two-column states compact.
+
+### Fixed
+
+- **Pluggy recycled transaction IDs**: sync detects when Pluggy reuses an existing transaction ID for different transaction content, clears dependent user joins for that stale row, and replaces it safely instead of preserving mismatched categorization/split data.
+- **Split summary placement**: the Dashboard split summary now sits below the bill card grid instead of being embedded as a grid card.
 
 ## [1.1.0] - 2026-04-21
 
