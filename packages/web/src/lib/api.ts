@@ -118,6 +118,8 @@ export interface UserCategoryRef {
 
 export interface Transaction {
   id: string;
+  /** The Pluggy-issued ID. Non-unique: Pluggy recycles IDs across different purchases. */
+  providerTransactionId: string | null;
   accountId: string;
   itemId: string;
   date: string; // yyyy-mm-dd
