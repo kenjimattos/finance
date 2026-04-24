@@ -6,14 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-04-24
+
 ### Changed
 
 - **Dashboard sem breakdown por grupo de cartão**: a seção "Divisão" agora supre a necessidade de entender como a fatura se distribui, então a grade de cartões-por-grupo foi removida. O endpoint `GET /bills/current/breakdown` retorna um objeto único (`total`, `previousTotal`, `delta`, `categories`, `installments`) em vez de um array `groups[]`. No frontend, `BillCardGrid` foi substituído por `BillHeader` (headline editorial com navegação de ciclo) e `CardGroupFilterBar` (chips para filtrar a lista por grupo + botão "gerenciar"). O mecanismo de agrupar cartões continua — só não dirige mais totais por cartão.
+- **Seções padronizadas acima do inbox**: Divisão, Cartões e Categorias agora compartilham a mesma cabeçalho (ponto laranja + título em accent uppercase + contagem entre parênteses em mono) e ficam separadas do bloco anterior com `rule-top mt-10 pt-6`.
 - **`account_id` de grupos de cartão realinhados**: `card_groups` e `card_group_members` cujos `account_id` apontavam para contas que não existem mais foram re-apontados para a conta CREDIT atual do mesmo item (via SQL direto no banco do usuário).
 
 ### Removed
 
 - **Botão "copiar para splitwise"**: o export via clipboard foi removido do painel de Divisão no Dashboard e no Overview. Não haverá integração com Splitwise e a funcionalidade não estava sendo usada. Também limpamos a função `copyToClipboard`, estado `copied`, helpers `formatDay`/`formatDueDateLabel`, a acumulação de transações no split agregado e os props `displayName`/`dueDate` do `SplitSummaryCard`.
+- **`ROADMAP.md`**: arquivo de roadmap removido do repositório — planejamento passou a viver fora do repo.
 
 ## [1.3.0] - 2026-04-24
 
