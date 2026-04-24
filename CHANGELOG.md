@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-24
+
+### Added
+
+- **UUID local como chave primária de transações**: `transactions.id` é agora um UUID gerado localmente (estável para sempre). O ID do Pluggy migrou para `provider_transaction_id`, que é non-unique e nullable para transações manuais. Migração automática no startup reemite UUIDs para todas as linhas existentes e reaponta as 5 tabelas de trabalho do usuário (`transaction_categories`, `transaction_bill_overrides`, `transaction_description_overrides`, `bill_payment_tags`, `transaction_splits`).
+- **Lógica de sync em 3 vias**: ao sincronizar, cada transação do Pluggy segue um de três caminhos — (1) provider ID novo → INSERT com UUID local novo; (2) mesmo provider ID, hash igual ou NULL → UPDATE apenas campos mutáveis; (3) mesmo provider ID, hash diferente → ID reciclado pelo Pluggy: mantém linha antiga intacta, insere nova linha com UUID novo e registra auditoria em `transaction_sync_conflicts`.
+- **Tabela de auditoria `transaction_sync_conflicts`**: registra cada evento de reciclagem de ID com os payloads antigo e novo para diagnóstico futuro.
+- **Identity hash portável entre reconexões**: o hash de identidade (`SHA-256(date|amount|merchant_slug)`) não inclui mais `account_id`, tornando-o portável quando o Pluggy emite novos IDs de conta ao reconectar o mesmo banco. Um fallback `findByIdentityHash` no sync detecta a reconexão e faz UPDATE em vez de INSERT, preservando categorias, splits e overrides existentes.
+- **Swap cirúrgico de item/conta no banco**: scripts de migração para substituir IDs de item e de contas Pluggy em todas as tabelas relacionadas (`items`, `accounts`, `transactions`, `bills`, `account_settings`, `balance_snapshots`, `card_groups`, `card_group_members`, `card_settings`) atomicamente com `PRAGMA foreign_keys = OFF`.
+
+### Changed
+
+- **Hash de identidade sem `accountId`**: a fórmula anterior incluía o account ID do Pluggy, o que tornava o hash inválido após reconexão. A nova fórmula (`date|amount|slug`) é estável mesmo com account IDs diferentes para o mesmo cartão físico.
+- Sync (CREDIT e BANK) não usa mais `INSERT OR REPLACE`. Todas as escritas passam pela lógica de 3 vias para preservar o trabalho do usuário.
+
 ## [1.2.1] - 2026-04-23
 
 ### Added
