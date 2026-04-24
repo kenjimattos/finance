@@ -262,7 +262,6 @@ export function Overview({
     let mineTotal = 0;
     const catMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number; mineTotal: number }>();
     const installments: SplitSummary['installments'] = [];
-    const allTxs: SplitSummary['transactions'] = [];
 
     for (const q of splitQueries) {
       const s = q.data;
@@ -295,7 +294,6 @@ export function Overview({
         }
       }
       installments.push(...s.installments);
-      allTxs.push(...s.transactions);
     }
 
     if (totalCount === 0) return null;
@@ -319,7 +317,6 @@ export function Overview({
         }))
         .sort((a, b) => b.total - a.total),
       installments,
-      transactions: allTxs,
     };
   }, [splitQueries]);
 
@@ -834,20 +831,10 @@ function SplitSection({
       installmentNumber: number;
       totalInstallments: number;
     }>;
-    transactions: Array<{
-      id: string;
-      date: string;
-      description: string | null;
-      amount: number;
-      splitType: 'half' | 'theirs' | 'mine';
-      owes: number;
-    }>;
   };
   year: number;
   month: number;
 }) {
-  const [copied, setCopied] = useState(false);
-
   // Separate categories into three independent lists
   const makeCatList = (key: 'halfTotal' | 'theirsTotal' | 'mineTotal') =>
     split.categories
@@ -862,28 +849,6 @@ function SplitSection({
   const halfInstallments = split.installments.filter((i) => i.splitType === 'half');
   const theirsInstallments = split.installments.filter((i) => i.splitType === 'theirs');
   const mineInstallments = split.installments.filter((i) => i.splitType === 'mine');
-
-  function copyToClipboard() {
-    const label = `${MONTH_NAMES[month - 1]} ${year}`;
-    const lines: string[] = [];
-    lines.push(`Divisão ${label} — Todos os cartões`);
-    lines.push('');
-    for (const tx of split.transactions) {
-      const desc = (tx.description ?? '—').padEnd(30);
-      const amt = formatBRL(tx.amount);
-      const tag = tx.splitType === 'half' ? '50/50' : tx.splitType === 'theirs' ? 'dela' : 'meu';
-      const owes = formatBRL(tx.owes);
-      lines.push(
-        `${tx.date.slice(8, 10)}/${tx.date.slice(5, 7)}  ${desc}  ${amt}  (${tag} → ${owes})`,
-      );
-    }
-    lines.push('');
-    lines.push(`Total que deve: ${formatBRL(split.partnerOwes)}`);
-    navigator.clipboard.writeText(lines.join('\n')).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
 
   return (
     <div className="mt-14">
@@ -946,16 +911,6 @@ function SplitSection({
           );
         })()}
 
-        {/* Copy button */}
-        <div className="mt-6">
-          <button
-            type="button"
-            onClick={copyToClipboard}
-            className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-accent)] transition-colors hover:text-[color:var(--color-ink)]"
-          >
-            {copied ? 'copiado!' : 'copiar para splitwise'}
-          </button>
-        </div>
       </div>
     </div>
   );

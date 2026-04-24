@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, type SplitSummary } from '../lib/api';
+import { api } from '../lib/api';
 import { formatBRL } from '../lib/format';
 
 const SPLIT_CAT_LIMIT = 4;
@@ -17,16 +17,10 @@ const SPLIT_INST_LIMIT = 4;
 export function SplitSummaryCard({
   accountId,
   offset,
-  displayName,
-  dueDate,
 }: {
   accountId: string;
   offset: number;
-  displayName: string | null;
-  dueDate: string;
 }) {
-  const [copied, setCopied] = useState(false);
-
   const summaryQ = useQuery({
     queryKey: ['splitSummary', accountId, offset],
     queryFn: () => api.getSplitSummary(accountId, offset),
@@ -34,8 +28,6 @@ export function SplitSummaryCard({
 
   const summary = summaryQ.data;
   if (!summary || summary.totalSplitTransactions === 0) return null;
-
-  const dueDateLabel = formatDueDateLabel(dueDate);
 
   // Separate categories into three independent lists
   const makeCatList = (key: 'halfTotal' | 'theirsTotal' | 'mineTotal') =>
@@ -51,27 +43,6 @@ export function SplitSummaryCard({
   const halfInstallments = summary.installments.filter((i) => i.splitType === 'half');
   const theirsInstallments = summary.installments.filter((i) => i.splitType === 'theirs');
   const mineInstallments = summary.installments.filter((i) => i.splitType === 'mine');
-
-  function copyToClipboard(s: SplitSummary) {
-    const lines: string[] = [];
-    lines.push(`Fatura ${dueDateLabel} — ${displayName ?? 'Cartão'}`);
-    lines.push('');
-    for (const tx of s.transactions) {
-      const desc = (tx.description ?? '—').padEnd(30);
-      const amt = formatBRL(tx.amount);
-      const label = tx.splitType === 'half' ? '50/50' : tx.splitType === 'theirs' ? 'dela' : 'meu';
-      const owes = formatBRL(tx.owes);
-      lines.push(
-        `${formatDay(tx.date)}  ${desc}  ${amt}  (${label} → ${owes})`,
-      );
-    }
-    lines.push('');
-    lines.push(`Total que deve: ${formatBRL(s.partnerOwes)}`);
-    navigator.clipboard.writeText(lines.join('\n')).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
 
   return (
     <div className="mt-10 border-t border-[color:var(--color-paper-rule)] pt-6 text-left">
@@ -143,16 +114,6 @@ export function SplitSummaryCard({
         );
       })()}
 
-      {/* Copy to clipboard */}
-      <div className="mt-6 border-t border-[color:var(--color-paper-rule)] pt-4">
-        <button
-          type="button"
-          onClick={() => copyToClipboard(summary)}
-          className="font-body text-[11px] uppercase tracking-[0.1em] text-[color:var(--color-accent)] transition-colors hover:text-[color:var(--color-ink)]"
-        >
-          {copied ? 'copiado!' : 'copiar para splitwise'}
-        </button>
-      </div>
     </div>
   );
 }
@@ -326,20 +287,6 @@ function ExpandToggle({
       {expanded ? '− recolher' : `+ ${hiddenCount} mais`}
     </button>
   );
-}
-
-function formatDay(iso: string): string {
-  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
-}
-
-function formatDueDateLabel(dueDate: string): string {
-  const months = [
-    'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-    'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
-  ];
-  const m = parseInt(dueDate.slice(5, 7), 10);
-  const y = dueDate.slice(0, 4);
-  return `${months[m - 1]}/${y}`;
 }
 
 const INSTALLMENT_SUFFIX = /\s*PARC\d{1,2}\/\d{1,2}\s*$/i;

@@ -222,8 +222,6 @@ function AccountDashboard({
       <SplitSummaryCard
         accountId={accountId}
         offset={billOffset}
-        displayName={breakdownQ.data.displayName}
-        dueDate={breakdownQ.data.dueDate}
       />
       <CategoryTabs
         categories={selectedGroup?.categories ?? []}
