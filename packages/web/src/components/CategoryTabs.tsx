@@ -29,22 +29,37 @@ export function CategoryTabs({
   if (categories.length === 0) return null;
 
   return (
-    <nav className="rule-top rule-bottom mt-12 flex flex-wrap items-baseline gap-x-5 gap-y-2 py-3">
-      <Tab
-        label="Todas"
-        active={selected === 'all'}
-        onClick={() => onSelect('all')}
-      />
-      {categories.map((c) => (
-        <Tab
-          key={c.id}
-          label={c.name}
-          color={c.color}
-          active={selected === c.id}
-          onClick={() => onSelect(c.id)}
+    <section className="rule-top mt-10 pt-6">
+      <div className="mb-3 flex items-center gap-2">
+        <span
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ background: 'var(--color-accent)' }}
+          aria-hidden="true"
         />
-      ))}
-    </nav>
+        <span className="font-body text-[11px] uppercase tracking-[0.14em] text-[color:var(--color-accent)]">
+          Categorias
+        </span>
+        <span className="font-mono text-[10px] text-[color:var(--color-ink-faint)]">
+          ({categories.length})
+        </span>
+      </div>
+      <nav className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
+        <Tab
+          label="Todas"
+          active={selected === 'all'}
+          onClick={() => onSelect('all')}
+        />
+        {categories.map((c) => (
+          <Tab
+            key={c.id}
+            label={c.name}
+            color={c.color}
+            active={selected === c.id}
+            onClick={() => onSelect(c.id)}
+          />
+        ))}
+      </nav>
+    </section>
   );
 }
 
