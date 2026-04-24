@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+
+- **CashFlow: projeções múltiplas**: o toggle único de projeção foi substituído por controles `+ projetar mês` e `− remover último`, permitindo estender a visualização em até 12 meses à frente. A quantidade é persistida em `localStorage` (`cashflow:projectionCount`). Remover afeta apenas meses de projeção (que contêm só lançamentos manuais); meses com dados bancários reais não têm botão de remover.
+
 ## [1.3.1] - 2026-04-24
 
 ### Changed
