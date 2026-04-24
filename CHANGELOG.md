@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Removed
+
+- **Botão "copiar para splitwise"**: o export via clipboard foi removido do painel de Divisão no Dashboard e no Overview. Não haverá integração com Splitwise e a funcionalidade não estava sendo usada. Também limpamos a função `copyToClipboard`, estado `copied`, helpers `formatDay`/`formatDueDateLabel`, a acumulação de transações no split agregado e os props `displayName`/`dueDate` do `SplitSummaryCard`.
+
 ## [1.3.0] - 2026-04-24
 
 ### Added
