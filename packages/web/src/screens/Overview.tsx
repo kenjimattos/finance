@@ -116,9 +116,6 @@ export function Overview({
   const isCurrentMonth =
     year === defaultMonth.year && month === defaultMonth.month;
 
-  const nextMonth = addMonth(defaultMonth.year, defaultMonth.month, 1);
-  const isNextMonth =
-    year === nextMonth.year && month === nextMonth.month;
   const isFutureMonth =
     year > defaultMonth.year || (year === defaultMonth.year && month > defaultMonth.month);
 
@@ -132,6 +129,8 @@ export function Overview({
   const ms = `${year}-${month < 10 ? '0' : ''}${month}`;
   const prevM = addMonth(year, month, -1);
   const prevMs = `${prevM.year}-${prevM.month < 10 ? '0' : ''}${prevM.month}`;
+  const nextM = addMonth(year, month, 1);
+  const nextMs = `${nextM.year}-${nextM.month < 10 ? '0' : ''}${nextM.month}`;
 
   const cashflowQ = useQuery({
     queryKey: ['cashflow', ms],
@@ -140,6 +139,13 @@ export function Overview({
   const prevCashflowQ = useQuery({
     queryKey: ['cashflow', prevMs],
     queryFn: () => api.getCashFlow(prevMs),
+  });
+  // Probe the NEXT month so the "→" arrow can enable only when there's
+  // something to navigate to (bank transactions, manual entries, or
+  // credit card bill projections).
+  const nextCashflowQ = useQuery({
+    queryKey: ['cashflow', nextMs],
+    queryFn: () => api.getCashFlow(nextMs),
   });
 
   const cashSummary = useMemo(() => {
@@ -351,6 +357,18 @@ export function Overview({
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [breakdownQueries]);
 
+  // Is there anything to see in the NEXT month? Enables the "→" arrow.
+  //  - any card's current-month breakdown reports shift-aware transactions
+  //    landing in the next bill window, OR
+  //  - the next month's cashflow has any entries (bank, manual, projected).
+  const hasEntriesInNextMonth = useMemo(() => {
+    const cardsHit = breakdownQueries.some(
+      (q) => q.data?.hasNextBillTransactions === true,
+    );
+    const cashHit = (nextCashflowQ.data?.days.length ?? 0) > 0;
+    return cardsHit || cashHit;
+  }, [breakdownQueries, nextCashflowQ.data]);
+
   const loading =
     accountQueries.some((q) => q.isLoading) ||
     settingsQueries.some((q) => q.isLoading);
@@ -389,7 +407,7 @@ export function Overview({
             <button
               type="button"
               onClick={() => navigateMonth(1)}
-              disabled={isNextMonth}
+              disabled={!hasEntriesInNextMonth}
               aria-label="próximo mês"
               className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:text-[color:var(--color-ink-faint)] disabled:opacity-40"
             >
