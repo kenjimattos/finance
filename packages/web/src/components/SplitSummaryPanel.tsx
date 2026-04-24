@@ -45,8 +45,7 @@ export function SplitSummaryCard({
   const mineInstallments = summary.installments.filter((i) => i.splitType === 'mine');
 
   return (
-    <div className="mt-10 border-t border-[color:var(--color-paper-rule)] pt-6 text-left">
-      {/* Eyebrow: "Divisão" with accent dot */}
+    <section className="rule-top mt-10 pt-6 text-left">
       <div className="mb-3 flex items-center gap-2">
         <span
           className="h-1.5 w-1.5 rounded-full"
@@ -114,7 +113,7 @@ export function SplitSummaryCard({
         );
       })()}
 
-    </div>
+    </section>
   );
 }
 
