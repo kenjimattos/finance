@@ -5,7 +5,6 @@ import {
   computeBillWindowAtOffset,
   type BillWindow,
 } from '../services/billWindow.js';
-import { parseCardGroupFilter } from './transactions.js';
 
 export const billsRouter = Router();
 
@@ -39,12 +38,6 @@ function scopeClause(s: Scope): { column: string; value: string } {
   return s.kind === 'account'
     ? { column: 't.account_id', value: s.accountId }
     : { column: 't.item_id', value: s.itemId };
-}
-
-function groupScopeClause(s: Scope): { column: string; value: string } {
-  return s.kind === 'account'
-    ? { column: 'g.account_id', value: s.accountId }
-    : { column: 'g.item_id', value: s.itemId };
 }
 
 function requireAccountSettings(accountId: string): AccountSettingsRow | null {
@@ -85,12 +78,13 @@ billsRouter.get('/bills', (req, res, next) => {
 /**
  * GET /bills/current/breakdown?itemId=...&offset=N
  *
- * Returns everything the dashboard needs to render the "cards per card group"
- * layout in a single round trip:
- *   - the bill window dates (closing/due) for the requested cycle
- *   - one entry for "all" (groupId: null) with overall total/delta/top categories
- *   - one entry per card group (only groups that actually have categorized
- *     transactions in the window — empty groups are skipped)
+ * Returns everything the dashboard needs to render the bill headline and
+ * inbox in a single round trip:
+ *   - the bill window dates (closing/due) for the requested cycle and
+ *     adjacent cycles (for shift-aware transaction lookups)
+ *   - overall total, previousTotal, delta
+ *   - sorted category breakdown for the window
+ *   - list of installment transactions landing in the window
  *
  * `offset` selects which cycle relative to the currently open bill:
  *   - 0  (default) = currently open bill
@@ -98,9 +92,6 @@ billsRouter.get('/bills', (req, res, next) => {
  *   - -N = N cycles in the past
  * The "previous" delta is always vs (offset - 1), so navigation back through
  * history keeps the same "vs prior month" framing.
- *
- * Per the design decision, the "no group" bucket is NOT returned — the user
- * asked for it not to appear as a card.
  */
 billsRouter.get('/bills/current/breakdown', (req, res, next) => {
   try {
@@ -155,80 +146,17 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
     // prevPrev is needed so the previous window's total can also be shift-aware.
     const prevPrev = computeBillWindowAtOffset(settingsT, offset - 2);
 
-    const { column: gCol, value: gVal } = groupScopeClause(scope);
-    const groups = db
-      .prepare(
-        `SELECT g.id, g.name, g.color FROM card_groups g WHERE ${gCol} = ? ORDER BY g.name ASC`,
-      )
-      .all(gVal) as Array<{ id: number; name: string; color: string }>;
-
-    const allFilter = parseCardGroupFilter(undefined); // "any"
-
-    const breakdown = [
-      {
-        groupId: null as number | null,
-        name: 'Todos',
-        color: null as string | null,
-        total: round2(
-          sumBillTotalWithShifts(scope, current, previous, next, allFilter),
-        ),
-        previousTotal: round2(
-          sumBillTotalWithShifts(scope, previous, prevPrev, current, allFilter),
-        ),
-        categories: categoryBreakdownWithShifts(
-          scope,
-          current,
-          previous,
-          next,
-          allFilter,
-        ),
-        installments: installmentBreakdownWithShifts(
-          scope,
-          current,
-          previous,
-          next,
-          allFilter,
-        ),
-      },
-    ];
-
-    for (const g of groups) {
-      const filter = parseCardGroupFilter(String(g.id));
-      const total = sumBillTotalWithShifts(scope, current, previous, next, filter);
-      const previousTotal = sumBillTotalWithShifts(
-        scope,
-        previous,
-        prevPrev,
-        current,
-        filter,
-      );
-      const categories = categoryBreakdownWithShifts(
-        scope,
-        current,
-        previous,
-        next,
-        filter,
-      );
-      const installments = installmentBreakdownWithShifts(
-        scope,
-        current,
-        previous,
-        next,
-        filter,
-      );
-
-      if (total === 0 && categories.length === 0) continue;
-
-      breakdown.push({
-        groupId: g.id,
-        name: g.name,
-        color: g.color,
-        total: round2(total),
-        previousTotal: round2(previousTotal),
-        categories,
-        installments,
-      });
-    }
+    const total = round2(sumBillTotalWithShifts(scope, current, previous, next));
+    const previousTotal = round2(
+      sumBillTotalWithShifts(scope, previous, prevPrev, current),
+    );
+    const categories = categoryBreakdownWithShifts(scope, current, previous, next);
+    const installments = installmentBreakdownWithShifts(
+      scope,
+      current,
+      previous,
+      next,
+    );
 
     res.json({
       itemId,
@@ -243,16 +171,11 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
       previousPeriodEnd: previous.periodEnd,
       nextPeriodStart: next.periodStart,
       nextPeriodEnd: next.periodEnd,
-      groups: breakdown.map((b) => ({
-        groupId: b.groupId,
-        name: b.name,
-        color: b.color,
-        total: b.total,
-        previousTotal: b.previousTotal,
-        delta: round2(b.total - b.previousTotal),
-        categories: b.categories,
-        installments: b.installments,
-      })),
+      total,
+      previousTotal,
+      delta: round2(total - previousTotal),
+      categories,
+      installments,
     });
   } catch (err) {
     next(err);
@@ -279,7 +202,6 @@ function sumBillTotalWithShifts(
   current: BillWindow,
   previous: BillWindow,
   next: BillWindow,
-  groupFilter: ReturnType<typeof parseCardGroupFilter>,
 ): number {
   const { column, value } = scopeClause(scope);
   const row = db
@@ -287,19 +209,12 @@ function sumBillTotalWithShifts(
       `SELECT COALESCE(SUM(COALESCE(t.amount_in_account_currency, t.amount)), 0) AS total
        FROM transactions t
        INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
-       LEFT JOIN card_group_members m
-         ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
        WHERE ${column} = ?
          AND (
               (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
            OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
            OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
-         )
-         AND (
-           ? = 'any'
-           OR (? = 'none' AND m.card_group_id IS NULL)
-           OR (? = 'id'   AND m.card_group_id = ?)
          )`,
     )
     .get(
@@ -307,21 +222,16 @@ function sumBillTotalWithShifts(
       current.periodStart, current.periodEnd,
       previous.periodStart, previous.periodEnd,
       next.periodStart, next.periodEnd,
-      groupFilter.kind,
-      groupFilter.kind,
-      groupFilter.kind,
-      groupFilter.kind === 'id' ? groupFilter.id : null,
     ) as SumRow;
   return row.total ?? 0;
 }
 
 /**
  * List the installment ("parcelada") transactions that land in the current
- * bill window for the given card group filter, honoring bill-shift
- * overrides. Installments are not filtered by user categorization — they
- * surface even if the user hasn't categorized them yet, because the point
- * of showing them is to remind the user of pre-committed spending
- * regardless of whether it's been classified.
+ * bill window, honoring bill-shift overrides. Installments are not filtered
+ * by user categorization — they surface even if the user hasn't categorized
+ * them yet, because the point of showing them is to remind the user of
+ * pre-committed spending regardless of whether it's been classified.
  *
  * Sorted by date descending so the eye scans newest-first, matching the
  * transaction inbox convention.
@@ -331,7 +241,6 @@ function installmentBreakdownWithShifts(
   current: BillWindow,
   previous: BillWindow,
   next: BillWindow,
-  groupFilter: ReturnType<typeof parseCardGroupFilter>,
 ): Array<{
   id: string;
   date: string;
@@ -350,8 +259,6 @@ function installmentBreakdownWithShifts(
               t.installment_number  AS installmentNumber,
               t.total_installments  AS totalInstallments
        FROM transactions t
-       LEFT JOIN card_group_members m
-         ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
        WHERE ${column} = ?
          AND t.installment_number IS NOT NULL
@@ -361,11 +268,6 @@ function installmentBreakdownWithShifts(
            OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
            OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
          )
-         AND (
-           ? = 'any'
-           OR (? = 'none' AND m.card_group_id IS NULL)
-           OR (? = 'id'   AND m.card_group_id = ?)
-         )
        ORDER BY t.date DESC, t.id DESC`,
     )
     .all(
@@ -373,10 +275,6 @@ function installmentBreakdownWithShifts(
       current.periodStart, current.periodEnd,
       previous.periodStart, previous.periodEnd,
       next.periodStart, next.periodEnd,
-      groupFilter.kind,
-      groupFilter.kind,
-      groupFilter.kind,
-      groupFilter.kind === 'id' ? groupFilter.id : null,
     ) as Array<{
     id: string;
     date: string;
@@ -397,7 +295,6 @@ function categoryBreakdownWithShifts(
   current: BillWindow,
   previous: BillWindow,
   next: BillWindow,
-  groupFilter: ReturnType<typeof parseCardGroupFilter>,
 ): Array<{ id: number; name: string; color: string; total: number }> {
   const { column, value } = scopeClause(scope);
   const rows = db
@@ -409,19 +306,12 @@ function categoryBreakdownWithShifts(
        FROM transactions t
        INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
        INNER JOIN user_categories uc        ON uc.id = tc.user_category_id
-       LEFT JOIN card_group_members m
-         ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
        WHERE ${column} = ?
          AND (
               (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
            OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
            OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
-         )
-         AND (
-           ? = 'any'
-           OR (? = 'none' AND m.card_group_id IS NULL)
-           OR (? = 'id'   AND m.card_group_id = ?)
          )
        GROUP BY uc.id
        ORDER BY total DESC`,
@@ -431,10 +321,6 @@ function categoryBreakdownWithShifts(
       current.periodStart, current.periodEnd,
       previous.periodStart, previous.periodEnd,
       next.periodStart, next.periodEnd,
-      groupFilter.kind,
-      groupFilter.kind,
-      groupFilter.kind,
-      groupFilter.kind === 'id' ? groupFilter.id : null,
     ) as Array<{ id: number; name: string; color: string; total: number }>;
   return rows.map((r) => ({ ...r, total: round2(r.total) }));
 }
