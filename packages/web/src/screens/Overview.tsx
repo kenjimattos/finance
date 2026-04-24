@@ -396,7 +396,10 @@ export function Overview({
               →
             </button>
           </div>
-          <SyncAllButton items={items} />
+          <div className="flex items-center gap-4">
+            <SyncAllButton items={items} />
+            <AddBankCard />
+          </div>
         </div>
       </div>
 
@@ -556,8 +559,6 @@ export function Overview({
               onClick={() => onSelectAccount(item.id, account.id, 0)}
             />
           ))}
-
-          <AddBankCard />
         </div>
       </div>
 
@@ -1118,17 +1119,16 @@ function AddBankCard() {
           tokenMut.mutate();
         }}
         disabled={tokenMut.isPending || status === 'saving' || status === 'syncing'}
-        className="flex flex-col items-center justify-center gap-2 border border-dashed border-[color:var(--color-paper-rule)] px-5 py-8 text-center transition-colors hover:border-[color:var(--color-ink-muted)] disabled:opacity-50"
+        className="flex items-center justify-center gap-2 px-5 py-8 text-center transition-colors hover:border-[color:var(--color-ink-muted)] disabled:opacity-50"
       >
-        <span className="font-display text-2xl text-[color:var(--color-ink-faint)]">+</span>
-        <span className="eyebrow text-[color:var(--color-ink-muted)]">
+        <span className="shrink-0 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50">
           {tokenMut.isPending
             ? 'Abrindo…'
             : status === 'saving'
               ? 'Salvando…'
               : status === 'syncing'
                 ? 'Sincronizando…'
-                : 'Adicionar banco'}
+                : 'Adicionar banco +'}
         </span>
         {(status === 'error' || tokenMut.isError) && (
           <span className="mt-1 font-body text-xs text-[color:var(--color-accent)]">
