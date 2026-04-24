@@ -45,6 +45,13 @@ export function BillHeader({
         ? 'lower'
         : 'flat';
 
+  // Now that future offsets are allowed (when there are lançamentos), base the
+  // "em aberto / passada / futura" copy on the actual closing date vs today,
+  // not on `offset === 0`.
+  const today = new Date().toISOString().slice(0, 10);
+  const isClosed = breakdown.closingDate < today;
+  const isOpen = breakdown.periodStart <= today && today <= breakdown.closingDate;
+
   return (
     <motion.section
       initial={{ opacity: 0, y: 12 }}
@@ -64,7 +71,7 @@ export function BillHeader({
               ←
             </button>
             <span>
-              {offset === 0
+              {isOpen
                 ? (breakdown.displayName ?? 'Fatura em aberto')
                 : breakdown.displayName
                   ? `${breakdown.displayName} · ${formatMonthYear(breakdown.closingDate)}`
@@ -73,7 +80,7 @@ export function BillHeader({
             <button
               type="button"
               onClick={() => onChangeOffset(offset + 1)}
-              disabled={offset >= 0}
+              disabled={!breakdown.hasNextBillTransactions}
               aria-label="próxima fatura"
               className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:text-[color:var(--color-ink-faint)] disabled:opacity-40"
             >
@@ -85,13 +92,13 @@ export function BillHeader({
           </div>
           <div className="mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-1 font-body text-sm text-[color:var(--color-ink-muted)]">
             <span>
-              {offset === 0 ? 'fecha em' : 'fechou em'}{' '}
+              {isClosed ? 'fechou em' : 'fecha em'}{' '}
               <span className="text-[color:var(--color-ink-soft)]">
                 {formatDateLong(breakdown.closingDate)}
               </span>
             </span>
             <span>
-              {offset === 0 ? 'vence em' : 'venceu em'}{' '}
+              {breakdown.dueDate < today ? 'venceu em' : 'vence em'}{' '}
               <span className="text-[color:var(--color-ink-soft)]">
                 {formatDateLong(breakdown.dueDate)}
               </span>

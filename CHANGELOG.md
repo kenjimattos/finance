@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- **Dashboard: navegação de fatura agora permite avançar**: a seta "→" do `BillHeader` deixa de travar em `offset = 0` e passa a ser habilitada quando o próximo ciclo tem lançamentos (incluindo shifts ±1). O backend retorna `hasNextBillTransactions` em `GET /bills/current/breakdown`, computado com o mesmo padrão shift-aware de três janelas (current/previous/next). Os labels "fecha em/fechou em" e "vence em/venceu em" agora se baseiam na data real vs hoje, já que ciclos futuros são navegáveis.
 - **CashFlow: projeções múltiplas**: o toggle único de projeção foi substituído por controles `+ projetar mês` e `− remover último`, permitindo estender a visualização em até 12 meses à frente. A quantidade é persistida em `localStorage` (`cashflow:projectionCount`). Remover afeta apenas meses de projeção (que contêm só lançamentos manuais); meses com dados bancários reais não têm botão de remover.
 
 ## [1.3.1] - 2026-04-24

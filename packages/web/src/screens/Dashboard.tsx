@@ -193,9 +193,10 @@ function AccountDashboard({
         itemId={itemId}
         offset={billOffset}
         onChangeOffset={(next) => {
-          // Right arrow is forward in time → cap at 0 (the open bill).
           // Left arrow is unbounded back into history.
-          if (next > 0) return;
+          // Right arrow is gated by `hasNextBillTransactions` in BillHeader,
+          // so future cycles only open when there are lançamentos to show
+          // (already considering bill-shift overrides).
           setBillOffset(next);
           setCardGroupFilter('all');
           setCategoryFilter('all');
