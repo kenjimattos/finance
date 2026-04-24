@@ -358,26 +358,18 @@ export function Overview({
   }, [breakdownQueries]);
 
   // Is there anything to see in the NEXT month? Enables the "→" arrow.
-  //  - any card's current-month breakdown reports shift-aware transactions
-  //    landing in the next bill window, OR
-  //  - the next month's cashflow has a real bank transaction (realized) or a
-  //    user-authored manual entry.
-  //
-  // `credit_card_bill` cashflow entries are projections derived from cards
-  // with categorized spend; they exist for every configured account in every
-  // future month and would keep the arrow permanently enabled. They're
-  // excluded here — the card path already captures card activity.
+  // Criterion: the next month's cashflow has a real bank transaction
+  // (realized) or a user-authored manual entry. Card activity is NOT part of
+  // this decision — projected bill outflows (`credit_card_bill`) are derived
+  // and would keep the arrow permanently enabled; Dashboard already gates bill
+  // navigation on its own `hasNextBillTransactions`.
   const hasEntriesInNextMonth = useMemo(() => {
-    const cardsHit = breakdownQueries.some(
-      (q) => q.data?.hasNextBillTransactions === true,
-    );
-    const cashHit = (nextCashflowQ.data?.days ?? []).some((day) =>
+    return (nextCashflowQ.data?.days ?? []).some((day) =>
       day.entries.some(
         (e) => e.type === 'bank_transaction' || e.type === 'manual_entry',
       ),
     );
-    return cardsHit || cashHit;
-  }, [breakdownQueries, nextCashflowQ.data]);
+  }, [nextCashflowQ.data]);
 
   const loading =
     accountQueries.some((q) => q.isLoading) ||
