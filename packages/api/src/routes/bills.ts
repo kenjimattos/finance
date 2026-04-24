@@ -145,6 +145,9 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
     const next = computeBillWindowAtOffset(settingsT, offset + 1);
     // prevPrev is needed so the previous window's total can also be shift-aware.
     const prevPrev = computeBillWindowAtOffset(settingsT, offset - 2);
+    // nextNext lets us ask "does the NEXT bill have any transactions?"
+    // using the same three-window shift-aware pattern.
+    const nextNext = computeBillWindowAtOffset(settingsT, offset + 2);
 
     const total = round2(sumBillTotalWithShifts(scope, current, previous, next));
     const previousTotal = round2(
@@ -157,6 +160,12 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
       previous,
       next,
     );
+    const hasNextBillTransactions = countTransactionsWithShifts(
+      scope,
+      next,
+      current,
+      nextNext,
+    ) > 0;
 
     res.json({
       itemId,
@@ -176,6 +185,7 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
       delta: round2(total - previousTotal),
       categories,
       installments,
+      hasNextBillTransactions,
     });
   } catch (err) {
     next(err);
@@ -325,6 +335,40 @@ function categoryBreakdownWithShifts(
   return rows.map((r) => ({ ...r, total: round2(r.total) }));
 }
 
+
+/**
+ * Shift-aware count of ANY transactions (categorized or not, pluggy or manual)
+ * that land in a given window. Used to decide whether the "next bill" arrow
+ * should be enabled: if the window has zero lançamentos there is nothing to
+ * navigate to.
+ */
+function countTransactionsWithShifts(
+  scope: Scope,
+  current: BillWindow,
+  previous: BillWindow,
+  next: BillWindow,
+): number {
+  const { column, value } = scopeClause(scope);
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS total
+       FROM transactions t
+       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+       WHERE ${column} = ?
+         AND (
+              (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
+           OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
+           OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+         )`,
+    )
+    .get(
+      value,
+      current.periodStart, current.periodEnd,
+      previous.periodStart, previous.periodEnd,
+      next.periodStart, next.periodEnd,
+    ) as SumRow;
+  return row.total ?? 0;
+}
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;

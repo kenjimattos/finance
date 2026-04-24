@@ -190,6 +190,9 @@ export interface BillBreakdown {
   delta: number;
   categories: BillCategoryBreakdown[];
   installments: BillInstallmentBreakdown[];
+  /** True when the immediately following bill window has any transactions
+   *  (shift-aware). Drives whether the "→" arrow is enabled. */
+  hasNextBillTransactions: boolean;
 }
 
 // ---------- Cash Flow ----------
