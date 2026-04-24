@@ -8,11 +8,12 @@ A **self-hosted, single-user** credit card spending manager backed by [Pluggy](h
 
 ## Transaction identity model
 
-`transactions.id` is a **locally-generated UUID** (stable forever). `provider_transaction_id` holds the Pluggy-issued ID, which Pluggy may recycle for unrelated purchases. On every sync, a SHA-256 identity hash (`account_id + date + amount + merchant_slug`) is compared against the stored hash for that `provider_transaction_id`. Three outcomes:
+`transactions.id` is a **locally-generated UUID** (stable forever). `provider_transaction_id` holds the Pluggy-issued ID, which Pluggy may recycle for unrelated purchases. On every sync, a SHA-256 identity hash (`date + amount + merchant_slug` — **no `account_id`**, so it is portable across reconnections) is compared to detect duplicates. Four outcomes:
 
-1. No existing row with that provider ID → insert (new local UUID).
-2. Hashes match (or stored hash is NULL — migrated rows before first sync) → update only mutable fields (`status`, `bill_id`, `raw_json`). User work (categories, splits, overrides) is untouched.
-3. Hash mismatch → **recycled ID**: keep old row intact, insert new row with a new local UUID, write audit entry to `transaction_sync_conflicts`.
+1. Provider ID found, hashes match (or stored hash is NULL — migrated rows before first sync) → update only mutable fields (`status`, `bill_id`, `raw_json`). User work (categories, splits, overrides) is untouched.
+2. Provider ID found, hash mismatch → **recycled ID**: keep old row intact, insert new row with a new local UUID, write audit entry to `transaction_sync_conflicts`.
+3. Provider ID not found, hash matches an existing `pluggy` row → **reconnect**: Pluggy issued new IDs for the same physical card. Update that row with the new provider ID instead of inserting a duplicate.
+4. Provider ID not found, no hash match → genuinely new transaction, insert (new local UUID).
 
 All five FK tables (`transaction_categories`, `transaction_bill_overrides`, `transaction_description_overrides`, `bill_payment_tags`, `transaction_splits`) reference `transactions.id` (local UUID). Manual transactions have `provider_transaction_id = NULL`.
 
