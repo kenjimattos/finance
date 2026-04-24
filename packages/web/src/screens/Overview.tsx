@@ -327,11 +327,8 @@ export function Overview({
     let delta = 0;
     breakdownQueries.forEach((q) => {
       if (!q.data) return;
-      const allSlot = q.data.groups.find((g) => g.groupId === null);
-      if (allSlot) {
-        total += allSlot.total;
-        delta += allSlot.delta;
-      }
+      total += q.data.total;
+      delta += q.data.delta;
     });
     return { grandTotal: total, grandDelta: delta };
   }, [breakdownQueries]);
@@ -342,9 +339,7 @@ export function Overview({
     const map = new Map<number, { id: number; name: string; color: string; total: number }>();
     breakdownQueries.forEach((q) => {
       if (!q.data) return;
-      const allSlot = q.data.groups.find((g) => g.groupId === null);
-      if (!allSlot) return;
-      for (const cat of allSlot.categories) {
+      for (const cat of q.data.categories) {
         const existing = map.get(cat.id);
         if (existing) {
           existing.total += cat.total;
@@ -689,8 +684,7 @@ function AccountCard({
     },
   });
 
-  const allSlot = breakdown?.groups.find((g) => g.groupId === null);
-  const total = allSlot?.total ?? 0;
+  const total = breakdown?.total ?? 0;
   const displayName =
     settings.display_name ?? account.name ?? item.connector_name ?? 'Conta';
 
@@ -730,9 +724,9 @@ function AccountCard({
           </span>
         )}
 
-        {allSlot && (() => {
-          const d = formatDelta(allSlot.delta);
-          const dir = allSlot.delta > 0.01 ? 'higher' : allSlot.delta < -0.01 ? 'lower' : 'flat';
+        {breakdown && (() => {
+          const d = formatDelta(breakdown.delta);
+          const dir = breakdown.delta > 0.01 ? 'higher' : breakdown.delta < -0.01 ? 'lower' : 'flat';
           return (
             <span className="mt-2 flex items-center gap-1.5 font-body text-xs text-[color:var(--color-ink-muted)]">
               <span

@@ -170,18 +170,6 @@ export interface BillInstallmentBreakdown {
   totalInstallments: number;
 }
 
-export interface BillGroupBreakdown {
-  /** null for the "all" slot; number for a concrete card group */
-  groupId: number | null;
-  name: string;
-  color: string | null;
-  total: number;
-  previousTotal: number;
-  delta: number;
-  categories: BillCategoryBreakdown[];
-  installments: BillInstallmentBreakdown[];
-}
-
 export interface BillBreakdown {
   itemId: string;
   accountId: string | null;
@@ -197,8 +185,11 @@ export interface BillBreakdown {
   previousPeriodEnd: string;
   nextPeriodStart: string;
   nextPeriodEnd: string;
-  /** First entry is always "Todos" (groupId: null). Empty groups are filtered out. */
-  groups: BillGroupBreakdown[];
+  total: number;
+  previousTotal: number;
+  delta: number;
+  categories: BillCategoryBreakdown[];
+  installments: BillInstallmentBreakdown[];
 }
 
 // ---------- Cash Flow ----------

@@ -8,7 +8,8 @@ import {
   type Account,
 } from '../lib/api';
 import { CardSettingsSetup } from '../components/CardSettingsSetup';
-import { BillCardGrid } from '../components/BillCardGrid';
+import { BillHeader } from '../components/BillHeader';
+import { CardGroupFilterBar } from '../components/CardGroupFilterBar';
 import { CategoryTabs, type CategoryTabFilter } from '../components/CategoryTabs';
 import { TransactionInbox } from '../components/TransactionInbox';
 import { CardGroupsManager } from '../components/CardGroupsManager';
@@ -170,17 +171,6 @@ function AccountDashboard({
     enabled: !!settingsQ.data,
   });
 
-  const selectedGroup = useMemo(() => {
-    if (!breakdownQ.data) return null;
-    if (cardGroupFilter === 'all') {
-      return breakdownQ.data.groups.find((g) => g.groupId == null) ?? null;
-    }
-    if (cardGroupFilter === 'none') return null;
-    return (
-      breakdownQ.data.groups.find((g) => g.groupId === cardGroupFilter) ?? null
-    );
-  }, [breakdownQ.data, cardGroupFilter]);
-
   if (needsSetup) {
     return <CardSettingsSetup itemId={itemId} accountId={accountId} />;
   }
@@ -198,15 +188,9 @@ function AccountDashboard({
 
   return (
     <>
-      <BillCardGrid
+      <BillHeader
         breakdown={breakdownQ.data}
         itemId={itemId}
-        accountId={accountId}
-        selected={cardGroupFilter}
-        onSelect={(f) => {
-          setCardGroupFilter(f);
-          setCategoryFilter('all');
-        }}
         offset={billOffset}
         onChangeOffset={(next) => {
           // Right arrow is forward in time → cap at 0 (the open bill).
@@ -216,15 +200,24 @@ function AccountDashboard({
           setCardGroupFilter('all');
           setCategoryFilter('all');
         }}
-        onManageCards={() => setManagerOpen(true)}
         onManageRules={() => setRulesOpen(true)}
       />
       <SplitSummaryCard
         accountId={accountId}
         offset={billOffset}
       />
+      <CardGroupFilterBar
+        itemId={itemId}
+        accountId={accountId}
+        selected={cardGroupFilter}
+        onSelect={(f) => {
+          setCardGroupFilter(f);
+          setCategoryFilter('all');
+        }}
+        onManageCards={() => setManagerOpen(true)}
+      />
       <CategoryTabs
-        categories={selectedGroup?.categories ?? []}
+        categories={breakdownQ.data.categories}
         selected={categoryFilter}
         onSelect={setCategoryFilter}
       />
