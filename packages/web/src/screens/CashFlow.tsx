@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { api } from '../lib/api';
@@ -74,13 +74,25 @@ export function CashFlow({
   // Current month is always visible; up to 5 previous months are behind a toggle.
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  const [projectionOpen, setProjectionOpen] = useState(false);
+  const PROJECTION_STORAGE_KEY = 'cashflow:projectionCount';
+  const PROJECTION_MAX = 12;
+  const [projectionCount, setProjectionCount] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0;
+    const raw = window.localStorage.getItem(PROJECTION_STORAGE_KEY);
+    const n = raw == null ? 0 : Number(raw);
+    return Number.isFinite(n) && n >= 0 ? Math.min(n, PROJECTION_MAX) : 0;
+  });
+  useEffect(() => {
+    window.localStorage.setItem(PROJECTION_STORAGE_KEY, String(projectionCount));
+  }, [projectionCount]);
 
-  const { historyMonths, projectionMonth, allVisibleMonths } = useMemo(() => {
-    if (!rangeQ.data?.lastMonth) return { historyMonths: [], projectionMonth: null, allVisibleMonths: [] };
+  const { historyMonths, projectionMonths, allVisibleMonths } = useMemo(() => {
+    if (!rangeQ.data?.lastMonth) return { historyMonths: [], projectionMonths: [], allVisibleMonths: [] };
     const [ey, em] = rangeQ.data.lastMonth.split('-').map(Number);
     const current = { year: ey, month: em };
-    const projection = addMonth(ey, em, 1);
+
+    const projections: Array<{ year: number; month: number }> = [];
+    for (let i = 1; i <= projectionCount; i++) projections.push(addMonth(ey, em, i));
 
     // Up to 5 months before the current, capped by firstMonth.
     const history: Array<{ year: number; month: number }> = [];
@@ -95,14 +107,14 @@ export function CashFlow({
     }
 
     const visible = historyOpen ? [...history, current] : [current];
-    if (projectionOpen) visible.push(projection);
+    visible.push(...projections);
 
     return {
       historyMonths: history,
-      projectionMonth: projection,
+      projectionMonths: projections,
       allVisibleMonths: visible,
     };
-  }, [rangeQ.data, historyOpen, projectionOpen]);
+  }, [rangeQ.data, historyOpen, projectionCount]);
 
   // Only fetch months that are visible — avoids 12 parallel requests on load.
   const queries = useQueries({
@@ -339,17 +351,30 @@ export function CashFlow({
         );
       })}
 
-      {/* Projection toggle */}
-      {projectionMonth && (
-        <button
-          type="button"
-          onClick={() => setProjectionOpen((o) => !o)}
-          className="mb-8 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
-        >
-          {projectionOpen
-            ? '− ocultar projeção'
-            : `+ projeção ${monthLabel(projectionMonth.year, projectionMonth.month)}`}
-        </button>
+      {/* Projection controls */}
+      {rangeQ.data?.lastMonth && (
+        <div className="mb-8 flex items-center gap-4 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)]">
+          <button
+            type="button"
+            onClick={() => setProjectionCount((n) => Math.min(n + 1, PROJECTION_MAX))}
+            disabled={projectionCount >= PROJECTION_MAX}
+            className="transition-colors hover:text-[color:var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-[color:var(--color-ink-muted)]"
+          >
+            + projetar mês
+          </button>
+          {projectionCount > 0 && (
+            <>
+              <span className="text-[color:var(--color-ink-faint)]">·</span>
+              <button
+                type="button"
+                onClick={() => setProjectionCount((n) => Math.max(n - 1, 0))}
+                className="transition-colors hover:text-[color:var(--color-accent)]"
+              >
+                − remover último ({monthLabel(projectionMonths[projectionMonths.length - 1].year, projectionMonths[projectionMonths.length - 1].month)})
+              </button>
+            </>
+          )}
+        </div>
       )}
 
     </motion.section>
