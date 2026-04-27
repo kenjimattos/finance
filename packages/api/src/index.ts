@@ -3,11 +3,14 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import cookieParser from 'cookie-parser';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { ZodError } from 'zod';
 
 import { config } from './config.js';
+import { authRouter } from './routes/auth.js';
+import { authMiddleware } from './middleware/auth.js';
 import { connectRouter } from './routes/connect.js';
 import { itemsRouter } from './routes/items.js';
 import { transactionsRouter } from './routes/transactions.js';
@@ -25,13 +28,20 @@ const app = express();
 
 app.use(helmet({ contentSecurityPolicy: false }));
 if (config.CORS_ORIGIN) {
-  app.use(cors({ origin: config.CORS_ORIGIN }));
+  app.use(cors({ origin: config.CORS_ORIGIN, credentials: true }));
 }
 app.use(express.json());
+app.use(cookieParser());
 app.use(morgan('dev'));
 app.use(rateLimit({ windowMs: 60_000, max: 120 }));
 
+if (!config.APP_PASSWORD) {
+  console.warn('[auth] APP_PASSWORD not set — authentication disabled');
+}
+
 app.get('/health', (_req, res) => res.json({ ok: true }));
+app.use(authRouter);
+app.use(authMiddleware);
 
 app.use(connectRouter);
 app.use(itemsRouter);

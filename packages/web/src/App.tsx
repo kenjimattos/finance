@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './lib/api';
+import { Login } from './screens/Login';
 import { Onboarding } from './screens/Onboarding';
 import { Overview } from './screens/Overview';
 import { Dashboard } from './screens/Dashboard';
@@ -14,7 +15,18 @@ import { CashFlow } from './screens/CashFlow';
  *  - Click account card → Dashboard (per-account detail)
  */
 export function App() {
-  const itemsQ = useQuery({ queryKey: ['items'], queryFn: api.listItems });
+  const queryClient = useQueryClient();
+  const authQ = useQuery({
+    queryKey: ['auth'],
+    queryFn: api.getAuthMe,
+    retry: false,
+  });
+
+  const itemsQ = useQuery({
+    queryKey: ['items'],
+    queryFn: api.listItems,
+    enabled: authQ.data?.authenticated === true,
+  });
 
   const [overviewMonth, setOverviewMonth] = useState<{
     year: number;
@@ -28,6 +40,28 @@ export function App() {
   } | null>(null);
 
   const [cashflowOpen, setCashflowOpen] = useState(false);
+
+  if (authQ.isLoading) {
+    return (
+      <>
+        <div className="page-rule" aria-hidden="true" />
+        <Skeleton />
+      </>
+    );
+  }
+
+  if (!authQ.data?.authenticated) {
+    return (
+      <>
+        <div className="page-rule" aria-hidden="true" />
+        <Login
+          onAuthenticated={() =>
+            queryClient.invalidateQueries({ queryKey: ['auth'] })
+          }
+        />
+      </>
+    );
+  }
 
   return (
     <>

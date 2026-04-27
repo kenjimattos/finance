@@ -13,6 +13,7 @@ async function request<T>(
   init: RequestInit = {},
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
+    credentials: 'include',
     ...init,
     headers: {
       'Content-Type': 'application/json',
@@ -582,4 +583,12 @@ export const api = {
     if (offset !== undefined && offset !== 0) qs.set('offset', String(offset));
     return request<SplitSummary>(`/bills/current/split-summary?${qs}`);
   },
+
+  getAuthMe: () => request<{ authenticated: boolean }>('/auth/me'),
+  login: (password: string) =>
+    request<{ ok: boolean }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+  logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 };

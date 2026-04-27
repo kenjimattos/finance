@@ -7,6 +7,7 @@ const schema = z.object({
   PORT: z.coerce.number().default(3333),
   CORS_ORIGIN: z.string().optional(),
   DATABASE_PATH: z.string().min(1, 'DATABASE_PATH is required'),
+  APP_PASSWORD: z.string().optional(),
 });
 
 export const config = schema.parse(process.env);
