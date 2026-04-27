@@ -2,8 +2,9 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { config } from '../config.js';
 
-const DB_PATH = 'data/finance.sqlite';
+const DB_PATH = config.DATABASE_PATH;
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
 export const db = new Database(DB_PATH);
