@@ -4,14 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-
 ## [1.3.3] - 2026-04-27
 
 ### Added
 
 - **Deploy no Railway**: `railway.toml` com build/start/healthcheck. Express serve o build do Vite como arquivos estáticos em produção (`NODE_ENV=production`), eliminando a necessidade de Nginx ou processo separado.
 - **`.npmrc` com `legacy-peer-deps=true`**: garante que `npm install` funcione no Railway sem falhar nas peer deps do React 19.
+- **Proteção por senha**: variável de ambiente `APP_PASSWORD` ativa autenticação em toda a API. Quando definida, todas as rotas retornam 401 sem o cookie de sessão válido. Se ausente, auth é desabilitada (dev local). Rotas públicas: `GET /health`, `GET /auth/me`, `POST /auth/login`, `POST /auth/logout`.
+- **Cookie de sessão persistente**: `httpOnly`, `SameSite=strict`, `Secure` em produção, `maxAge` de 10 anos — sem expiração para uso pessoal. Token é um HMAC-SHA256 determinístico da senha; trocar `APP_PASSWORD` invalida todos os cookies existentes automaticamente, sem banco de sessões.
+- **Tela de login**: exibida antes de qualquer conteúdo carregar quando o usuário não está autenticado. Estilo editorial do projeto — campo de senha com borda inferior, botão sublinhado, mensagem de erro inline.
 
 ### Changed
 
