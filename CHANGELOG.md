@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-04-27
+
+### Added
+
+- **Deploy no Railway**: `railway.toml` com build/start/healthcheck. Express serve o build do Vite como arquivos estáticos em produção (`NODE_ENV=production`), eliminando a necessidade de Nginx ou processo separado.
+- **`.npmrc` com `legacy-peer-deps=true`**: garante que `npm install` funcione no Railway sem falhar nas peer deps do React 19.
+
+### Changed
+
+- **`DATABASE_PATH` obrigatório via env**: o caminho do SQLite saiu do código e virou variável de ambiente obrigatória — sem ela a API falha na inicialização. Localmente configurado em `.env` (`data/finance.sqlite`), no Railway apontará para o volume persistente (`/data/finance.sqlite`).
+- **`CORS_ORIGIN` agora opcional**: quando não definida, o middleware de CORS é ignorado. Em produção (frontend e API na mesma origem), a variável não precisa ser configurada.
+- **Helmet sem CSP**: `contentSecurityPolicy: false` para compatibilidade com o SPA servido pelo Express.
+
 ## [1.3.2] - 2026-04-27
 
 ### Added
