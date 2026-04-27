@@ -3,6 +3,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { ZodError } from 'zod';
 
 import { config } from './config.js';
@@ -21,8 +23,10 @@ import { splitsRouter } from './routes/splits.js';
 
 const app = express();
 
-app.use(helmet());
-app.use(cors({ origin: config.CORS_ORIGIN }));
+app.use(helmet({ contentSecurityPolicy: false }));
+if (config.CORS_ORIGIN) {
+  app.use(cors({ origin: config.CORS_ORIGIN }));
+}
 app.use(express.json());
 app.use(morgan('dev'));
 app.use(rateLimit({ windowMs: 60_000, max: 120 }));
@@ -41,6 +45,15 @@ app.use(categorizeRouter);
 app.use(manualEntriesRouter);
 app.use(cashflowRouter);
 app.use(splitsRouter);
+
+if (process.env.NODE_ENV === 'production') {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const webDist = join(__dirname, '..', '..', 'web', 'dist');
+  app.use(express.static(webDist));
+  app.get('*', (_req, res) => {
+    res.sendFile(join(webDist, 'index.html'));
+  });
+}
 
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof ZodError) {
