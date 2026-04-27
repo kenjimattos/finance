@@ -6,15 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-04-27
+
 ### Added
 
-- **Dashboard: soma dos valores selecionados na barra de ação em lote**: ao marcar checkboxes no inbox, a barra flutuante agora exibe o total em BRL ao lado da contagem de transações selecionadas. Soma `t.amount` direto (DEBIT positivo, CREDIT negativo) — útil para conferir antes de aplicar uma categoria/divisão em lote.
+- **Dashboard: soma dos valores selecionados na barra de ação em lote**: ao marcar checkboxes no inbox, a barra flutuante exibe o total em BRL ao lado da contagem. Soma `t.amount` direto (DEBIT positivo, CREDIT negativo) — útil para conferir antes de aplicar categoria/divisão em lote.
+- **Overview: botão de remoção de banco**: `RemoveBank` aparece no cabeçalho da toolbar ao lado do `ManageBankButton`, permitindo remover uma conexão bancária sem precisar entrar em configurações separadas.
 
 ### Changed
 
-- **Dashboard: navegação de fatura agora permite avançar**: a seta "→" do `BillHeader` deixa de travar em `offset = 0` e passa a ser habilitada quando o próximo ciclo tem lançamentos (incluindo shifts ±1). O backend retorna `hasNextBillTransactions` em `GET /bills/current/breakdown`, computado com o mesmo padrão shift-aware de três janelas (current/previous/next). Os labels "fecha em/fechou em" e "vence em/venceu em" agora se baseiam na data real vs hoje, já que ciclos futuros são navegáveis.
-- **Overview: navegação de mês agora permite avançar**: a seta "→" deixa de travar em `defaultMonth + 1` e passa a ser habilitada quando o mês seguinte tem lançamentos no fluxo de caixa — apenas `bank_transaction` (realizada) ou `manual_entry` (autorada). Atividade de cartão fica de fora do critério: `credit_card_bill` é projeção que existe para todo mês futuro em qualquer conta configurada, e a navegação da fatura já é governada pelo próprio `hasNextBillTransactions` no Dashboard. Uma query de cashflow do mês +1 é feita em paralelo só para isso.
-- **CashFlow: projeções múltiplas**: o toggle único de projeção foi substituído por controles `+ projetar mês` e `− remover último`, permitindo estender a visualização em até 12 meses à frente. A quantidade é persistida em `localStorage` (`cashflow:projectionCount`). Remover afeta apenas meses de projeção (que contêm só lançamentos manuais); meses com dados bancários reais não têm botão de remover.
+- **Dashboard: navegação de fatura permite avançar**: a seta "→" do `BillHeader` deixa de travar em `offset = 0` e é habilitada quando o próximo ciclo tem lançamentos (incluindo shifts ±1). O backend retorna `hasNextBillTransactions` em `GET /bills/current/breakdown`, computado com o padrão shift-aware de três janelas. Os labels "fecha em/fechou em" e "vence em/venceu em" passam a derivar da data real vs hoje, já que ciclos futuros são navegáveis.
+- **Overview: navegação de mês permite avançar**: a seta "→" deixa de travar em `defaultMonth + 1` e é habilitada quando o mês seguinte tem lançamentos reais no fluxo de caixa (`bank_transaction` ou `manual_entry`). Atividade de cartão fica fora do critério — `credit_card_bill` existe para todo mês futuro configurado e seria sempre verdadeiro.
+- **Overview: `ManageBankButton` consolida ações de banco num dropdown**: o card "adicionar banco" saiu do grid e virou um botão inline na toolbar (`+ Adicionar banco` / `Remover`). Simplifica a gestão sem ocupar espaço no grid de contas.
+- **CashFlow: projeções múltiplas com `+ projetar mês` / `− remover último`**: o toggle único foi substituído por controles incrementais que permitem estender a visualização em até 12 meses. A quantidade é persistida em `localStorage` (`cashflow:projectionCount`). Meses com dados bancários reais não têm botão de remover.
 
 ## [1.3.1] - 2026-04-24
 
