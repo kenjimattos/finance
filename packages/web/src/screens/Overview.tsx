@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PluggyConnect } from 'react-pluggy-connect';
 import { motion } from 'motion/react';
@@ -418,7 +418,8 @@ export function Overview({
           </div>
           <div className="flex items-center gap-4">
             <SyncAllButton items={items} />
-            <AddBankCard />
+            <ManageBankButton configuredCards={configured}  />
+  
           </div>
         </div>
       </div>
@@ -1179,6 +1180,55 @@ function RemoveBank({ account, item }: { item: Item; account: Account }) {
           🅧
         </span>
       </button>
+    </div>
+  );
+}
+
+// ── Manage banks ───────────────────────────────────────────────
+function ManageBankButton({
+  configuredCards,
+}: {
+  configuredCards?: Array<{ item: Item; account: Account; settings: AccountSettings }>;
+}) {
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [menuRef]);
+
+  return (
+    <div ref={menuRef}>
+      <button
+        type="button"
+        onClick={() => setShowMenu((s) => !s)}
+        className="flex items-center justify-center gap-2 px-5 py-8 text-center transition-colors hover:border-[color:var(--color-ink-muted)]"
+      >
+        <span className="shrink-0 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]">
+          Gerenciar bancos
+        </span>
+      </button>
+
+      {showMenu && (
+        <div className="mt-2 border shadow-lg absolute">
+          {configuredCards && configuredCards.length > 0 && (
+            <ul>
+              {configuredCards.map(({ item, account }) => {
+                return <RemoveBank key={account.id} item={item} account={account}/>;
+              })}
+            </ul>
+          )}
+          <AddBank />
+        </div>
+      )}
     </div>
   );
 }
