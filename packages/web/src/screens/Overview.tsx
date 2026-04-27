@@ -1147,3 +1147,37 @@ function AddBankCard() {
     </>
   );
 }
+// ─── Remove bank Button ─────────────────────────────────────────
+
+function RemoveBank({ account, item }: { item: Item; account: Account }) {
+  const queryClient = useQueryClient();
+  const deleteMut = useMutation({
+    mutationFn: (item: Item) => api.deleteItem(item.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
+    },
+  });
+  return (
+    <div className="flex items-center justify-center gap-2 px-5 py-4">
+      <span className="w-full font-body text-xs tracking-[0.14em] text-[color:var(--color-ink-muted)]">
+        {account.name}
+      </span>
+      <button
+        key={account.id}
+        type="button"
+        onClick={() => {
+          if (window.confirm(`Tem certeza que deseja remover a conta "${account.name}"?`)) {
+            deleteMut.mutate(item);
+          }
+        }}
+        className="text-left transition-colors hover:border-[color:var(--color-ink-muted)] disabled:opacity-50"
+      >
+        <span className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50">
+          🅧
+        </span>
+      </button>
+    </div>
+  );
+}
