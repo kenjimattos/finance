@@ -695,15 +695,6 @@ function AccountCard({
   loading: boolean;
   onClick: () => void;
 }) {
-  const queryClient = useQueryClient();
-  const deleteMut = useMutation({
-    mutationFn: () => api.deleteItem(item.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['items'] });
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
-    },
-  });
 
   const total = breakdown?.total ?? 0;
   const displayName =
@@ -711,21 +702,6 @@ function AccountCard({
 
   return (
     <div className="group relative flex flex-col items-start border border-[color:var(--color-paper-rule)] px-5 py-5 text-left transition-colors hover:border-[color:var(--color-ink-muted)]">
-      {/* Delete button */}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          if (confirm(`Remover "${displayName}" e todos os seus dados?`)) {
-            deleteMut.mutate();
-          }
-        }}
-        disabled={deleteMut.isPending}
-        className="absolute top-3 right-3 font-body text-xs text-[color:var(--color-ink-faint)] opacity-0 transition-opacity hover:text-[color:var(--color-accent)] group-hover:opacity-100 disabled:opacity-50"
-        aria-label={`Remover ${displayName}`}
-      >
-        remover
-      </button>
 
       {/* Main clickable area */}
       <button
