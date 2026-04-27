@@ -1067,9 +1067,9 @@ function stripInstallmentSuffix(description: string | null): string {
   return description.replace(INSTALLMENT_SUFFIX, '').trim() || '—';
 }
 
-// ─── Add bank card ──────────────────────────────────────────────────
+// ─── Add bank Button ──────────────────────────────────────────────────
 
-function AddBankCard() {
+function AddBank() {
   const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'saving' | 'syncing' | 'error'>('idle');
@@ -1115,7 +1115,7 @@ function AddBankCard() {
           tokenMut.mutate();
         }}
         disabled={tokenMut.isPending || status === 'saving' || status === 'syncing'}
-        className="flex items-center justify-center gap-2 px-5 py-8 text-center transition-colors hover:border-[color:var(--color-ink-muted)] disabled:opacity-50"
+        className="flex items-center justify-center gap-2 px-5 py-4 text-center transition-colors hover:border-[color:var(--color-ink-muted)] disabled:opacity-50"
       >
         <span className="shrink-0 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50">
           {tokenMut.isPending
@@ -1126,6 +1126,7 @@ function AddBankCard() {
                 ? 'Sincronizando…'
                 : 'Adicionar banco +'}
         </span>
+
         {(status === 'error' || tokenMut.isError) && (
           <span className="mt-1 font-body text-xs text-[color:var(--color-accent)]">
             {errorMsg ?? 'Falha ao abrir o widget. Tente novamente.'}
