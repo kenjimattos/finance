@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'motion/react';
 import { api, type Transaction } from '../lib/api';
+import { formatBRL } from '../lib/format';
 import type { CategoryTabFilter } from './CategoryTabs';
 import { TransactionRow } from './TransactionRow';
 import { CategoryTrigger } from './CategoryPicker';
@@ -276,6 +277,13 @@ export function TransactionInbox({
 
   const categories = categoriesQ.data ?? [];
 
+  const selectedTotal = useMemo(() => {
+    const all: Transaction[] = txsQ.data ?? [];
+    return all
+      .filter((t) => selected.has(t.id))
+      .reduce((sum, t) => sum + t.amount, 0);
+  }, [txsQ.data, selected]);
+
   return (
     <div className="mt-20">
       <Section
@@ -438,6 +446,9 @@ export function TransactionInbox({
             <div className="flex items-center gap-4">
               <span className="font-display text-lg text-[color:var(--color-ink)]">
                 {selected.size} selecionada{selected.size > 1 ? 's' : ''}
+              </span>
+              <span className="font-mono text-sm tabular-nums text-[color:var(--color-ink)]">
+                {formatBRL(selectedTotal)}
               </span>
               <span className="font-body text-xs text-[color:var(--color-ink-faint)]">
                 aplicar categoria em lote
