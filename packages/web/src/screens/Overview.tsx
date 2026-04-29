@@ -149,6 +149,32 @@ export function Overview({
     queryFn: () => api.getCashFlow(nextMs),
   });
 
+  // ── Carry-forward months for projected balance ──
+  // For future months the API's `openingBalance` is the bank's *current*
+  // balance, not the projected opening for that month. To get the right saldo,
+  // we mirror CashFlow's running-balance logic: fetch every month between today
+  // and the target, then accumulate entry-by-entry sequentially.
+  const carryMonths = useMemo(() => {
+    if (!isFutureMonth) return [] as { year: number; month: number }[];
+    const result: { year: number; month: number }[] = [];
+    let cursor = { year: defaultMonth.year, month: defaultMonth.month };
+    while (cursor.year < year || (cursor.year === year && cursor.month < month)) {
+      result.push(cursor);
+      cursor = addMonth(cursor.year, cursor.month, 1);
+    }
+    return result;
+  }, [isFutureMonth, defaultMonth.year, defaultMonth.month, year, month]);
+
+  const carryQueries = useQueries({
+    queries: carryMonths.map((m) => {
+      const key = `${m.year}-${m.month < 10 ? '0' : ''}${m.month}`;
+      return {
+        queryKey: ['cashflow', key],
+        queryFn: () => api.getCashFlow(key),
+      };
+    }),
+  });
+
   const cashSummary = useMemo(() => {
     const data = cashflowQ.data;
     if (!data) return null;
@@ -181,13 +207,36 @@ export function Overview({
       }
     }
     // * MARK: Cálculo do saldo
-    // Saldo: for current/past months use realized only; for future months use all entries.
-    let balanceSum = 0;
-    for (const day of data.days) {
-      if (!isFutureMonth && !day.isPast) continue;
-      for (const e of day.entries) balanceSum += e.amount;
+    // Past/current months: openingBalance + realized entries only.
+    // Future months: start from today's balance, then carry forward through every
+    // intermediate month's entries, then through the target month's entries.
+    let currentBalance: number;
+    if (isFutureMonth) {
+      // Today's balance = first carry month's openingBalance + its past entries.
+      // (Falls back to target's openingBalance if no carry months loaded yet.)
+      const firstCarry = carryQueries.find((q) => q.data)?.data;
+      const startOpening = firstCarry
+        ? firstCarry.bankAccounts.reduce((s, ba) => s + (ba.openingBalance ?? 0), 0)
+        : openingBalance;
+      let running = startOpening;
+      for (const q of carryQueries) {
+        if (!q.data) continue;
+        for (const day of q.data.days) {
+          for (const e of day.entries) running += e.amount;
+        }
+      }
+      for (const day of data.days) {
+        for (const e of day.entries) running += e.amount;
+      }
+      currentBalance = Math.round(running * 100) / 100;
+    } else {
+      let balanceSum = 0;
+      for (const day of data.days) {
+        if (!day.isPast) continue;
+        for (const e of day.entries) balanceSum += e.amount;
+      }
+      currentBalance = Math.round((openingBalance + balanceSum) * 100) / 100;
     }
-    const currentBalance = Math.round((openingBalance + balanceSum) * 100) / 100;
 
     return {
       openingBalance: Math.round(openingBalance * 100) / 100,
@@ -196,7 +245,7 @@ export function Overview({
       expenses: Math.round((expenses - cardBills) * 100) / 100,
       cardBills: Math.round(cardBills * 100) / 100,
     };
-  }, [cashflowQ.data, isFutureMonth]);
+  }, [cashflowQ.data, isFutureMonth, carryQueries]);
 
   const prevCashSummary = useMemo(() => {
     const data = prevCashflowQ.data;

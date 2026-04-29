@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Overview: saldo projetado para meses futuros**. Antes o cálculo era `openingBalance(do mês alvo) + entradas do mês alvo`, mas `openingBalance` retornado pela API é o saldo *atual* do banco — não o saldo projetado para o início daquele mês futuro. Agora, quando o mês selecionado é futuro, o Overview busca em paralelo todos os meses intermediários e acumula o running balance sequencialmente (mesma lógica usada pelo CashFlow), produzindo um saldo projetado correto.
+
 ## [1.3.3] - 2026-04-27
 
 ### Added
