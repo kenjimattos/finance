@@ -617,10 +617,11 @@ function DayGroup({
             )}
 
             {/* Date */}
-            <div className={`flex items-center gap-1 ${i > 0 && entry.type === 'manual_entry' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>
+            <div className={`flex items-center gap-1 ${i > 0 && entry.type === 'manual_entry' ? 'group-hover:opacity-100 transition-opacity' : ''}`}>
               {i === 0 || entry.type === 'manual_entry' ? (
                 <>
                   <DayCell
+                    index = {i}
                     date={day.date}
                     editable={entry.type === 'manual_entry'}
                     onSubmit={(d) => onEditDay(entry, d)}
@@ -780,10 +781,12 @@ function DescriptionCell({
 // ── Day cell ──
 
 function DayCell({
+  index,
   date,
   editable,
   onSubmit,
 }: {
+  index: number;
   date: string;
   editable: boolean;
   onSubmit: (day: number) => void;
@@ -819,7 +822,9 @@ function DayCell({
 
   return (
     <span
-      className={`font-mono text-[11px] text-[color:var(--color-ink-muted)] ${editable ? 'cursor-pointer hover:text-[color:var(--color-accent)]' : ''}`}
+      className={`font-mono text-[11px] text-[color:var(--color-ink-muted)]
+        ${editable ? 'cursor-pointer hover:text-[color:var(--color-accent)]' : ''}
+        ${index ? 'opacity-0' : ''}`}
       onClick={() => { if (editable) setEditing(true); }}
       title={editable ? 'Editar dia' : undefined}
     >
