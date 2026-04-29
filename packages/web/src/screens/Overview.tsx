@@ -105,9 +105,10 @@ export function Overview({
   // ── Target month (initialized from the first account's current due month) ──
 
   const defaultMonth = useMemo(() => {
-    if (configured.length === 0) return { year: today.getFullYear(), month: today.getMonth() + 1 };
-    const s = configured[0].settings;
-    return currentDueMonth({ closingDay: s.closing_day, dueDay: s.due_day }, today);
+    // if (configured.length === 0)
+      return { year: today.getFullYear(), month: today.getMonth() + 1};
+    // const s = configured[0].settings;
+    // return currentDueMonth({ closingDay: s.closing_day, dueDay: s.due_day }, today);
   }, [configured, today]);
 
   const year = controlledMonth?.year ?? defaultMonth.year;
