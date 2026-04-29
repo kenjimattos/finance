@@ -180,7 +180,7 @@ export function Overview({
         }
       }
     }
-
+    // * MARK: Cálculo do saldo
     // Saldo: for current/past months use realized only; for future months use all entries.
     let balanceSum = 0;
     for (const day of data.days) {
@@ -376,7 +376,7 @@ export function Overview({
     accountQueries.some((q) => q.isLoading) ||
     settingsQueries.some((q) => q.isLoading);
 
-  // ── Render ──
+  // *MARK: ── Render ──
 
   const expensesDelta = cashSummary && prevCashSummary
     ? formatDelta(cashSummary.expenses - prevCashSummary.expenses)
