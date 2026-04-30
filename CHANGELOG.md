@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- **"Selecionar todas" na seção "Já categorizadas"**: o botão já existia em "A categorizar"; agora a seção de transações já categorizadas também tem seu próprio toggle de seleção em massa, permitindo aplicar split ou recategorizar todas as visíveis de uma vez.
+
 ### Fixed
 
 - **Overview: saldo projetado para meses futuros**. Antes o cálculo era `openingBalance(do mês alvo) + entradas do mês alvo`, mas `openingBalance` retornado pela API é o saldo *atual* do banco — não o saldo projetado para o início daquele mês futuro. Agora, quando o mês selecionado é futuro, o Overview busca em paralelo todos os meses intermediários e acumula o running balance sequencialmente (mesma lógica usada pelo CashFlow), produzindo um saldo projetado correto.
