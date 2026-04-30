@@ -388,13 +388,26 @@ export function TransactionInbox({
         title="Já categorizadas"
         count={categorized.length}
         right={
-          <button
-            type="button"
-            onClick={() => setShowCategorized((v) => !v)}
-            className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-accent)]"
-          >
-            {showCategorized ? 'ocultar' : 'mostrar'}
-          </button>
+          <div className="flex items-center gap-4">
+            {showCategorized && categorized.length > 0 && (
+              <button
+                type="button"
+                onClick={() => toggleAll(categorized.map((t) => t.id))}
+                className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-accent)]"
+              >
+                {categorized.every((t) => selected.has(t.id))
+                  ? 'desmarcar'
+                  : 'selecionar todas'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowCategorized((v) => !v)}
+              className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-accent)]"
+            >
+              {showCategorized ? 'ocultar' : 'mostrar'}
+            </button>
+          </div>
         }
       >
         {showCategorized && (
