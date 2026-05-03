@@ -68,8 +68,12 @@ export function extractMerchantSlug(description: string | null | undefined): str
 
   if (!s) return null;
 
-  // Take first 3 tokens max — keeps the slug stable across noisy variants
-  const tokens = s.split(' ').filter(Boolean).slice(0, 3);
+  // Take first 5 tokens max — keeps the slug stable across noisy variants
+  // while preserving enough discriminator tokens to avoid collisions between
+  // distinct purchases at the same merchant on the same day for the same value
+  // (e.g. "ZUL 1 cartao 22LNBF" vs "ZUL 1 cartao 22LBLK" — both real, different
+  // physical parking sessions).
+  const tokens = s.split(' ').filter(Boolean).slice(0, 5);
   const slug = tokens.join(' ');
 
   // Reject slugs that are just noise (pure numbers, too short)
