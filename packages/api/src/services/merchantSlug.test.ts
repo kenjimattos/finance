@@ -51,11 +51,17 @@ describe('extractMerchantSlug', () => {
 
   // ─── Token limiting (max 3) ──────────────────────────────────────
 
-  it('keeps at most 3 tokens', () => {
+  it('keeps at most 5 tokens', () => {
     assert.equal(
-      extractMerchantSlug('ONE TWO THREE FOUR FIVE'),
-      'ONE TWO THREE',
+      extractMerchantSlug('ONE TWO THREE FOUR FIVE SIX SEVEN'),
+      'ONE TWO THREE FOUR FIVE',
     );
+  });
+
+  it('differentiates ZUL parking sessions by trailing card token', () => {
+    const a = extractMerchantSlug('ZUL 1 cartao 22LNBF      .SAO PAULO  BRA');
+    const b = extractMerchantSlug('ZUL 1 cartao 22LBLK      .SAO PAULO  BRA');
+    assert.notEqual(a, b);
   });
 
   // ─── Fuzzy collapsing ────────────────────────────────────────────

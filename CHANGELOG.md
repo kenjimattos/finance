@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- **Sync: colisão de hash perdia transações distintas no mesmo dia/valor/merchant**. O slug do merchant era truncado em 3 tokens, então `"ZUL 1 cartao 22LNBF"` e `"ZUL 1 cartao 22LBLK"` (duas sessões de estacionamento reais, mesmo dia, mesmo valor) geravam o mesmo hash de identidade e uma sobrescrevia a outra a cada sync. Limite agora é 5 tokens, preservando o discriminador final. Hashes existentes recomputados via `recompute-hashes.ts`.
 - **Overview: saldo projetado para meses futuros**. Antes o cálculo era `openingBalance(do mês alvo) + entradas do mês alvo`, mas `openingBalance` retornado pela API é o saldo *atual* do banco — não o saldo projetado para o início daquele mês futuro. Agora, quando o mês selecionado é futuro, o Overview busca em paralelo todos os meses intermediários e acumula o running balance sequencialmente (mesma lógica usada pelo CashFlow), produzindo um saldo projetado correto.
 
 ## [1.3.3] - 2026-04-27
