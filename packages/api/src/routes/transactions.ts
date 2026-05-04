@@ -524,11 +524,28 @@ async function syncItem(itemId: string) {
   // ORDER BY first_seen_at DESC means that after a recycle (two rows with the
   // same provider_transaction_id), subsequent syncs match the newer row.
   const findByProviderId = db.prepare(`
-    SELECT id, identity_hash, raw_json
+    SELECT id, identity_hash, raw_json, date, amount, description
     FROM transactions
     WHERE provider_transaction_id = ?
     ORDER BY first_seen_at DESC
     LIMIT 1
+  `);
+
+  // Used when a transaction transitions PENDING → POSTED and Pluggy adjusts
+  // the date (the original purchase date is replaced by the posting date).
+  // Same provider_id + same amount + same merchant slug = same purchase, so
+  // we update the date along with the mutable fields. User-applied overrides
+  // (categorization, splits, bill shifts) stay attached to the same row.
+  const updateTxRepost = db.prepare(`
+    UPDATE transactions SET
+      date          = ?,
+      status        = ?,
+      bill_id       = ?,
+      identity_hash = ?,
+      last_seen_at  = datetime('now'),
+      raw_json      = ?,
+      synced_at     = datetime('now')
+    WHERE id = ?
   `);
 
   // Fallback lookup by content hash — used when provider_transaction_id is
@@ -589,7 +606,7 @@ async function syncItem(itemId: string) {
       const newHash = computeIdentityHash(newDate, t.amount, t.description ?? null);
 
       const existing = findByProviderId.get(t.id) as
-        | { id: string; identity_hash: string | null; raw_json: string }
+        | { id: string; identity_hash: string | null; raw_json: string; date: string; amount: number; description: string | null }
         | undefined;
 
       if (!existing) {
@@ -617,6 +634,19 @@ async function syncItem(itemId: string) {
         // Same transaction (or first sync after migration — hash was NULL).
         // Only update fields that Pluggy legitimately changes over time.
         updateTx.run(t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existing.id);
+      } else if (
+        existing.amount === t.amount &&
+        extractMerchantSlug(existing.description) === extractMerchantSlug(t.description ?? null)
+      ) {
+        // Same provider_id + same amount + same merchant slug, but date changed:
+        // this is a PENDING→POSTED transition where Pluggy replaces the original
+        // purchase date with the posting date. Update in place (including date)
+        // so user work stays attached to the same row.
+        console.log(
+          `[sync] Repost detected for ${t.id}: ${existing.date} → ${newDate} ` +
+          `(status ${t.status ?? '?'}). Updating in place.`,
+        );
+        updateTxRepost.run(newDate, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existing.id);
       } else {
         // Recycled Pluggy ID: the incoming payload is a materially different
         // purchase. Keep the old row intact and insert the new one separately.
