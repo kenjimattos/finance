@@ -483,7 +483,7 @@ export function Overview({
         ) : cashSummary ? (
           <div>
             {/* Saldo headline */}
-            <div className="font-display text-[72px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[96px]">
+            <div className="font-display text-[48px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[56px]">
               {formatBRL(cashSummary.currentBalance)}
             </div>
             <div className="mt-2 flex items-baseline gap-4">
