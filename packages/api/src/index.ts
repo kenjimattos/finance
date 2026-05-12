@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { ZodError } from 'zod';
 
 import { config } from './config.js';
@@ -39,7 +40,29 @@ if (!config.APP_PASSWORD) {
   console.warn('[auth] APP_PASSWORD not set — authentication disabled');
 }
 
+// Match the Vite dev proxy behavior: in production the SPA is served from
+// the same origin and calls /api/*, so strip the prefix before routing.
+app.use((req, _res, next) => {
+  if (req.url.startsWith('/api/')) {
+    req.url = req.url.slice(4);
+  } else if (req.url === '/api') {
+    req.url = '/';
+  }
+  next();
+});
+
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// Static assets and the SPA shell must be reachable without auth so the
+// login UI itself can render. Data lives behind the API routes, which sit
+// after authMiddleware below.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const webDist = join(__dirname, '..', '..', 'web', 'dist');
+const serveWeb = existsSync(webDist);
+if (serveWeb) {
+  app.use(express.static(webDist));
+}
+
 app.use(authRouter);
 app.use(authMiddleware);
 
@@ -56,10 +79,7 @@ app.use(manualEntriesRouter);
 app.use(cashflowRouter);
 app.use(splitsRouter);
 
-if (process.env.NODE_ENV === 'production') {
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  const webDist = join(__dirname, '..', '..', 'web', 'dist');
-  app.use(express.static(webDist));
+if (serveWeb) {
   app.get('*', (_req, res) => {
     res.sendFile(join(webDist, 'index.html'));
   });
