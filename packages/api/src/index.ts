@@ -24,6 +24,7 @@ import { accountsRouter } from './routes/accounts.js';
 import { manualEntriesRouter } from './routes/manualEntries.js';
 import { cashflowRouter } from './routes/cashflow.js';
 import { splitsRouter } from './routes/splits.js';
+import { adminRouter } from './routes/admin.js';
 
 const app = express();
 
@@ -78,6 +79,7 @@ app.use(categorizeRouter);
 app.use(manualEntriesRouter);
 app.use(cashflowRouter);
 app.use(splitsRouter);
+app.use(adminRouter);
 
 if (serveWeb) {
   app.get('*', (_req, res) => {

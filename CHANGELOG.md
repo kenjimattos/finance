@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- **Rota temporária `POST /admin/restore-db`**: aceita o conteúdo binário de um `.sqlite` (até 100mb) via body raw, faz backup do arquivo existente (`<path>.bak.<ts>`) e sobrescreve `DATABASE_PATH`. Apaga os sidecars `-wal`/`-shm` para não reabrir o estado antigo. Usada uma única vez no deploy do Railway para popular o volume com o banco local; será removida após o seed. Protegida pelo `APP_PASSWORD` via `authMiddleware`.
 - **"Selecionar todas" na seção "Já categorizadas"**: o botão já existia em "A categorizar"; agora a seção de transações já categorizadas também tem seu próprio toggle de seleção em massa, permitindo aplicar split ou recategorizar todas as visíveis de uma vez.
 
 ### Fixed
