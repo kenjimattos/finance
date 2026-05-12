@@ -6,6 +6,9 @@
   "workspaces": [
     "packages/*"
   ],
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "npm run dev -w @finance/api & npm run dev -w @finance/web",
     "dev:api": "npm run dev -w @finance/api",
