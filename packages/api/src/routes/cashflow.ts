@@ -54,6 +54,26 @@ cashflowRouter.delete('/cashflow/bill-tag/:transactionId', (req, res) => {
 });
 
 /**
+ * PUT /cashflow/hide/:transactionId — exclude this row from the CashFlow view
+ *   (used for known visual duplicates: the bank reported the same charge twice
+ *   under different provider_ids).
+ * DELETE /cashflow/hide/:transactionId — un-hide.
+ */
+cashflowRouter.put('/cashflow/hide/:transactionId', (req, res) => {
+  const { transactionId } = req.params;
+  db.prepare(
+    'INSERT OR IGNORE INTO bank_transaction_hidden (transaction_id) VALUES (?)',
+  ).run(transactionId);
+  res.json({ ok: true, transactionId, hidden: true });
+});
+
+cashflowRouter.delete('/cashflow/hide/:transactionId', (req, res) => {
+  const { transactionId } = req.params;
+  db.prepare('DELETE FROM bank_transaction_hidden WHERE transaction_id = ?').run(transactionId);
+  res.json({ ok: true, transactionId, hidden: false });
+});
+
+/**
  * PUT  /bank-transactions/:id/description — override a bank transaction's display description.
  * DELETE /bank-transactions/:id/description — clear the override.
  */
@@ -167,7 +187,8 @@ const BANK_TX_EXCLUDE_DESCRIPTIONS = [
 
 const BANK_TX_EXCLUDE_SQL = BANK_TX_EXCLUDE_DESCRIPTIONS
   .map(() => "t.description NOT LIKE ?")
-  .join(' AND ');
+  .join(' AND ')
+  + " AND NOT EXISTS (SELECT 1 FROM bank_transaction_hidden h WHERE h.transaction_id = t.id)";
 
 const BANK_TX_EXCLUDE_PARAMS = BANK_TX_EXCLUDE_DESCRIPTIONS.map((d) => `%${d}%`);
 

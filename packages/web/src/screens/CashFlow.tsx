@@ -190,6 +190,10 @@ export function CashFlow({
       tagged ? api.untagBillPayment(id) : api.tagBillPayment(id),
     onSuccess: invalidateAll,
   });
+  const hideMut = useMutation({
+    mutationFn: (id: string) => api.hideBankTransaction(id),
+    onSuccess: invalidateAll,
+  });
   const descTxMut = useMutation({
     mutationFn: ({ id, desc }: { id: string; desc: string }) =>
       api.updateTransactionDescription(id, desc),
@@ -347,6 +351,7 @@ export function CashFlow({
                 dayManualMut.mutate({ id: Number(entry.id.replace('manual-', '')), dayOfMonth });
               }
             }}
+            onHide={(entry) => hideMut.mutate(entry.id)}
           />
         );
       })}
@@ -403,6 +408,7 @@ function MonthSection({
   onEditDesc,
   onEditAmount,
   onEditDay,
+  onHide,
 }: {
   year: number;
   month: number;
@@ -423,6 +429,7 @@ function MonthSection({
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onEditAmount: (entry: CashFlowEntry, amount: number) => void;
   onEditDay: (entry: CashFlowEntry, day: number) => void;
+  onHide: (entry: CashFlowEntry) => void;
 }) {
   const [addingEntry, setAddingEntry] = useState(false);
   const nextMs = (() => {
@@ -497,6 +504,7 @@ function MonthSection({
             onEditDesc={onEditDesc}
             onEditAmount={onEditAmount}
             onEditDay={onEditDay}
+            onHide={onHide}
             staggerIndex={di}
           />
         ))
@@ -534,6 +542,7 @@ function DayGroup({
   onEditDesc,
   onEditAmount,
   onEditDay,
+  onHide,
   staggerIndex,
 }: {
   day: CashFlowDay;
@@ -549,6 +558,7 @@ function DayGroup({
   onEditDesc: (entry: CashFlowEntry, desc: string) => void;
   onEditAmount: (entry: CashFlowEntry, amount: number) => void;
   onEditDay: (entry: CashFlowEntry, day: number) => void;
+  onHide: (entry: CashFlowEntry) => void;
   staggerIndex: number;
 }) {
   const dayOfMonth = Number(day.date.split('-')[2]);
@@ -645,6 +655,7 @@ function DayGroup({
               onDeleteManual={onDeleteManual}
               onDuplicate={() => onDuplicate(entry, dayOfMonth)}
               onDuplicateNext={() => onDuplicateNext(entry, dayOfMonth)}
+              onHide={entry.type === 'bank_transaction' ? () => onHide(entry) : undefined}
             />
 
             {/* Debit column */}
@@ -686,6 +697,7 @@ function DescriptionCell({
   onDeleteManual,
   onDuplicate,
   onDuplicateNext,
+  onHide,
 }: {
   entry: CashFlowEntry;
   manualId: number | null;
@@ -694,6 +706,7 @@ function DescriptionCell({
   onDeleteManual: (id: number) => void;
   onDuplicate: () => void;
   onDuplicateNext: () => void;
+  onHide?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -773,6 +786,17 @@ function DescriptionCell({
             ×
           </button>
         </div>
+      )}
+
+      {onHide && (
+        <button
+          type="button"
+          onClick={onHide}
+          className="ml-auto shrink-0 font-mono text-[10px] text-[color:var(--color-ink-faint)] opacity-0 transition-opacity hover:text-[color:var(--color-accent)] group-hover/desc:opacity-100"
+          title="Esconder do fluxo de caixa"
+        >
+          esconder
+        </button>
       )}
     </div>
   );
