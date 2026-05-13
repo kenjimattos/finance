@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **CashFlow: PENDING→POSTED com mudança de data duplicava transação BANK**. O fix do 1.4.0 cobriu o sync de cartão de crédito (`/transactions/sync`), mas o `/cashflow/sync` ainda tinha a lógica antiga. Quando uma transação bancária PENDING virava POSTED com data ajustada, o hash mudava e a row antiga ficava órfã enquanto uma nova era inserida. Aplica a mesma heurística (mesmo `provider_id` + mesmo `amount` + mesmo `merchantSlug` ⇒ update in-place) ao sync de fluxo de caixa.
+
 ## [1.4.0] - 2026-05-12
 
 ### Added

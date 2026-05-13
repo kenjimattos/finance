@@ -515,8 +515,22 @@ cashflowRouter.post('/cashflow/sync', async (_req, res, next) => {
       WHERE id = ?
     `);
 
+    // PENDING → POSTED: Pluggy keeps the provider_id but swaps the predicted
+    // date for the actual posting date. Update in place (including date) so
+    // user overrides on the row stay attached.
+    const updateTxRepost = db.prepare(`
+      UPDATE transactions SET
+        date          = ?,
+        status        = ?,
+        identity_hash = ?,
+        last_seen_at  = datetime('now'),
+        raw_json      = ?,
+        synced_at     = datetime('now')
+      WHERE id = ?
+    `);
+
     const findByProviderId = db.prepare(`
-      SELECT id, identity_hash, raw_json
+      SELECT id, identity_hash, raw_json, date, amount, description
       FROM transactions
       WHERE provider_transaction_id = ?
       ORDER BY first_seen_at DESC
@@ -557,7 +571,7 @@ cashflowRouter.post('/cashflow/sync', async (_req, res, next) => {
         const newHash = cashflowIdentityHash(newDate, t.amount, t.description ?? null);
 
         const existing = findByProviderId.get(t.id) as
-          | { id: string; identity_hash: string | null; raw_json: string }
+          | { id: string; identity_hash: string | null; raw_json: string; date: string; amount: number; description: string | null }
           | undefined;
 
         if (!existing) {
@@ -578,6 +592,15 @@ cashflowRouter.post('/cashflow/sync', async (_req, res, next) => {
           }
         } else if (existing.identity_hash === null || existing.identity_hash === newHash) {
           updateTx.run(t.status ?? null, newHash, newPayload, existing.id);
+        } else if (
+          existing.amount === t.amount &&
+          extractMerchantSlug(existing.description) === extractMerchantSlug(t.description ?? null)
+        ) {
+          console.log(
+            `[cashflow-sync] Repost detected for ${t.id}: ${existing.date} → ${newDate} ` +
+            `(status ${t.status ?? '?'}). Updating in place.`,
+          );
+          updateTxRepost.run(newDate, t.status ?? null, newHash, newPayload, existing.id);
         } else {
           const newLocalId = randomUUID();
           console.warn(
