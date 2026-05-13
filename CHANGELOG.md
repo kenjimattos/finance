@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- **Hide flag for visually-duplicate bank rows.** Pluggy sometimes returns one conceptual bank charge as two distinct transactions with different `provider_id`s, dates, and descriptions (e.g. the same Comgas debit appearing as `"DA  COMGAS 65363710"` on one day and `"Débito automático DA COMGAS 65363710"` on the next). Both are legitimate to Pluggy; no heuristic can safely merge them without false positives elsewhere. A new `bank_transaction_hidden` table lets the user mark a row as a known duplicate; the row stays in `bank_transactions` (so subsequent syncs still touch it and balance snapshots stay consistent) but is excluded from both the `/cashflow` listing and the running-balance sums. Surfaced as a hover-only "esconder" button on every bank row in the CashFlow ledger. Reversible via `DELETE /cashflow/hide/:id` (no UI for un-hide yet).
+
 ### Changed
 
 - **BANK transactions moved out of the shared `transactions` table.** Bank and credit-card transactions now live in separate tables (`bank_transactions` + `transactions`) with separate sync paths, because their identity models diverge: credit-card `provider_transaction_id`s are observed to be recycled across installment refreshes, while bank ones are stable but the surrounding fields (description, date) drift as Pluggy enriches metadata between syncs. The shared dedup heuristic (date + amount + merchant slug hash) was generating false positives on BANK whenever Pluggy enriched a description (e.g. `"TED D INT5c20eee1"` → `"TED enviada Kenji Mattos Kinoshita"`), inserting a duplicate row under the same provider_id.
