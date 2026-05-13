@@ -6,9 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
-### Fixed
+### Changed
 
-- **CashFlow: PENDING→POSTED com mudança de data duplicava transação BANK**. O fix do 1.4.0 cobriu o sync de cartão de crédito (`/transactions/sync`), mas o `/cashflow/sync` ainda tinha a lógica antiga. Quando uma transação bancária PENDING virava POSTED com data ajustada, o hash mudava e a row antiga ficava órfã enquanto uma nova era inserida. Aplica a mesma heurística (mesmo `provider_id` + mesmo `amount` + mesmo `merchantSlug` ⇒ update in-place) ao sync de fluxo de caixa.
+- **BANK transactions moved out of the shared `transactions` table.** Bank and credit-card transactions now live in separate tables (`bank_transactions` + `transactions`) with separate sync paths, because their identity models diverge: credit-card `provider_transaction_id`s are observed to be recycled across installment refreshes, while bank ones are stable but the surrounding fields (description, date) drift as Pluggy enriches metadata between syncs. The shared dedup heuristic (date + amount + merchant slug hash) was generating false positives on BANK whenever Pluggy enriched a description (e.g. `"TED D INT5c20eee1"` → `"TED enviada Kenji Mattos Kinoshita"`), inserting a duplicate row under the same provider_id.
+  - `POST /cashflow/sync` now uses a naive provider_id-keyed upsert against `bank_transactions`: if Pluggy returns a known `provider_transaction_id`, every mutable field is overwritten in place (date, description, amount, status, raw_json); otherwise insert. No identity hash, no recycle-detection branch.
+  - The bill-tag and description-override join tables for BANK rows moved to their own siblings (`bank_bill_payment_tags`, `bank_transaction_description_overrides`).
+  - `PUT/DELETE /transactions/:id/description` (only ever used for BANK) was replaced by `PUT/DELETE /bank-transactions/:id/description`. Frontend updated.
+  - `POST /transactions/sync` no longer fetches BANK transactions (it still upserts BANK account metadata and balance snapshots).
+
+### Migration
+
+- An idempotent migration moves existing BANK rows from `transactions` to `bank_transactions`, repoints attached description overrides and bill tags to the new sister tables, and dedupes by `provider_transaction_id` (keeping the most recently seen row, migrating user work from stale rows before deleting them). The migration only runs while BANK rows still exist in `transactions`; subsequent boots are a no-op.
 
 ## [1.4.0] - 2026-05-12
 

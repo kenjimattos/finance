@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Transaction } from 'pluggy-sdk';
 import { pluggy } from '../services/pluggy.js';
@@ -8,7 +8,6 @@ import {
   computeBillWindowAtOffset,
   findOffsetForDueMonth,
 } from '../services/billWindow.js';
-import { extractMerchantSlug } from '../services/merchantSlug.js';
 
 export const cashflowRouter = Router();
 
@@ -19,10 +18,8 @@ export const cashflowRouter = Router();
 cashflowRouter.get('/cashflow/range', (_req, res) => {
   const row = db
     .prepare(
-      `SELECT MIN(t.date) AS first_date, MAX(t.date) AS last_date
-       FROM transactions t
-       JOIN accounts a ON a.id = t.account_id
-       WHERE a.type = 'BANK'`,
+      `SELECT MIN(date) AS first_date, MAX(date) AS last_date
+       FROM bank_transactions`,
     )
     .get() as { first_date: string | null; last_date: string | null };
 
@@ -45,15 +42,56 @@ cashflowRouter.get('/cashflow/range', (_req, res) => {
 cashflowRouter.put('/cashflow/bill-tag/:transactionId', (req, res) => {
   const { transactionId } = req.params;
   db.prepare(
-    `INSERT OR IGNORE INTO bill_payment_tags (transaction_id) VALUES (?)`,
+    `INSERT OR IGNORE INTO bank_bill_payment_tags (transaction_id) VALUES (?)`,
   ).run(transactionId);
   res.json({ ok: true, transactionId, tagged: true });
 });
 
 cashflowRouter.delete('/cashflow/bill-tag/:transactionId', (req, res) => {
   const { transactionId } = req.params;
-  db.prepare('DELETE FROM bill_payment_tags WHERE transaction_id = ?').run(transactionId);
+  db.prepare('DELETE FROM bank_bill_payment_tags WHERE transaction_id = ?').run(transactionId);
   res.json({ ok: true, transactionId, tagged: false });
+});
+
+/**
+ * PUT  /bank-transactions/:id/description — override a bank transaction's display description.
+ * DELETE /bank-transactions/:id/description — clear the override.
+ */
+cashflowRouter.put('/bank-transactions/:id/description', (req, res, next) => {
+  try {
+    const txId = req.params.id;
+    const { description } = z
+      .object({ description: z.string().min(1) })
+      .parse(req.body);
+
+    const tx = db.prepare('SELECT id FROM bank_transactions WHERE id = ?').get(txId);
+    if (!tx) {
+      res.status(404).json({ error: 'Bank transaction not found' });
+      return;
+    }
+
+    db.prepare(
+      `INSERT INTO bank_transaction_description_overrides (transaction_id, description)
+       VALUES (?, ?)
+       ON CONFLICT(transaction_id) DO UPDATE SET description = excluded.description`,
+    ).run(txId, description);
+
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+cashflowRouter.delete('/bank-transactions/:id/description', (req, res, next) => {
+  try {
+    const txId = req.params.id;
+    db.prepare(
+      'DELETE FROM bank_transaction_description_overrides WHERE transaction_id = ?',
+    ).run(txId);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
 });
 
 interface AccountRow {
@@ -180,7 +218,7 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
       const maxRow = db
         .prepare(
           `SELECT MAX(t.date) AS max_date
-           FROM transactions t
+           FROM bank_transactions t
            WHERE t.account_id IN (${ph})
              AND t.date >= ? AND t.date <= ?
              AND ${BANK_TX_EXCLUDE_SQL}`,
@@ -239,7 +277,7 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
           const row = db
             .prepare(
               `SELECT COALESCE(SUM(t.amount), 0) AS total
-               FROM transactions t
+               FROM bank_transactions t
                WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
                  AND ${BANK_TX_EXCLUDE_SQL}`,
             )
@@ -255,7 +293,7 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
         const row = db
           .prepare(
             `SELECT COALESCE(SUM(t.amount), 0) AS total
-             FROM transactions t
+             FROM bank_transactions t
              WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
                AND ${BANK_TX_EXCLUDE_SQL}`,
           )
@@ -266,7 +304,7 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
         const row = db
           .prepare(
             `SELECT COALESCE(SUM(t.amount), 0) AS total
-             FROM transactions t
+             FROM bank_transactions t
              WHERE t.account_id = ? AND t.date >= ?
                AND ${BANK_TX_EXCLUDE_SQL}`,
           )
@@ -288,9 +326,9 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
                   COALESCE(o.description, t.description) AS description,
                   t.amount, t.type,
                   CASE WHEN bp.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_bill_tagged
-           FROM transactions t
-           LEFT JOIN transaction_description_overrides o ON o.transaction_id = t.id
-           LEFT JOIN bill_payment_tags bp ON bp.transaction_id = t.id
+           FROM bank_transactions t
+           LEFT JOIN bank_transaction_description_overrides o ON o.transaction_id = t.id
+           LEFT JOIN bank_bill_payment_tags bp ON bp.transaction_id = t.id
            WHERE t.account_id IN (${placeholders})
              AND t.date >= ? AND t.date <= ?
              AND ${BANK_TX_EXCLUDE_SQL}
@@ -449,22 +487,20 @@ function toYmd(d: Date | string): string {
   return `${y}-${m}-${day}`;
 }
 
-function cashflowIdentityHash(
-  date: string,
-  amount: number,
-  description: string | null,
-): string {
-  const slug = extractMerchantSlug(description) ?? '';
-  return createHash('sha256')
-    .update(`${date}|${amount}|${slug}`)
-    .digest('hex')
-    .slice(0, 32);
-}
-
 /**
- * POST /cashflow/sync — sync only BANK accounts and their transactions.
- * Lighter than the full /transactions/sync which also pulls credit accounts,
- * bills, and credit card transactions.
+ * POST /cashflow/sync — sync BANK accounts and their transactions into
+ * `bank_transactions`. The sync logic is intentionally naive:
+ *   - if Pluggy returns a `provider_transaction_id` we have already seen,
+ *     overwrite every mutable field on that row (date, description, amount,
+ *     status, raw_json);
+ *   - otherwise insert a new row.
+ *
+ * No identity_hash, no "recycled ID" heuristic. We treat Pluggy's
+ * provider_transaction_id as authoritative for BANK because we have not
+ * observed it being recycled, and the previous heuristic (date+amount+slug
+ * hash) caused false positives when Pluggy enriched descriptions between
+ * syncs. If a real recycle ever happens, the new payload simply overwrites
+ * the old row — we will see it in the data and react then.
  */
 cashflowRouter.post('/cashflow/sync', async (_req, res, next) => {
   try {
@@ -498,123 +534,49 @@ cashflowRouter.post('/cashflow/sync', async (_req, res, next) => {
     `);
 
     const insertTx = db.prepare(`
-      INSERT INTO transactions
+      INSERT INTO bank_transactions
         (id, provider_transaction_id, account_id, item_id, date, description, amount,
-         amount_in_account_currency, currency_code, pluggy_category, pluggy_category_id,
-         type, status, identity_hash, raw_json, synced_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+         currency_code, pluggy_category, pluggy_category_id, type, status, raw_json, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `);
 
-    const updateTx = db.prepare(`
-      UPDATE transactions SET
-        status        = ?,
-        identity_hash = ?,
-        last_seen_at  = datetime('now'),
-        raw_json      = ?,
-        synced_at     = datetime('now')
-      WHERE id = ?
-    `);
-
-    // PENDING → POSTED: Pluggy keeps the provider_id but swaps the predicted
-    // date for the actual posting date. Update in place (including date) so
-    // user overrides on the row stay attached.
-    const updateTxRepost = db.prepare(`
-      UPDATE transactions SET
-        date          = ?,
-        status        = ?,
-        identity_hash = ?,
-        last_seen_at  = datetime('now'),
-        raw_json      = ?,
-        synced_at     = datetime('now')
+    const updateTxByProviderId = db.prepare(`
+      UPDATE bank_transactions SET
+        date         = ?,
+        description  = ?,
+        amount       = ?,
+        status       = ?,
+        last_seen_at = datetime('now'),
+        raw_json     = ?,
+        synced_at    = datetime('now')
       WHERE id = ?
     `);
 
     const findByProviderId = db.prepare(`
-      SELECT id, identity_hash, raw_json, date, amount, description
-      FROM transactions
+      SELECT id FROM bank_transactions
       WHERE provider_transaction_id = ?
-      ORDER BY first_seen_at DESC
       LIMIT 1
-    `);
-
-    const findByIdentityHash = db.prepare(`
-      SELECT id, identity_hash, raw_json
-      FROM transactions
-      WHERE identity_hash = ?
-        AND source = 'pluggy'
-      ORDER BY first_seen_at DESC
-      LIMIT 1
-    `);
-
-    const updateTxWithProvider = db.prepare(`
-      UPDATE transactions SET
-        provider_transaction_id = ?,
-        status        = ?,
-        identity_hash = ?,
-        last_seen_at  = datetime('now'),
-        raw_json      = ?,
-        synced_at     = datetime('now')
-      WHERE id = ?
-    `);
-
-    const insertConflict = db.prepare(`
-      INSERT INTO transaction_sync_conflicts
-        (provider_transaction_id, kept_transaction_id, new_transaction_id,
-         old_payload_json, new_payload_json)
-      VALUES (?, ?, ?, ?, ?)
     `);
 
     const upsertTxBatch = db.transaction((txs: Transaction[], accountId: string, itemId: string) => {
       for (const t of txs) {
         const newDate = toYmd(t.date);
         const newPayload = JSON.stringify(t);
-        const newHash = cashflowIdentityHash(newDate, t.amount, t.description ?? null);
 
-        const existing = findByProviderId.get(t.id) as
-          | { id: string; identity_hash: string | null; raw_json: string; date: string; amount: number; description: string | null }
-          | undefined;
+        const existing = findByProviderId.get(t.id) as { id: string } | undefined;
 
-        if (!existing) {
-          const existingByHash = findByIdentityHash.get(newHash) as
-            | { id: string; identity_hash: string | null; raw_json: string }
-            | undefined;
-          if (existingByHash) {
-            console.log(`[cashflow-sync] Hash match for new provider ID ${t.id} — updating existing row ${existingByHash.id}`);
-            updateTxWithProvider.run(t.id, t.status ?? null, newHash, newPayload, existingByHash.id);
-          } else {
-            insertTx.run(
-              randomUUID(), t.id, accountId, itemId, newDate,
-              t.description ?? null, t.amount,
-              t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
-              t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
-              newHash, newPayload,
-            );
-          }
-        } else if (existing.identity_hash === null || existing.identity_hash === newHash) {
-          updateTx.run(t.status ?? null, newHash, newPayload, existing.id);
-        } else if (
-          existing.amount === t.amount &&
-          extractMerchantSlug(existing.description) === extractMerchantSlug(t.description ?? null)
-        ) {
-          console.log(
-            `[cashflow-sync] Repost detected for ${t.id}: ${existing.date} → ${newDate} ` +
-            `(status ${t.status ?? '?'}). Updating in place.`,
+        if (existing) {
+          updateTxByProviderId.run(
+            newDate, t.description ?? null, t.amount, t.status ?? null,
+            newPayload, existing.id,
           );
-          updateTxRepost.run(newDate, t.status ?? null, newHash, newPayload, existing.id);
         } else {
-          const newLocalId = randomUUID();
-          console.warn(
-            `[cashflow-sync] Recycled provider ID ${t.id}: existing identity ` +
-            `${existing.identity_hash} ≠ incoming ${newHash}. Keeping old row, inserting new.`,
-          );
           insertTx.run(
-            newLocalId, t.id, accountId, itemId, newDate,
-            t.description ?? null, t.amount,
-            t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
+            randomUUID(), t.id, accountId, itemId, newDate,
+            t.description ?? null, t.amount, t.currencyCode ?? null,
             t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
-            newHash, newPayload,
+            newPayload,
           );
-          insertConflict.run(t.id, existing.id, newLocalId, existing.raw_json, newPayload);
         }
         txCount++;
       }

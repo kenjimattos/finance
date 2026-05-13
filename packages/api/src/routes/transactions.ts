@@ -219,48 +219,6 @@ export function parseCardGroupFilter(
   return { kind: 'id', id: parsed };
 }
 
-// PUT /transactions/:id/description — override a transaction's display description
-transactionsRouter.put('/transactions/:id/description', (req, res, next) => {
-  try {
-    const txId = req.params.id;
-    const { description } = z
-      .object({ description: z.string().min(1) })
-      .parse(req.body);
-
-    // Verify transaction exists.
-    const tx = db
-      .prepare('SELECT id FROM transactions WHERE id = ?')
-      .get(txId);
-    if (!tx) {
-      res.status(404).json({ error: 'Transaction not found' });
-      return;
-    }
-
-    db.prepare(
-      `INSERT INTO transaction_description_overrides (transaction_id, description)
-       VALUES (?, ?)
-       ON CONFLICT(transaction_id) DO UPDATE SET description = excluded.description`,
-    ).run(txId, description);
-
-    res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// DELETE /transactions/:id/description — remove description override
-transactionsRouter.delete('/transactions/:id/description', (req, res, next) => {
-  try {
-    const txId = req.params.id;
-    db.prepare(
-      'DELETE FROM transaction_description_overrides WHERE transaction_id = ?',
-    ).run(txId);
-    res.status(204).end();
-  } catch (err) {
-    next(err);
-  }
-});
-
 // ── Manual bill transactions ──────────────────────────────────────────
 // These let the user add transactions that Pluggy missed (e.g. the
 // connector didn't return them) directly into the transactions table
@@ -697,7 +655,12 @@ async function syncItem(itemId: string) {
       }
     }
 
-    // Transactions — fetch ALL pages for each account type.
+    // Transactions — only CREDIT accounts. BANK transactions live in their
+    // own table (`bank_transactions`) with their own naive sync, exposed
+    // via POST /cashflow/sync. Fetching them here would write duplicate
+    // rows into both tables.
+    if (account.type !== 'CREDIT') continue;
+
     let page = 1;
     let totalPages = 1;
     do {
