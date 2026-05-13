@@ -539,7 +539,7 @@ export const api = {
 
   updateTransactionDescription: (transactionId: string, description: string) =>
     request<{ ok: true }>(
-      `/transactions/${encodeURIComponent(transactionId)}/description`,
+      `/bank-transactions/${encodeURIComponent(transactionId)}/description`,
       {
         method: 'PUT',
         body: JSON.stringify({ description }),
@@ -548,7 +548,7 @@ export const api = {
 
   deleteTransactionDescription: (transactionId: string) =>
     request<void>(
-      `/transactions/${encodeURIComponent(transactionId)}/description`,
+      `/bank-transactions/${encodeURIComponent(transactionId)}/description`,
       { method: 'DELETE' },
     ),
 

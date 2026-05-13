@@ -275,6 +275,53 @@ db.exec(`
     new_payload_json        TEXT NOT NULL,
     detected_at             TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- BANK transactions live in their own table because their identity model
+  -- differs from credit cards. Pluggy provider_transaction_id is the only
+  -- stable identity signal for BANK (no installment refreshes, no observed
+  -- ID recycling); descriptions and dates can drift between syncs as Pluggy
+  -- enriches metadata. The cashflow sync trusts provider_id and overwrites
+  -- mutable fields in place — no hash machinery, no recycled ID branch.
+  -- Schema is intentionally narrower than transactions: no installment,
+  -- bill, or card columns, no identity_hash, no source.
+  CREATE TABLE IF NOT EXISTS bank_transactions (
+    id                      TEXT PRIMARY KEY,
+    provider_transaction_id TEXT,
+    account_id              TEXT NOT NULL,
+    item_id                 TEXT NOT NULL,
+    date                    TEXT NOT NULL,
+    description             TEXT,
+    amount                  REAL NOT NULL,
+    currency_code           TEXT,
+    pluggy_category         TEXT,
+    pluggy_category_id      TEXT,
+    type                    TEXT,
+    status                  TEXT,
+    raw_json                TEXT NOT NULL,
+    first_seen_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    synced_at               TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_bank_tx_account  ON bank_transactions(account_id);
+  CREATE INDEX IF NOT EXISTS idx_bank_tx_item     ON bank_transactions(item_id);
+  CREATE INDEX IF NOT EXISTS idx_bank_tx_date     ON bank_transactions(date);
+  CREATE INDEX IF NOT EXISTS idx_bank_tx_provider ON bank_transactions(provider_transaction_id);
+
+  -- Sister tables for user work attached to BANK rows.
+  CREATE TABLE IF NOT EXISTS bank_transaction_description_overrides (
+    transaction_id TEXT PRIMARY KEY,
+    description    TEXT NOT NULL,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES bank_transactions(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS bank_bill_payment_tags (
+    transaction_id TEXT PRIMARY KEY,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES bank_transactions(id) ON DELETE CASCADE
+  );
 `);
 
 // -----------------------------------------------------------------------------
@@ -580,6 +627,125 @@ db.exec(`
 db.exec(
   'CREATE INDEX IF NOT EXISTS idx_tx_provider ON transactions(provider_transaction_id)',
 );
+
+// Migration: split BANK transactions out of `transactions` into the dedicated
+// `bank_transactions` table. The two domains have different identity models
+// (see the table comment) and were entangled in the cashflow sync, causing
+// false-positive "recycled ID" duplicates when Pluggy enriched descriptions
+// between syncs. Moving BANK to its own table with a naive provider_id-based
+// sync isolates the problem and lets us observe Pluggy's BANK behavior
+// without affecting the credit-card path.
+//
+// Idempotency: only runs while BANK rows still exist in `transactions`.
+// Re-running after a successful split is a no-op.
+{
+  const bankInOld = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM transactions
+       WHERE account_id IN (SELECT id FROM accounts WHERE type = 'BANK')`,
+    )
+    .get() as { n: number };
+
+  if (bankInOld.n > 0) {
+    db.pragma('foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        // Step 1 — copy BANK rows into bank_transactions, preserving ids.
+        db.exec(`
+          INSERT INTO bank_transactions
+            (id, provider_transaction_id, account_id, item_id, date, description,
+             amount, currency_code, pluggy_category, pluggy_category_id,
+             type, status, raw_json, first_seen_at, last_seen_at, synced_at)
+          SELECT
+            id, provider_transaction_id, account_id, item_id, date, description,
+            amount, currency_code, pluggy_category, pluggy_category_id,
+            type, status, raw_json, first_seen_at, last_seen_at, synced_at
+          FROM transactions
+          WHERE account_id IN (SELECT id FROM accounts WHERE type = 'BANK')
+            AND COALESCE(source, 'pluggy') = 'pluggy';
+        `);
+
+        // Step 2 — move FK rows pointing at the migrated BANK transactions.
+        db.exec(`
+          INSERT OR IGNORE INTO bank_transaction_description_overrides
+            (transaction_id, description, created_at)
+          SELECT o.transaction_id, o.description, o.created_at
+          FROM transaction_description_overrides o
+          WHERE o.transaction_id IN (SELECT id FROM bank_transactions);
+
+          DELETE FROM transaction_description_overrides
+          WHERE transaction_id IN (SELECT id FROM bank_transactions);
+
+          INSERT OR IGNORE INTO bank_bill_payment_tags
+            (transaction_id, created_at)
+          SELECT t.transaction_id, t.created_at
+          FROM bill_payment_tags t
+          WHERE t.transaction_id IN (SELECT id FROM bank_transactions);
+
+          DELETE FROM bill_payment_tags
+          WHERE transaction_id IN (SELECT id FROM bank_transactions);
+        `);
+
+        // Step 3 — remove BANK rows from `transactions`.
+        db.exec(`
+          DELETE FROM transactions
+          WHERE account_id IN (SELECT id FROM accounts WHERE type = 'BANK')
+            AND COALESCE(source, 'pluggy') = 'pluggy';
+        `);
+
+        // Step 4 — dedupe by provider_transaction_id. Pluggy enriching a
+        // description between syncs previously caused duplicate rows under
+        // the same provider_id. Keep the most recently seen row; migrate
+        // user work from the stale rows; delete them.
+        const dupGroups = db
+          .prepare(
+            `SELECT provider_transaction_id, id, last_seen_at
+             FROM bank_transactions
+             WHERE provider_transaction_id IS NOT NULL
+               AND provider_transaction_id IN (
+                 SELECT provider_transaction_id FROM bank_transactions
+                 WHERE provider_transaction_id IS NOT NULL
+                 GROUP BY provider_transaction_id
+                 HAVING COUNT(*) > 1
+               )
+             ORDER BY provider_transaction_id, last_seen_at DESC, first_seen_at DESC`,
+          )
+          .all() as Array<{ provider_transaction_id: string; id: string; last_seen_at: string }>;
+
+        const grouped = new Map<string, string[]>();
+        for (const r of dupGroups) {
+          const arr = grouped.get(r.provider_transaction_id) ?? [];
+          arr.push(r.id);
+          grouped.set(r.provider_transaction_id, arr);
+        }
+
+        const migrateDescOv = db.prepare(
+          'UPDATE OR IGNORE bank_transaction_description_overrides SET transaction_id = ? WHERE transaction_id = ?',
+        );
+        const migrateBillTag = db.prepare(
+          'UPDATE OR IGNORE bank_bill_payment_tags SET transaction_id = ? WHERE transaction_id = ?',
+        );
+        const deleteRow = db.prepare('DELETE FROM bank_transactions WHERE id = ?');
+
+        let removed = 0;
+        for (const [, ids] of grouped) {
+          const [keep, ...stale] = ids;
+          for (const s of stale) {
+            migrateDescOv.run(keep, s);
+            migrateBillTag.run(keep, s);
+            deleteRow.run(s);
+            removed++;
+          }
+        }
+        if (removed > 0) {
+          console.log(`[migration] bank_transactions dedupe removed ${removed} stale duplicate row(s).`);
+        }
+      })();
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+  }
+}
 
 function addColumnIfMissing(table: string, column: string, decl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
