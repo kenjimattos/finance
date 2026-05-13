@@ -322,6 +322,17 @@ db.exec(`
     created_at     TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (transaction_id) REFERENCES bank_transactions(id) ON DELETE CASCADE
   );
+
+  -- Hide flag for bank rows the user knows are visual duplicates (e.g. the
+  -- bank reported the same charge twice with different metadata, and Pluggy
+  -- passed both through as distinct provider_ids). Rows here are excluded
+  -- from /cashflow but kept in bank_transactions so subsequent syncs still
+  -- touch them (and so balance math stays consistent).
+  CREATE TABLE IF NOT EXISTS bank_transaction_hidden (
+    transaction_id TEXT PRIMARY KEY,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES bank_transactions(id) ON DELETE CASCADE
+  );
 `);
 
 // -----------------------------------------------------------------------------

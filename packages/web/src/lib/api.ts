@@ -507,6 +507,12 @@ export const api = {
   untagBillPayment: (transactionId: string) =>
     request<{ ok: true }>(`/cashflow/bill-tag/${encodeURIComponent(transactionId)}`, { method: 'DELETE' }),
 
+  hideBankTransaction: (transactionId: string) =>
+    request<{ ok: true }>(`/cashflow/hide/${encodeURIComponent(transactionId)}`, { method: 'PUT' }),
+
+  unhideBankTransaction: (transactionId: string) =>
+    request<{ ok: true }>(`/cashflow/hide/${encodeURIComponent(transactionId)}`, { method: 'DELETE' }),
+
   listManualEntries: () => request<ManualEntry[]>('/manual-entries'),
 
   createManualEntry: (body: {
