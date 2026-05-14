@@ -1,9 +1,87 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { api } from '../lib/api';
 import type { CashFlowEntry, CashFlowDay, CashFlowResponse } from '../lib/api';
 import { formatBRL, formatDateShort } from '../lib/format';
+
+const isDraggable = (e: CashFlowEntry) =>
+  e.type === 'bank_transaction' || e.type === 'manual_entry';
+
+function manualIdFromEntry(id: string): number {
+  return Number(id.replace('manual-', ''));
+}
+
+/**
+ * Apply a reorder operation to a day list, returning a new days array.
+ * activeId moves to land just before overId (or to end of target day if
+ * overId is the day sentinel `__day__:YYYY-MM-DD`).
+ */
+function applyReorder(
+  days: CashFlowDay[],
+  activeId: string,
+  overId: string,
+): { days: CashFlowDay[]; sourceDate: string; targetDate: string } | null {
+  let sourceDate = '';
+  let targetDate = '';
+  let activeEntry: CashFlowEntry | null = null;
+
+  for (const d of days) {
+    for (const e of d.entries) {
+      if (e.id === activeId) {
+        sourceDate = d.date;
+        activeEntry = e;
+      }
+    }
+  }
+  if (!activeEntry) return null;
+
+  if (overId.startsWith('__day__:')) {
+    targetDate = overId.slice('__day__:'.length);
+  } else {
+    for (const d of days) {
+      for (const e of d.entries) {
+        if (e.id === overId) targetDate = d.date;
+      }
+    }
+  }
+  if (!targetDate) return null;
+
+  // Build new days, removing active from source and inserting in target.
+  const newDays: CashFlowDay[] = days.map((d) => ({
+    ...d,
+    entries: d.entries.filter((e) => e.id !== activeId),
+  }));
+
+  const target = newDays.find((d) => d.date === targetDate);
+  if (!target) return null;
+
+  if (overId.startsWith('__day__:')) {
+    // Append at the end of draggable section (before any non-draggable trailing entries).
+    // Simplest: just push to end.
+    target.entries.push(activeEntry);
+  } else {
+    const overIndex = target.entries.findIndex((e) => e.id === overId);
+    const insertAt = overIndex === -1 ? target.entries.length : overIndex;
+    target.entries.splice(insertAt, 0, activeEntry);
+  }
+
+  return { days: newDays, sourceDate, targetDate };
+}
 
 // ── Helpers ──
 
@@ -215,6 +293,72 @@ export function CashFlow({
     onSuccess: invalidateAll,
   });
 
+  // ── Drag-and-drop reorder ──
+  // Rebuilds sort_keys for affected days, persists them, and applies an
+  // optimistic update to the month's cache so the row moves instantly.
+  const handleReorder = useCallback(
+    (monthStr: string, activeId: string, overId: string) => {
+      const cacheKey = ['cashflow', monthStr];
+      const current = qc.getQueryData<CashFlowResponse>(cacheKey);
+      if (!current) return;
+
+      const result = applyReorder(current.days, activeId, overId);
+      if (!result) return;
+      const { days: newDays, sourceDate, targetDate } = result;
+
+      // Locate the active entry to check kind for cross-day rejection.
+      const activeEntry = current.days
+        .flatMap((d) => d.entries)
+        .find((e) => e.id === activeId);
+      if (!activeEntry) return;
+
+      if (
+        activeEntry.type === 'bank_transaction' &&
+        sourceDate !== targetDate
+      ) {
+        // Bank transactions cannot move between days.
+        return;
+      }
+
+      // Optimistic update.
+      qc.setQueryData<CashFlowResponse>(cacheKey, {
+        ...current,
+        days: newDays,
+      });
+
+      // Build persistence calls: for each affected day, write a fresh
+      // sort_key (1000, 2000, …) for every draggable entry in display
+      // order. The moved entry (when crossing days as a manual_entry)
+      // also gets its day_of_month updated.
+      const affected = new Set([sourceDate, targetDate]);
+      const calls: Promise<unknown>[] = [];
+
+      for (const day of newDays) {
+        if (!affected.has(day.date)) continue;
+        const draggable = day.entries.filter(isDraggable);
+        draggable.forEach((e, i) => {
+          const sortKey = (i + 1) * 1000;
+          if (e.type === 'bank_transaction') {
+            calls.push(api.setBankTransactionSortKey(e.id, sortKey));
+          } else {
+            const manualId = manualIdFromEntry(e.id);
+            const crossing = e.id === activeId && sourceDate !== targetDate;
+            const body: { sortKey: number; dayOfMonth?: number } = { sortKey };
+            if (crossing) {
+              body.dayOfMonth = Number(day.date.split('-')[2]);
+            }
+            calls.push(api.updateManualEntry(manualId, body));
+          }
+        });
+      }
+
+      Promise.allSettled(calls).then(() => {
+        qc.invalidateQueries({ queryKey: ['cashflow'] });
+      });
+    },
+    [qc],
+  );
+
   // ── Sync ──
   const [syncing, setSyncing] = useState(false);
   const handleSync = useCallback(async () => {
@@ -352,6 +496,7 @@ export function CashFlow({
               }
             }}
             onHide={(entry) => hideMut.mutate(entry.id)}
+            onReorder={(activeId, overId) => handleReorder(ms, activeId, overId)}
           />
         );
       })}
@@ -409,6 +554,7 @@ function MonthSection({
   onEditAmount,
   onEditDay,
   onHide,
+  onReorder,
 }: {
   year: number;
   month: number;
@@ -430,12 +576,38 @@ function MonthSection({
   onEditAmount: (entry: CashFlowEntry, amount: number) => void;
   onEditDay: (entry: CashFlowEntry, day: number) => void;
   onHide: (entry: CashFlowEntry) => void;
+  onReorder: (activeId: string, overId: string) => void;
 }) {
   const [addingEntry, setAddingEntry] = useState(false);
   const nextMs = (() => {
     const n = addMonth(year, month, 1);
     return `${n.year}-${pad(n.month)}`;
   })();
+
+  // Sortable item IDs in display order — used by SortableContext so dnd-kit
+  // can compute insertion points based on hover position.
+  const sortableIds = useMemo(() => {
+    if (!data) return [];
+    const ids: string[] = [];
+    for (const d of data.days) {
+      for (const e of d.entries) {
+        if (isDraggable(e)) ids.push(e.id);
+      }
+    }
+    return ids;
+  }, [data]);
+
+  const sensors = useSensors(
+    // 6px activation distance keeps text selection / clicks working.
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    onReorder(String(active.id), String(over.id));
+  };
+
   return (
     <div className="mb-10">
       {/* Month header */}
@@ -478,36 +650,40 @@ function MonthSection({
       {loading ? (
         <LedgerSkeleton />
       ) : data && data.days.length > 0 ? (
-        data.days.map((day, di) => (
-          <DayGroup
-            key={day.date}
-            day={day}
-            today={today}
-            balance={dayBalances.get(day.date) ?? null}
-            bankColors={bankColorMap}
-            bankNames={bankNames}
-            onSelectBill={() => onSelectBill(year, month)}
-            onDeleteManual={onDeleteManual}
-            onToggleBillTag={onToggleBillTag}
-            onDuplicate={(entry, dom) => onDuplicateEntry({
-              description: entry.description,
-              amount: entry.amount,
-              dayOfMonth: dom,
-              month: ms,
-            })}
-            onDuplicateNext={(entry, dom) => onDuplicateEntry({
-              description: entry.description,
-              amount: entry.amount,
-              dayOfMonth: dom,
-              month: nextMs,
-            })}
-            onEditDesc={onEditDesc}
-            onEditAmount={onEditAmount}
-            onEditDay={onEditDay}
-            onHide={onHide}
-            staggerIndex={di}
-          />
-        ))
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+            {data.days.map((day, di) => (
+              <DayGroup
+                key={day.date}
+                day={day}
+                today={today}
+                balance={dayBalances.get(day.date) ?? null}
+                bankColors={bankColorMap}
+                bankNames={bankNames}
+                onSelectBill={() => onSelectBill(year, month)}
+                onDeleteManual={onDeleteManual}
+                onToggleBillTag={onToggleBillTag}
+                onDuplicate={(entry, dom) => onDuplicateEntry({
+                  description: entry.description,
+                  amount: entry.amount,
+                  dayOfMonth: dom,
+                  month: ms,
+                })}
+                onDuplicateNext={(entry, dom) => onDuplicateEntry({
+                  description: entry.description,
+                  amount: entry.amount,
+                  dayOfMonth: dom,
+                  month: nextMs,
+                })}
+                onEditDesc={onEditDesc}
+                onEditAmount={onEditAmount}
+                onEditDay={onEditDay}
+                onHide={onHide}
+                staggerIndex={di}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       ) : !loading && (
         <p className="py-4 font-body text-sm text-[color:var(--color-ink-faint)]">
           Nenhuma movimentação.
@@ -561,9 +737,6 @@ function DayGroup({
   onHide: (entry: CashFlowEntry) => void;
   staggerIndex: number;
 }) {
-  const dayOfMonth = Number(day.date.split('-')[2]);
-  const isToday = day.date === today;
-
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -571,28 +744,191 @@ function DayGroup({
       transition={{ duration: 0.3, delay: Math.min(staggerIndex * 0.03, 0.4) }}
       className="rule-top"
     >
-      {day.entries.map((entry, i) => {
-        const isDebit = entry.amount < 0;
-        const manualId = entry.type === 'manual_entry'
-          ? Number(entry.id.replace('manual-', ''))
-          : null;
+      {day.entries.map((entry, i) => (
+        <EntryRow
+          key={entry.id}
+          entry={entry}
+          index={i}
+          day={day}
+          today={today}
+          bankColors={bankColors}
+          bankNames={bankNames}
+          balance={balance}
+          isLast={i === day.entries.length - 1}
+          onSelectBill={onSelectBill}
+          onDeleteManual={onDeleteManual}
+          onToggleBillTag={onToggleBillTag}
+          onDuplicate={onDuplicate}
+          onDuplicateNext={onDuplicateNext}
+          onEditDesc={onEditDesc}
+          onEditAmount={onEditAmount}
+          onEditDay={onEditDay}
+          onHide={onHide}
+        />
+      ))}
+    </motion.div>
+  );
+}
 
-        const isBill = entry.isBillPayment || entry.type === 'credit_card_bill';
-        const bulletColor = isBill
-          ? 'var(--color-accent)'
-          : entry.bankAccountId
-            ? bankColors.get(entry.bankAccountId) ?? 'var(--color-ink-muted)'
-            : 'var(--color-ink-faint)';
+// ── Entry row ──
 
-        const canToggleBillTag = day.isPast && entry.type === 'bank_transaction';
+function EntryRow({
+  entry,
+  index: i,
+  day,
+  today,
+  bankColors,
+  bankNames,
+  balance,
+  isLast,
+  onSelectBill,
+  onDeleteManual,
+  onToggleBillTag,
+  onDuplicate,
+  onDuplicateNext,
+  onEditDesc,
+  onEditAmount,
+  onEditDay,
+  onHide,
+}: {
+  entry: CashFlowEntry;
+  index: number;
+  day: CashFlowDay;
+  today: string;
+  bankColors: Map<string, string>;
+  bankNames: Map<string, string>;
+  balance: number | null;
+  isLast: boolean;
+  onSelectBill: () => void;
+  onDeleteManual: (id: number) => void;
+  onToggleBillTag: (entry: CashFlowEntry) => void;
+  onDuplicate: (entry: CashFlowEntry, dayOfMonth: number) => void;
+  onDuplicateNext: (entry: CashFlowEntry, dayOfMonth: number) => void;
+  onEditDesc: (entry: CashFlowEntry, desc: string) => void;
+  onEditAmount: (entry: CashFlowEntry, amount: number) => void;
+  onEditDay: (entry: CashFlowEntry, day: number) => void;
+  onHide: (entry: CashFlowEntry) => void;
+}) {
+  const draggable = isDraggable(entry);
+  const sortable = useSortable({ id: entry.id, disabled: !draggable });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortable;
 
-        return (
-          <div
-            key={entry.id}
-            className={`group grid items-center gap-x-6 py-[7px] ${day.isPast ? 'bg-[color:var(--color-paper-tint)]' : ''}`}
-            style={{ gridTemplateColumns: GRID_COLS }}
-          >
-            {/* Source / bank column */}
+  const isDebit = entry.amount < 0;
+  const manualId = entry.type === 'manual_entry' ? manualIdFromEntry(entry.id) : null;
+  const dayOfMonth = Number(day.date.split('-')[2]);
+  const isToday = day.date === today;
+
+  const isBill = entry.isBillPayment || entry.type === 'credit_card_bill';
+  const bulletColor = isBill
+    ? 'var(--color-accent)'
+    : entry.bankAccountId
+      ? bankColors.get(entry.bankAccountId) ?? 'var(--color-ink-muted)'
+      : 'var(--color-ink-faint)';
+
+  const canToggleBillTag = day.isPast && entry.type === 'bank_transaction';
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        gridTemplateColumns: GRID_COLS,
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+        position: 'relative',
+      }}
+      className={`group grid items-center gap-x-6 py-[7px] ${day.isPast ? 'bg-[color:var(--color-paper-tint)]' : ''}`}
+    >
+      {draggable && (
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          aria-label="Reordenar"
+          title="Arrastar para reordenar"
+          className="absolute -left-5 top-1/2 -translate-y-1/2 cursor-grab select-none font-mono text-[12px] leading-none text-[color:var(--color-ink-faint)] opacity-0 transition-opacity hover:text-[color:var(--color-accent)] group-hover:opacity-100 active:cursor-grabbing"
+        >
+          ⋮⋮
+        </button>
+      )}
+      <RowBody
+        entry={entry}
+        i={i}
+        day={day}
+        isToday={isToday}
+        manualId={manualId}
+        bankNames={bankNames}
+        bulletColor={bulletColor}
+        isBill={isBill}
+        canToggleBillTag={canToggleBillTag}
+        isDebit={isDebit}
+        balance={balance}
+        isLast={isLast}
+        dayOfMonth={dayOfMonth}
+        onSelectBill={onSelectBill}
+        onDeleteManual={onDeleteManual}
+        onToggleBillTag={onToggleBillTag}
+        onDuplicate={onDuplicate}
+        onDuplicateNext={onDuplicateNext}
+        onEditDesc={onEditDesc}
+        onEditAmount={onEditAmount}
+        onEditDay={onEditDay}
+        onHide={onHide}
+      />
+    </div>
+  );
+}
+
+function RowBody({
+  entry,
+  i,
+  day,
+  isToday,
+  manualId,
+  bankNames,
+  bulletColor,
+  isBill,
+  canToggleBillTag,
+  isDebit,
+  balance,
+  isLast,
+  dayOfMonth,
+  onSelectBill,
+  onDeleteManual,
+  onToggleBillTag,
+  onDuplicate,
+  onDuplicateNext,
+  onEditDesc,
+  onEditAmount,
+  onEditDay,
+  onHide,
+}: {
+  entry: CashFlowEntry;
+  i: number;
+  day: CashFlowDay;
+  isToday: boolean;
+  manualId: number | null;
+  bankNames: Map<string, string>;
+  bulletColor: string;
+  isBill: boolean;
+  canToggleBillTag: boolean;
+  isDebit: boolean;
+  balance: number | null;
+  isLast: boolean;
+  dayOfMonth: number;
+  onSelectBill: () => void;
+  onDeleteManual: (id: number) => void;
+  onToggleBillTag: (entry: CashFlowEntry) => void;
+  onDuplicate: (entry: CashFlowEntry, dayOfMonth: number) => void;
+  onDuplicateNext: (entry: CashFlowEntry, dayOfMonth: number) => void;
+  onEditDesc: (entry: CashFlowEntry, desc: string) => void;
+  onEditAmount: (entry: CashFlowEntry, amount: number) => void;
+  onEditDay: (entry: CashFlowEntry, day: number) => void;
+  onHide: (entry: CashFlowEntry) => void;
+}) {
+  return (
+    <>
+      {/* Source / bank column */}
             {entry.type === 'manual_entry' ? <span /> : (
               <div
                 className={`flex items-center gap-1.5 min-w-0 ${
@@ -674,16 +1010,11 @@ function DayGroup({
               onSubmit={(val) => onEditAmount(entry, val)}
             />
 
-            {/* Running balance — only on last row of the group */}
-            <div className="text-right font-mono text-[11px] tabular-nums text-[color:var(--color-ink-muted)]">
-              {i === day.entries.length - 1 && balance !== null
-                ? formatBRL(balance)
-                : ''}
-            </div>
-          </div>
-        );
-      })}
-    </motion.div>
+      {/* Running balance — only on last row of the group */}
+      <div className="text-right font-mono text-[11px] tabular-nums text-[color:var(--color-ink-muted)]">
+        {isLast && balance !== null ? formatBRL(balance) : ''}
+      </div>
+    </>
   );
 }
 
