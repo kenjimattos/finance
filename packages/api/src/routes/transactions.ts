@@ -225,14 +225,28 @@ export function parseCardGroupFilter(
 // with source='manual'. They participate in all bill window queries,
 // categorization, and shifts exactly like Pluggy-synced rows.
 
-const manualTxSchema = z.object({
-  accountId: z.string().min(1),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  description: z.string().min(1),
-  amount: z.number(),
-  cardLast4: z.string().optional(),
-  categoryId: z.number().int().positive().optional(),
-});
+const manualTxSchema = z
+  .object({
+    accountId: z.string().min(1),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    description: z.string().min(1),
+    amount: z.number(),
+    cardLast4: z.string().optional(),
+    categoryId: z.number().int().positive().optional(),
+    installmentNumber: z.number().int().positive().nullable().optional(),
+    totalInstallments: z.number().int().positive().nullable().optional(),
+  })
+  .refine(
+    (d) => (d.installmentNumber == null) === (d.totalInstallments == null),
+    { message: 'installmentNumber and totalInstallments must be provided together' },
+  )
+  .refine(
+    (d) =>
+      d.installmentNumber == null ||
+      d.totalInstallments == null ||
+      d.installmentNumber <= d.totalInstallments,
+    { message: 'installmentNumber must not exceed totalInstallments' },
+  );
 
 function manualTransactionType(amount: number): 'DEBIT' | 'CREDIT' {
   return amount < 0 ? 'CREDIT' : 'DEBIT';
@@ -256,8 +270,8 @@ transactionsRouter.post('/transactions/manual', (req, res, next) => {
     db.prepare(
       `INSERT INTO transactions
         (id, account_id, item_id, date, description, amount, currency_code,
-         type, source, raw_json, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'BRL', ?, 'manual', '{}', datetime('now'))`,
+         type, source, installment_number, total_installments, raw_json, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'BRL', ?, 'manual', ?, ?, '{}', datetime('now'))`,
     ).run(
       id,
       body.accountId,
@@ -266,6 +280,8 @@ transactionsRouter.post('/transactions/manual', (req, res, next) => {
       body.description,
       body.amount,
       manualTransactionType(body.amount),
+      body.installmentNumber ?? null,
+      body.totalInstallments ?? null,
     );
 
     if (body.cardLast4) {
@@ -289,12 +305,31 @@ transactionsRouter.post('/transactions/manual', (req, res, next) => {
 });
 
 // PUT /transactions/manual/:id — update a manual transaction
-const manualTxUpdateSchema = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  description: z.string().min(1).optional(),
-  amount: z.number().optional(),
-  cardLast4: z.string().nullable().optional(),
-});
+const manualTxUpdateSchema = z
+  .object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    description: z.string().min(1).optional(),
+    amount: z.number().optional(),
+    cardLast4: z.string().nullable().optional(),
+    // Installment fields must be updated as a pair; pass both null to clear.
+    installmentNumber: z.number().int().positive().nullable().optional(),
+    totalInstallments: z.number().int().positive().nullable().optional(),
+  })
+  .refine(
+    (d) => (d.installmentNumber === undefined) === (d.totalInstallments === undefined),
+    { message: 'installmentNumber and totalInstallments must be updated together' },
+  )
+  .refine(
+    (d) => (d.installmentNumber == null) === (d.totalInstallments == null),
+    { message: 'installmentNumber and totalInstallments must both be set or both cleared' },
+  )
+  .refine(
+    (d) =>
+      d.installmentNumber == null ||
+      d.totalInstallments == null ||
+      d.installmentNumber <= d.totalInstallments,
+    { message: 'installmentNumber must not exceed totalInstallments' },
+  );
 
 transactionsRouter.put('/transactions/manual/:id', (req, res, next) => {
   try {
@@ -329,6 +364,13 @@ transactionsRouter.put('/transactions/manual/:id', (req, res, next) => {
     if (body.cardLast4 !== undefined) {
       sets.push('card_last4 = ?');
       params.push(body.cardLast4);
+    }
+    // The schema guarantees both installment fields move together.
+    if (body.installmentNumber !== undefined) {
+      sets.push('installment_number = ?');
+      params.push(body.installmentNumber);
+      sets.push('total_installments = ?');
+      params.push(body.totalInstallments);
     }
 
     if (sets.length > 0) {

@@ -339,6 +339,8 @@ export function TransactionInbox({
                   description: body.description,
                   amount: body.amount,
                   cardLast4: body.cardLast4 ?? null,
+                  installmentNumber: body.installmentNumber ?? null,
+                  totalInstallments: body.totalInstallments ?? null,
                 },
               })
             }
@@ -590,6 +592,8 @@ function ManualTransactionForm({
     description: string;
     amount: number;
     cardLast4?: string;
+    installmentNumber?: number | null;
+    totalInstallments?: number | null;
   }) => void;
   onCancel: () => void;
   busy: boolean;
@@ -605,6 +609,12 @@ function ManualTransactionForm({
     initial ? String(Math.abs(initial.amount)) : '',
   );
   const [cardLast4, setCardLast4] = useState(initial?.cardLast4 ?? '');
+  const [installmentNumber, setInstallmentNumber] = useState(
+    initial?.installmentNumber != null ? String(initial.installmentNumber) : '',
+  );
+  const [totalInstallments, setTotalInstallments] = useState(
+    initial?.totalInstallments != null ? String(initial.totalInstallments) : '',
+  );
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -624,6 +634,11 @@ function ManualTransactionForm({
       y < 2000 ||
       y > 2100
     ) return;
+    // Installment fields move as a pair: both filled or both empty.
+    const iNum = installmentNumber.trim() ? parseInt(installmentNumber, 10) : null;
+    const iTot = totalInstallments.trim() ? parseInt(totalInstallments, 10) : null;
+    if ((iNum === null) !== (iTot === null)) return;
+    if (iNum !== null && iTot !== null && (iNum < 1 || iTot < 1 || iNum > iTot)) return;
     const fullDate = `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     onSubmit({
       accountId,
@@ -631,6 +646,8 @@ function ManualTransactionForm({
       description: description.trim(),
       amount: parsed,
       cardLast4: cardLast4.trim() || undefined,
+      installmentNumber: iNum,
+      totalInstallments: iTot,
     });
   }
 
@@ -639,7 +656,7 @@ function ManualTransactionForm({
       onSubmit={handleSubmit}
       className="mb-4 border-b border-[color:var(--color-paper-rule)] pb-4"
     >
-      <div className="grid grid-cols-[116px_1fr_110px_72px] items-end gap-3">
+      <div className="grid grid-cols-[116px_1fr_110px_72px_96px] items-end gap-3">
         <div className="grid grid-cols-[1fr_1fr_2fr] gap-1.5">
           <div className="min-w-0">
             <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
@@ -723,6 +740,32 @@ function ManualTransactionForm({
             placeholder="1234"
             className="w-full border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 font-mono text-xs text-[color:var(--color-ink)] outline-none placeholder:text-[color:var(--color-ink-faint)] focus:border-[color:var(--color-accent)]"
           />
+        </div>
+        <div>
+          <label className="mb-1 block font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
+            Parcela
+          </label>
+          <div className="flex items-center gap-1">
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={2}
+              value={installmentNumber}
+              onChange={(e) => setInstallmentNumber(e.target.value.replace(/\D/g, ''))}
+              placeholder="3"
+              className="w-full min-w-0 border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 text-center font-mono text-xs text-[color:var(--color-ink)] outline-none placeholder:text-[color:var(--color-ink-faint)] focus:border-[color:var(--color-accent)]"
+            />
+            <span className="font-mono text-xs text-[color:var(--color-ink-faint)]">/</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={2}
+              value={totalInstallments}
+              onChange={(e) => setTotalInstallments(e.target.value.replace(/\D/g, ''))}
+              placeholder="10"
+              className="w-full min-w-0 border-b border-[color:var(--color-ink-muted)] bg-transparent pb-1 text-center font-mono text-xs text-[color:var(--color-ink)] outline-none placeholder:text-[color:var(--color-ink-faint)] focus:border-[color:var(--color-accent)]"
+            />
+          </div>
         </div>
       </div>
       <div className="mt-3 flex items-center gap-3">

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- **Transações manuais de cartão podem ser marcadas como parceladas.** O formulário de lançamento manual no inbox da fatura ganhou um campo "Parcela" (`X / N`). Os dois valores se movem como par — ambos preenchidos ou ambos vazios — e são gravados nas colunas `installment_number` / `total_installments` da tabela `transactions`, as mesmas usadas pelas parcelas vindas da Pluggy. Com isso a linha manual exibe o badge `X/N` e participa do breakdown de parcelas da fatura e do split exatamente como uma linha sincronizada. O modelo é "linha única por parcela": cada ciclo é uma linha independente (espelha como a Pluggy entrega parceladas), sem auto-expansão em N faturas. `POST`/`PUT /transactions/manual` aceitam `installmentNumber`/`totalInstallments` (opcionais, validados juntos; passar ambos `null` no PUT limpa a marcação).
+
 ### Fixed
 
 - **Drag-and-drop do fluxo de caixa: mover para baixo agora respeita uma posição por vez.** A lógica de reordenação inseria sempre *antes* do item sob o cursor, ignorando a direção do arraste — então mover uma linha para baixo em um slot era no-op (o item alvo apenas subia para o espaço vago) e o usuário precisava mirar duas linhas abaixo. `applyReorder` agora detecta a direção pelos índices da lista plana e insere *depois* do alvo quando o arraste é para baixo, espelhando a semântica do `arrayMove` do dnd-kit.

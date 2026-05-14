@@ -457,6 +457,8 @@ export const api = {
     amount: number;
     cardLast4?: string;
     categoryId?: number;
+    installmentNumber?: number | null;
+    totalInstallments?: number | null;
   }) =>
     request<{ ok: true; id: string }>('/transactions/manual', {
       method: 'POST',
@@ -470,6 +472,8 @@ export const api = {
       description: string;
       amount: number;
       cardLast4: string | null;
+      installmentNumber: number | null;
+      totalInstallments: number | null;
     }>,
   ) =>
     request<{ ok: true }>(`/transactions/manual/${encodeURIComponent(id)}`, {
