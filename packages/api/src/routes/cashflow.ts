@@ -200,23 +200,16 @@ function addDaysIso(iso: string, days: number): string {
 }
 
 /**
- * Descriptions to exclude from BANK transaction listings and sums.
- * These are internal bookkeeping entries from certain connectors
- * (e.g. PicPay's "Retirada de saldo por lastro") that duplicate
- * real movements and break balance calculations.
+ * BANK transactions are excluded from listings and sums only when the user
+ * has explicitly hidden them via `bank_transaction_hidden`. There is no
+ * description-based blocklist: connector noise (e.g. PicPay's
+ * "Recarga em carteira" / "Retirada de saldo por lastro" trios) can't be
+ * pattern-matched safely — the "real spend" leg of such a trio has a
+ * per-recipient description with no stable string to match — so the user
+ * hides those rows by hand instead.
  */
-const BANK_TX_EXCLUDE_DESCRIPTIONS = [
-  'Retirada de saldo por lastro',
-  'Recarga em carteira via Cartão de Crédito',
-  'COM CARTAO',
-];
-
-const BANK_TX_EXCLUDE_SQL = BANK_TX_EXCLUDE_DESCRIPTIONS
-  .map(() => "t.description NOT LIKE ?")
-  .join(' AND ')
-  + " AND NOT EXISTS (SELECT 1 FROM bank_transaction_hidden h WHERE h.transaction_id = t.id)";
-
-const BANK_TX_EXCLUDE_PARAMS = BANK_TX_EXCLUDE_DESCRIPTIONS.map((d) => `%${d}%`);
+const BANK_TX_NOT_HIDDEN_SQL =
+  "NOT EXISTS (SELECT 1 FROM bank_transaction_hidden h WHERE h.transaction_id = t.id)";
 
 /**
  * GET /cashflow?month=YYYY-MM — day-by-day cash-flow view for a given month.
@@ -268,9 +261,9 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
            FROM bank_transactions t
            WHERE t.account_id IN (${ph})
              AND t.date >= ? AND t.date <= ?
-             AND ${BANK_TX_EXCLUDE_SQL}`,
+             AND ${BANK_TX_NOT_HIDDEN_SQL}`,
         )
-        .get(...bankAccountIds, firstDay, lastDay, ...BANK_TX_EXCLUDE_PARAMS) as {
+        .get(...bankAccountIds, firstDay, lastDay) as {
         max_date: string | null;
       };
       dataBoundary = maxRow.max_date
@@ -326,9 +319,9 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
               `SELECT COALESCE(SUM(t.amount), 0) AS total
                FROM bank_transactions t
                WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
-                 AND ${BANK_TX_EXCLUDE_SQL}`,
+                 AND ${BANK_TX_NOT_HIDDEN_SQL}`,
             )
-            .get(ba.id, dayAfterSnap, dayBeforeFirst, ...BANK_TX_EXCLUDE_PARAMS) as { total: number };
+            .get(ba.id, dayAfterSnap, dayBeforeFirst) as { total: number };
           opening = round2(snapBefore.balance + row.total);
         } else {
           // Snapshot is the day before firstDay — balance IS the opening.
@@ -342,9 +335,9 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
             `SELECT COALESCE(SUM(t.amount), 0) AS total
              FROM bank_transactions t
              WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
-               AND ${BANK_TX_EXCLUDE_SQL}`,
+               AND ${BANK_TX_NOT_HIDDEN_SQL}`,
           )
-          .get(ba.id, firstDay, snapAfter.date, ...BANK_TX_EXCLUDE_PARAMS) as { total: number };
+          .get(ba.id, firstDay, snapAfter.date) as { total: number };
         opening = round2(snapAfter.balance - row.total);
       } else {
         // No snapshots at all — use live Pluggy balance (original fallback).
@@ -353,9 +346,9 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
             `SELECT COALESCE(SUM(t.amount), 0) AS total
              FROM bank_transactions t
              WHERE t.account_id = ? AND t.date >= ?
-               AND ${BANK_TX_EXCLUDE_SQL}`,
+               AND ${BANK_TX_NOT_HIDDEN_SQL}`,
           )
-          .get(ba.id, firstDay, ...BANK_TX_EXCLUDE_PARAMS) as { total: number };
+          .get(ba.id, firstDay) as { total: number };
         opening = round2((ba.balance ?? 0) - row.total);
       }
 
@@ -378,10 +371,10 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
            LEFT JOIN bank_bill_payment_tags bp ON bp.transaction_id = t.id
            WHERE t.account_id IN (${placeholders})
              AND t.date >= ? AND t.date <= ?
-             AND ${BANK_TX_EXCLUDE_SQL}
+             AND ${BANK_TX_NOT_HIDDEN_SQL}
            ORDER BY t.date ASC, COALESCE(t.sort_key, 1e18) ASC, t.id ASC`,
         )
-        .all(...bankAccountIds, firstDay, yesterday, ...BANK_TX_EXCLUDE_PARAMS) as BankTxRow[];
+        .all(...bankAccountIds, firstDay, yesterday) as BankTxRow[];
     }
 
     // ── Future days: manual entries ──
