@@ -130,6 +130,7 @@ interface BankTxRow {
   amount: number;
   type: string | null;
   is_bill_tagged: number;
+  sort_key: number | null;
 }
 
 interface ManualEntryRow {
@@ -137,6 +138,7 @@ interface ManualEntryRow {
   description: string;
   amount: number;
   day_of_month: number;
+  sort_key: number | null;
 }
 
 interface CashFlowEntry {
@@ -345,7 +347,7 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
         .prepare(
           `SELECT t.id, t.account_id,  t.date,
                   COALESCE(o.description, t.description) AS description,
-                  t.amount, t.type,
+                  t.amount, t.type, t.sort_key,
                   CASE WHEN bp.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_bill_tagged
            FROM bank_transactions t
            LEFT JOIN bank_transaction_description_overrides o ON o.transaction_id = t.id
@@ -353,14 +355,19 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
            WHERE t.account_id IN (${placeholders})
              AND t.date >= ? AND t.date <= ?
              AND ${BANK_TX_EXCLUDE_SQL}
-           ORDER BY t.date ASC, t.id ASC`,
+           ORDER BY t.date ASC, COALESCE(t.sort_key, 1e18) ASC, t.id ASC`,
         )
         .all(...bankAccountIds, firstDay, yesterday, ...BANK_TX_EXCLUDE_PARAMS) as BankTxRow[];
     }
 
     // ── Future days: manual entries ──
     const manualEntries = db
-      .prepare('SELECT id, description, amount, day_of_month FROM manual_entries WHERE active = 1 AND month = ?')
+      .prepare(
+        `SELECT id, description, amount, day_of_month, sort_key
+         FROM manual_entries
+         WHERE active = 1 AND month = ?
+         ORDER BY day_of_month ASC, COALESCE(sort_key, id * 1.0) ASC, id ASC`,
+      )
       .all(monthStr) as ManualEntryRow[];
 
     // ── Future days: credit card bill outflows ──

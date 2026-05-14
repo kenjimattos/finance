@@ -361,6 +361,13 @@ addColumnIfMissing('manual_entries', 'month', 'TEXT');
 addColumnIfMissing('accounts', 'balance', 'REAL');
 addColumnIfMissing('accounts', 'subtype', 'TEXT');
 
+// sort_key for user-controlled ordering within the cashflow day grouping.
+// NULL means "use the natural order" (bank_transactions: id ASC; manual_entries: id ASC).
+// Set to a fractional REAL when the user drags a row; new positions are placed
+// midway between neighbors so any sequence of drags stays representable.
+addColumnIfMissing('bank_transactions', 'sort_key', 'REAL');
+addColumnIfMissing('manual_entries', 'sort_key', 'REAL');
+
 // Backfill balance and subtype from raw_json for existing accounts.
 db.exec(`
   UPDATE accounts
