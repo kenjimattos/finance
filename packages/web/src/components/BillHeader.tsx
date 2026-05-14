@@ -91,7 +91,7 @@ export function BillHeader({
               <button
                 type="button"
                 onClick={onManageRules}
-                className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+                className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] hidden md:inline-flex"
               >
                 regras
               </button>
