@@ -147,10 +147,10 @@ export function SplitSection({
   }
   const cols =
     columns.length === 1
-      ? 'grid-cols-1'
+      ? 'md:grid-cols-1'
       : columns.length === 2
-        ? 'grid-cols-2'
-        : 'grid-cols-3';
+        ? 'md:grid-cols-2'
+        : 'md:grid-cols-3';
 
   return (
     <section className={v.wrapperClass}>
@@ -181,7 +181,7 @@ export function SplitSection({
         </p>
       )}
 
-      <div className={`${v.gridMargin} grid ${cols} ${v.gridGap}`}>{columns}</div>
+      <div className={`md:m-${v.gridMargin} flex-col md:grid ${cols} ${v.gridGap}`}>{columns}</div>
     </section>
   );
 }
