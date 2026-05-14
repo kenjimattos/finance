@@ -70,7 +70,7 @@ const VARIANTS: Record<
     columnTotalClass: 'mt-1 font-display text-[32px] leading-none tracking-[-0.02em]',
     columnChildGap: 'mt-5',
     gridMargin: 'mt-8',
-    gridGap: 'gap-8',
+    gridGap: 'gap-4',
     catLimit: 6,
   },
 };
@@ -205,7 +205,7 @@ function SplitColumn({
 }) {
   const v = VARIANTS[variant];
   return (
-    <div>
+    <div className='p-10 border border-[color:var(--color-paper-rule)] mt-5'>
       <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
         {label}
       </div>
