@@ -1074,9 +1074,21 @@ function OverviewSplitInstallmentList({
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? installments : installments.slice(0, SPLIT_INST_LIMIT);
   const hiddenCount = installments.length - SPLIT_INST_LIMIT;
+  const total = installments.reduce((acc, i) => acc + i.amount, 0);
 
   return (
     <div>
+      <div className="mb-2.5 flex items-baseline justify-between gap-2">
+        <span className="font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
+          parcelas · {installments.length}
+        </span>
+        <span
+          className="font-mono text-[12px] tabular-nums"
+          style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
+        >
+          {formatBRL(total)}
+        </span>
+      </div>
       <ul className="space-y-2">
         {visible.map((inst) => (
           <li
