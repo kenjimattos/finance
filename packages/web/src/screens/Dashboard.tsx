@@ -14,7 +14,7 @@ import { CategoryTabs, type CategoryTabFilter } from '../components/CategoryTabs
 import { TransactionInbox } from '../components/TransactionInbox';
 import { CardGroupsManager } from '../components/CardGroupsManager';
 import { RulesManager } from '../components/RulesManager';
-import { SplitSummaryCard } from '../components/SplitSummaryPanel';
+import { SplitSection } from '../components/SplitSection';
 
 /**
  * The main screen, once a card is linked.
@@ -171,6 +171,12 @@ function AccountDashboard({
     enabled: !!settingsQ.data,
   });
 
+  const splitSummaryQ = useQuery({
+    queryKey: ['splitSummary', accountId, billOffset],
+    queryFn: () => api.getSplitSummary(accountId, billOffset),
+    enabled: !!settingsQ.data,
+  });
+
   if (needsSetup) {
     return <CardSettingsSetup itemId={itemId} accountId={accountId} />;
   }
@@ -203,10 +209,18 @@ function AccountDashboard({
         }}
         onManageRules={() => setRulesOpen(true)}
       />
-      <SplitSummaryCard
-        accountId={accountId}
-        offset={billOffset}
-      />
+      {splitSummaryQ.data && splitSummaryQ.data.totalSplitTransactions > 0 && (
+        <SplitSection
+          variant="card"
+          split={{
+            partnerOwes: splitSummaryQ.data.partnerOwes,
+            totalCount: splitSummaryQ.data.totalSplitTransactions,
+            breakdown: splitSummaryQ.data.breakdown,
+            categories: splitSummaryQ.data.categories,
+            installments: splitSummaryQ.data.installments,
+          }}
+        />
+      )}
       <CardGroupFilterBar
         itemId={itemId}
         accountId={accountId}

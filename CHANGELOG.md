@@ -8,9 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
-- **Total das parcelas exibido acima da lista, no Dashboard e no Overview.** Cada coluna da seção "Divisão" (½, dela, meu) que tem parcelas agora mostra um cabeçalho `parcelas · N` com a soma dos valores das parcelas daquela coluna, alinhado à direita no mesmo estilo monoespaçado das demais cifras. Aplicado nos dois componentes paralelos: `SplitInstallmentList` em `SplitSummaryPanel.tsx` (Dashboard) e `OverviewSplitInstallmentList` em `Overview.tsx` (Overview).
+- **Total das parcelas exibido acima da lista, no Dashboard e no Overview.** Cada coluna da seção "Divisão" (½, dela, meu) que tem parcelas agora mostra um cabeçalho `parcelas · N` com a soma dos valores das parcelas daquela coluna, alinhado à direita no mesmo estilo monoespaçado das demais cifras.
 
 - **Transações manuais de cartão podem ser marcadas como parceladas.** O formulário de lançamento manual no inbox da fatura ganhou um campo "Parcela" (`X / N`). Os dois valores se movem como par — ambos preenchidos ou ambos vazios — e são gravados nas colunas `installment_number` / `total_installments` da tabela `transactions`, as mesmas usadas pelas parcelas vindas da Pluggy. Com isso a linha manual exibe o badge `X/N` e participa do breakdown de parcelas da fatura e do split exatamente como uma linha sincronizada. O modelo é "linha única por parcela": cada ciclo é uma linha independente (espelha como a Pluggy entrega parceladas), sem auto-expansão em N faturas. `POST`/`PUT /transactions/manual` aceitam `installmentNumber`/`totalInstallments` (opcionais, validados juntos; passar ambos `null` no PUT limpa a marcação).
+
+### Changed
+
+- **Seção "Divisão" unificada em um único componente.** O Dashboard e o Overview mantinham duas implementações quase idênticas da seção de split — `SplitSummaryCard` em `SplitSummaryPanel.tsx` e `SplitSection` inline em `Overview.tsx`, com colunas, listas de categoria/parcela e `stripInstallmentSuffix` duplicados. Agora há um único componente presentational `SplitSection` em `components/SplitSection.tsx` com uma prop `variant` (`'card'` no Dashboard, `'section'` no Overview) que controla escala, eyebrow e espaçamento. Cada tela faz seu próprio fetch/agregação e passa os dados normalizados (`totalCount`, antes `totalSplitTransactions` no Dashboard). `SplitSummaryPanel.tsx` foi removido; as props mortas `year`/`month` da versão do Overview também. O toggle "+N mais" do Overview agora usa o mesmo estilo em caixa alta do Dashboard.
 
 ### Fixed
 
