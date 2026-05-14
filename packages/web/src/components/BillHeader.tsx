@@ -59,33 +59,51 @@ export function BillHeader({
       transition={{ duration: 0.4, ease: [0.2, 0.65, 0.3, 0.9] }}
       className="pt-2"
     >
-      <div className="mb-10 flex items-start justify-between gap-6">
-        <div>
-          <div className="eyebrow flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => onChangeOffset(offset - 1)}
-              aria-label="fatura anterior"
-              className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none"
-            >
-              ←
-            </button>
-            <span>
-              {isOpen
-                ? (breakdown.displayName ?? 'Fatura em aberto')
-                : breakdown.displayName
-                  ? `${breakdown.displayName} · ${formatMonthYear(breakdown.closingDate)}`
-                  : `Fatura ${formatMonthYear(breakdown.closingDate)}`}
-            </span>
-            <button
-              type="button"
-              onClick={() => onChangeOffset(offset + 1)}
-              disabled={!breakdown.hasNextBillTransactions}
-              aria-label="próxima fatura"
-              className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:text-[color:var(--color-ink-faint)] disabled:opacity-40"
-            >
-              →
-            </button>
+      <div className="mb-10 flex-col items-start justify-between gap-6">
+          <div className='flex justify-between w-full'>
+            <div className="eyebrow flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => onChangeOffset(offset - 1)}
+                aria-label="fatura anterior"
+                className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none"
+              >
+                ←
+              </button>
+              <span>
+                {isOpen
+                  ? (breakdown.displayName ?? 'Fatura em aberto')
+                  : breakdown.displayName
+                    ? `${breakdown.displayName} · ${formatMonthYear(breakdown.closingDate)}`
+                    : `Fatura ${formatMonthYear(breakdown.closingDate)}`}
+              </span>
+              <button
+                type="button"
+                onClick={() => onChangeOffset(offset + 1)}
+                disabled={!breakdown.hasNextBillTransactions}
+                aria-label="próxima fatura"
+                className="leading-none transition-colors hover:text-[color:var(--color-accent)] focus-visible:text-[color:var(--color-accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:text-[color:var(--color-ink-faint)] disabled:opacity-40"
+              >
+                →
+              </button>
+            </div>
+            <div className="flex items-center gap-6">
+              <button
+                type="button"
+                onClick={onManageRules}
+                className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
+              >
+                regras
+              </button>
+              <button
+                type="button"
+                onClick={() => sync.mutate()}
+                disabled={sync.isPending}
+                className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
+              >
+                {sync.isPending ? 'sincronizando…' : 'sincronizar ↻'}
+              </button>
+            </div>
           </div>
           <div className="mt-3 font-display text-[72px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[96px]">
             {formatBRL(breakdown.total)}
@@ -124,25 +142,6 @@ export function BillHeader({
             </span>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-5 pt-2">
-          <button
-            type="button"
-            onClick={onManageRules}
-            className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
-          >
-            regras
-          </button>
-          <button
-            type="button"
-            onClick={() => sync.mutate()}
-            disabled={sync.isPending}
-            className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
-          >
-            {sync.isPending ? 'sincronizando…' : 'sincronizar ↻'}
-          </button>
-        </div>
-      </div>
-
     </motion.section>
   );
 }
