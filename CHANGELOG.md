@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Drag-and-drop do fluxo de caixa: mover para baixo agora respeita uma posição por vez.** A lógica de reordenação inseria sempre *antes* do item sob o cursor, ignorando a direção do arraste — então mover uma linha para baixo em um slot era no-op (o item alvo apenas subia para o espaço vago) e o usuário precisava mirar duas linhas abaixo. `applyReorder` agora detecta a direção pelos índices da lista plana e insere *depois* do alvo quando o arraste é para baixo, espelhando a semântica do `arrayMove` do dnd-kit.
+
 ## [1.5.0] - 2026-05-14
 
 ### Added

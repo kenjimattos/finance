@@ -28,40 +28,46 @@ function manualIdFromEntry(id: string): number {
 
 /**
  * Apply a reorder operation to a day list, returning a new days array.
- * activeId moves to land just before overId (or to end of target day if
- * overId is the day sentinel `__day__:YYYY-MM-DD`).
+ * activeId lands relative to overId: when dragging downward it goes just
+ * *after* overId, when dragging upward just *before* it (mirroring dnd-kit's
+ * arrayMove semantics — without the direction check, moving down by one slot
+ * is a no-op because the hovered item just shifts up into the vacated spot).
+ * overId may be the day sentinel `__day__:YYYY-MM-DD`, meaning "end of day".
  */
 function applyReorder(
   days: CashFlowDay[],
   activeId: string,
   overId: string,
 ): { days: CashFlowDay[]; sourceDate: string; targetDate: string } | null {
-  let sourceDate = '';
-  let targetDate = '';
-  let activeEntry: CashFlowEntry | null = null;
-
+  // Flat draggable order across all days — the basis for direction detection.
+  const flat: Array<{ id: string; date: string }> = [];
   for (const d of days) {
     for (const e of d.entries) {
-      if (e.id === activeId) {
-        sourceDate = d.date;
-        activeEntry = e;
-      }
+      if (isDraggable(e)) flat.push({ id: e.id, date: d.date });
     }
   }
-  if (!activeEntry) return null;
 
+  const activeIdx = flat.findIndex((f) => f.id === activeId);
+  if (activeIdx === -1) return null;
+  const sourceDate = flat[activeIdx].date;
+  const activeEntry = days
+    .flatMap((d) => d.entries)
+    .find((e) => e.id === activeId)!;
+
+  let targetDate: string;
+  let overIdx: number;
   if (overId.startsWith('__day__:')) {
     targetDate = overId.slice('__day__:'.length);
+    overIdx = flat.length; // dropping onto empty day space — treat as "after end"
   } else {
-    for (const d of days) {
-      for (const e of d.entries) {
-        if (e.id === overId) targetDate = d.date;
-      }
-    }
+    overIdx = flat.findIndex((f) => f.id === overId);
+    if (overIdx === -1) return null;
+    targetDate = flat[overIdx].date;
   }
-  if (!targetDate) return null;
 
-  // Build new days, removing active from source and inserting in target.
+  const movingDown = activeIdx < overIdx;
+
+  // Build new days with active removed from its source position.
   const newDays: CashFlowDay[] = days.map((d) => ({
     ...d,
     entries: d.entries.filter((e) => e.id !== activeId),
@@ -71,12 +77,15 @@ function applyReorder(
   if (!target) return null;
 
   if (overId.startsWith('__day__:')) {
-    // Append at the end of draggable section (before any non-draggable trailing entries).
-    // Simplest: just push to end.
     target.entries.push(activeEntry);
   } else {
-    const overIndex = target.entries.findIndex((e) => e.id === overId);
-    const insertAt = overIndex === -1 ? target.entries.length : overIndex;
+    const overPos = target.entries.findIndex((e) => e.id === overId);
+    const insertAt =
+      overPos === -1
+        ? target.entries.length
+        : movingDown
+          ? overPos + 1
+          : overPos;
     target.entries.splice(insertAt, 0, activeEntry);
   }
 
