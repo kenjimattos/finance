@@ -248,36 +248,17 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
     const bankAccountIds = bankAccounts.map((a) => a.id);
 
     // ── Data coverage boundary ──
-    // The cutoff between "real data" and "projections" is driven by the
-    // last date that has actual bank transactions, not by today's date.
-    // Days up to that date show bank transactions; days after show manual
-    // entries and credit card bill outflows.
-    let dataBoundary: string; // first date NOT covered by real data
-    if (bankAccountIds.length > 0) {
-      const ph = bankAccountIds.map(() => '?').join(',');
-      const maxRow = db
-        .prepare(
-          `SELECT MAX(t.date) AS max_date
-           FROM bank_transactions t
-           WHERE t.account_id IN (${ph})
-             AND t.date >= ? AND t.date <= ?
-             AND ${BANK_TX_NOT_HIDDEN_SQL}`,
-        )
-        .get(...bankAccountIds, firstDay, lastDay) as {
-        max_date: string | null;
-      };
-      dataBoundary = maxRow.max_date
-        ? addDaysIso(maxRow.max_date, 1)
-        : firstDay;
-    } else {
-      dataBoundary = firstDay;
-    }
-
-    const dataBoundaryDay = dataBoundary <= firstDay
-      ? 0
-      : dataBoundary > lastDay
-        ? monthDays + 1
-        : Number(dataBoundary.split('-')[2]);
+    // One global cutoff: the latest date that has ANY real bank transaction,
+    // across every account and every month. Hidden rows still count — hiding
+    // is a display choice, not "data ends here". Days on or before this date
+    // are realized (show real bank transactions); days after it are
+    // projection territory (manual entries + credit card bill outflows).
+    // Deliberately NOT tied to today's date: if syncing stalls, the boundary
+    // stalls with it, instead of marking un-synced days as empty-but-realized.
+    const realizedRow = db
+      .prepare('SELECT MAX(date) AS max_date FROM bank_transactions')
+      .get() as { max_date: string | null };
+    const lastRealizedDate = realizedRow.max_date ?? '0000-00-00';
 
     // ── Compute opening balance per bank account ──
     // Find the best anchor: the closest balance snapshot to the target month.
@@ -355,10 +336,12 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
       openingBalances.set(ba.id, opening);
     }
 
-    // ── Past days: actual bank transactions (all bank accounts) ──
+    // ── Realized days: actual bank transactions (all bank accounts) ──
+    // Every bank transaction is realized by definition (its date is <=
+    // lastRealizedDate), so the whole month window is fair game — the
+    // assembly loop below places each row on its own day.
     let pastTxRows: BankTxRow[] = [];
-    if (bankAccountIds.length > 0 && dataBoundaryDay > 1) {
-      const yesterday = `${monthStr}-${pad(dataBoundaryDay - 1)}`;
+    if (bankAccountIds.length > 0) {
       const placeholders = bankAccountIds.map(() => '?').join(',');
       pastTxRows = db
         .prepare(
@@ -374,7 +357,7 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
              AND ${BANK_TX_NOT_HIDDEN_SQL}
            ORDER BY t.date ASC, COALESCE(t.sort_key, 1e18) ASC, t.id ASC`,
         )
-        .all(...bankAccountIds, firstDay, yesterday) as BankTxRow[];
+        .all(...bankAccountIds, firstDay, lastDay) as BankTxRow[];
     }
 
     // ── Future days: manual entries ──
@@ -410,8 +393,12 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
       if (offset === null) continue;
 
       const dueDay = acct.due_day;
-      // Only include if due date falls in the future portion of the month.
-      if (dueDay < dataBoundaryDay) continue;
+      // Only project the bill if its due date is still ahead of the last
+      // realized bank transaction. Once real data has moved past the due
+      // date, the actual "Pagamento de fatura" bank row represents it —
+      // projecting it again would double-count.
+      const dueDate = `${monthStr}-${pad(Math.min(dueDay, monthDays))}`;
+      if (dueDate <= lastRealizedDate) continue;
 
       // Compute bill total using the same shift-aware logic as bills.ts.
       const current = computeBillWindowAtOffset(settings, offset);
@@ -461,7 +448,7 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
 
     for (let d = 1; d <= monthDays; d++) {
       const date = `${monthStr}-${pad(d)}`;
-      const isPast = date < dataBoundary;
+      const isPast = date <= lastRealizedDate;
       const entries: CashFlowEntry[] = [];
 
       if (isPast) {
