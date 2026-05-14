@@ -533,6 +533,7 @@ export const api = {
       amount: number;
       dayOfMonth: number;
       active: boolean;
+      sortKey: number | null;
     }>,
   ) =>
     request<ManualEntry>(`/manual-entries/${id}`, {
@@ -542,6 +543,15 @@ export const api = {
 
   deleteManualEntry: (id: number) =>
     request<void>(`/manual-entries/${id}`, { method: 'DELETE' }),
+
+  setBankTransactionSortKey: (transactionId: string, sortKey: number | null) =>
+    request<{ ok: true }>(
+      `/bank-transactions/${encodeURIComponent(transactionId)}/sort-key`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ sortKey }),
+      },
+    ),
 
   updateTransactionDescription: (transactionId: string, description: string) =>
     request<{ ok: true }>(

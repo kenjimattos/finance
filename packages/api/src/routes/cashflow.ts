@@ -102,6 +102,30 @@ cashflowRouter.put('/bank-transactions/:id/description', (req, res, next) => {
   }
 });
 
+/**
+ * PUT /bank-transactions/:id/sort-key — set/clear the manual ordering key.
+ * Body: { sortKey: number | null }. Null restores natural order.
+ */
+cashflowRouter.put('/bank-transactions/:id/sort-key', (req, res, next) => {
+  try {
+    const txId = req.params.id;
+    const { sortKey } = z
+      .object({ sortKey: z.number().nullable() })
+      .parse(req.body);
+
+    const tx = db.prepare('SELECT id FROM bank_transactions WHERE id = ?').get(txId);
+    if (!tx) {
+      res.status(404).json({ error: 'Bank transaction not found' });
+      return;
+    }
+
+    db.prepare('UPDATE bank_transactions SET sort_key = ? WHERE id = ?').run(sortKey, txId);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 cashflowRouter.delete('/bank-transactions/:id/description', (req, res, next) => {
   try {
     const txId = req.params.id;
