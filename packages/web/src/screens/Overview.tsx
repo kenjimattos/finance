@@ -984,7 +984,7 @@ function ManageBankButton({
       <button
         type="button"
         onClick={() => setShowMenu((s) => !s)}
-        className="flex items-center justify-center gap-2 px-5 py-8 text-center transition-colors hover:border-[color:var(--color-ink-muted)]"
+        className="flex items-center justify-center gap-2 px-5 py-8 text-center transition-colors hover:border-[color:var(--color-ink-muted)] hidden md:inline-flex"
       >
         <span className="shrink-0 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]">
           Gerenciar bancos
