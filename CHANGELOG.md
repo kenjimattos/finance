@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- **Endpoints para atualizar `sort_key` no fluxo de caixa.** `PUT /bank-transactions/:id/sort-key { sortKey: number | null }` para transações bancárias; `PUT /manual-entries/:id` agora aceita `sortKey: number | null` junto com os demais campos. Null restaura a ordem natural.
+
 - **Coluna `sort_key` para ordenação manual no fluxo de caixa.** Adicionada a `bank_transactions` e `manual_entries` (REAL, nullable). `GET /cashflow` agora ordena dentro de cada dia por `COALESCE(sort_key, ∞)`/`COALESCE(sort_key, id*1.0)` — quando nulo, mantém a ordem natural anterior; quando preenchido, controla a posição. Preparação para o drag-and-drop de linhas no CashFlow.
 
 - **Hide flag for visually-duplicate bank rows.** Pluggy sometimes returns one conceptual bank charge as two distinct transactions with different `provider_id`s, dates, and descriptions (e.g. the same Comgas debit appearing as `"DA  COMGAS 65363710"` on one day and `"Débito automático DA COMGAS 65363710"` on the next). Both are legitimate to Pluggy; no heuristic can safely merge them without false positives elsewhere. A new `bank_transaction_hidden` table lets the user mark a row as a known duplicate; the row stays in `bank_transactions` (so subsequent syncs still touch it and balance snapshots stay consistent) but is excluded from both the `/cashflow` listing and the running-balance sums. Surfaced as a hover-only "esconder" button on every bank row in the CashFlow ledger. Reversible via `DELETE /cashflow/hide/:id` (no UI for un-hide yet).

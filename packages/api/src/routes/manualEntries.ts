@@ -76,6 +76,7 @@ const updateSchema = z.object({
   amount: z.number().optional(),
   dayOfMonth: z.number().int().min(1).max(31).optional(),
   active: z.boolean().optional(),
+  sortKey: z.number().nullable().optional(),
 });
 
 // PUT /manual-entries/:id — update an entry
@@ -93,7 +94,7 @@ manualEntriesRouter.put('/manual-entries/:id', (req, res, next) => {
     }
 
     const sets: string[] = [];
-    const vals: (string | number)[] = [];
+    const vals: (string | number | null)[] = [];
 
     if (updates.description !== undefined) {
       sets.push('description = ?');
@@ -110,6 +111,10 @@ manualEntriesRouter.put('/manual-entries/:id', (req, res, next) => {
     if (updates.active !== undefined) {
       sets.push('active = ?');
       vals.push(updates.active ? 1 : 0);
+    }
+    if (updates.sortKey !== undefined) {
+      sets.push('sort_key = ?');
+      vals.push(updates.sortKey);
     }
 
     if (sets.length > 0) {
