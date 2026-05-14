@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- **Drag-and-drop para reordenar linhas no fluxo de caixa.** Cada linha arrastável (transações bancárias e entradas manuais) exibe um handle "⋮⋮" no hover, à esquerda da linha. Arrastar permite reposicionar dentro do mesmo dia; para entradas manuais, também é possível mover entre dias (atualiza `day_of_month` automaticamente). Transações bancárias da Pluggy ficam restritas ao mesmo dia — qualquer drag entre dias é ignorado. Faturas de cartão (`credit_card_bill`) não são arrastáveis. A cada drop, os `sort_key` dos dias afetados são reescritos em múltiplos de 1000 (n × 1000), preservando margem para inserções futuras. UI otimista atualiza o cache da query antes das chamadas REST resolverem.
+
 - **Endpoints para atualizar `sort_key` no fluxo de caixa.** `PUT /bank-transactions/:id/sort-key { sortKey: number | null }` para transações bancárias; `PUT /manual-entries/:id` agora aceita `sortKey: number | null` junto com os demais campos. Null restaura a ordem natural.
 
 - **Coluna `sort_key` para ordenação manual no fluxo de caixa.** Adicionada a `bank_transactions` e `manual_entries` (REAL, nullable). `GET /cashflow` agora ordena dentro de cada dia por `COALESCE(sort_key, ∞)`/`COALESCE(sort_key, id*1.0)` — quando nulo, mantém a ordem natural anterior; quando preenchido, controla a posição. Preparação para o drag-and-drop de linhas no CashFlow.
