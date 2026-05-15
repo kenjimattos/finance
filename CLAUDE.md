@@ -94,25 +94,11 @@ Column-level migrations use `addColumnIfMissing()` in [db/index.ts](packages/api
 
 The full endpoint catalog (auth, items, sync, bills, transactions, cash flow) lives in [docs/api.md](docs/api.md). The frontend mounts `<PluggyConnect>` by rendering it (no `isOpen` prop); `onSuccess({ item })` returns the item id which is then POSTed to `/items`.
 
-### Frontend design language
+### Frontend
 
-Editorial / financial-press. Light warm-paper background (`#fbf8f4`), warm near-black ink, single burnt-orange accent (`#c2410c`). No drop-shadow cards, no gradients, no rounded-xl anything. Aesthetic is "printed broadsheet", not "SaaS dashboard".
+Editorial / financial-press aesthetic: warm paper, single burnt-orange accent, Fraunces for headlines + JetBrains Mono for currency, no shadows or gradients. Screen hierarchy is **Login → CashFlow → Overview → Dashboard** (drill-down state lives in `App.tsx`). Mobile-responsive throughout. Reusable patterns: Portal-based overlays (`CategoryPicker`, `RowActionsMenu`, `ToastLayer`), one-toast-at-a-time `ToastProvider`, `RowActionsMenu` for rare per-row actions, `SplitSection` shared between Dashboard and Overview.
 
-Type system:
-
-- **Fraunces** (variable serif) — dominates the page. Used for every heading and for the bill headline (96px / 72px narrow) and account-card totals (40px).
-- **JetBrains Mono** — currency and dates. `font-variant-numeric: tabular-nums` set project-wide for column alignment.
-- **Inter** — small UI metadata only (labels, tiny hints).
-
-Decoration: fixed CSS-only paper-grain noise overlay, fixed vertical margin rule at `left: 48px`, focus rings in the accent color, muted scrollbars. Motion is used sparingly — entrance fades for screens, slide-up for the bulk action bar and toast, card fade-in. No micro-animations scattered.
-
-The app has three primary screens in a drill-down hierarchy plus a Login gate: **Login** → **CashFlow** → **Overview** → **Dashboard** (and **Onboarding** when no bank is linked). **CashFlow** (`CashFlow.tsx`) is the top-level landing page: multi-month financial ledger with columns (origem | dia | descrição | débito | crédito | saldo), bank transactions for past days, manual entries + credit card bill outflows for future days, running balance with one global realized/projected boundary, inline editing of descriptions/amounts/dates, drag-and-drop reordering within a day, ghost row for adding new entries. Clicking a credit card bill drills into Overview. **Overview** (`Overview.tsx`): "← voltar" to CashFlow → ←/→ month navigation (auto-advances when next month has activity) → grand total with delta → aggregated category breakdown → aggregated `SplitSection` → grid of account cards plus a `ManageBankButton` dropdown (add/remove banks). Clicking an account card drills into Dashboard. **Dashboard** (`Dashboard.tsx`): "← voltar" to Overview → account tabs (if multiple) → `BillHeader` (bill-cycle arrows, giant total, delta, closing/due dates, inline regras/sincronizar actions) → `SplitSection` (partner debt breakdown) → `CardGroupFilterBar` (chips to filter the list by card group + "gerenciar" link, hidden below `md`) → `CategoryTabs` → `TransactionInbox`. App.tsx manages drill-down state: `overviewMonth` (year/month from CashFlow → Overview) and `drillDown` (itemId/accountId/offset from Overview → Dashboard), gated by the `useQuery(['auth'])` result.
-
-### Reusable UI patterns
-
-- **Portal for any overlay that needs to escape row stacking contexts.** Used by `CategoryPicker`, `RowActionsMenu`, `CardGroupsManager`, and `ToastLayer`. Common shape: `createPortal` into `document.body`, `getBoundingClientRect` via `useLayoutEffect` for position, `flip upward / right-align` when near edges, listeners for `mousedown` outside / `scroll` outside (scroll **inside** the overlay is explicitly allowed) / `resize` / `Escape`.
-- **`ToastProvider`** in [Toast.tsx](packages/web/src/components/Toast.tsx) exposes `useToast()` with `show({ message, undo?, durationMs? })`. One toast at a time; a new one replaces the previous. Hover pauses the 6s countdown. Used after a shift so the user has a recovery window (no historical bill navigation yet).
-- **`RowActionsMenu`** for rare per-row actions. Currently hosts bill-shift, manual-entry edit/delete, and split commands on each transaction row. Add more actions here before cluttering the row visually.
+Full design language, screen-by-screen layout, and pattern catalog: [docs/frontend.md](docs/frontend.md).
 
 ### Config boundary
 
