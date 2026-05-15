@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.2] - 2026-05-14
+
+### Changed
+
+- **Layout responsivo para mobile.** O app foi otimizado para uso em telas estreitas, sem custos no desktop:
+  - **CashFlow:** a tabela de fluxo de caixa colapsa em mobile mostrando apenas as colunas essenciais (descrição + saldo); débito/crédito/dia ficam visíveis apenas a partir de `md:`. Os cabeçalhos "desktop-only" são ocultados na versão mobile e a coluna de valores ganhou variantes responsivas para caber sem quebrar.
+  - **BillHeader:** os botões de ação ("gerenciar regras", "sincronizar") foram movidos para inline com a navegação de ciclo, e "gerenciar regras" é escondido em mobile (visível a partir de `md:`). O botão "adicionar banco" do Overview segue a mesma regra.
+  - **SplitSection:** o grid das colunas (½ · dela · meu) agora é responsivo com breakpoints `md:`, evitando que as três colunas apertem em telas estreitas. Estilo de card com borda e `gap` reduzido.
+
 ## [1.5.1] - 2026-05-14
 
 ### Added
