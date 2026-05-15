@@ -634,7 +634,7 @@ function MonthSection({
         className="rule-bottom grid items-baseline gap-x-2 md:gap-x-6 pb-2"
         style={{ gridTemplateColumns: 'var(--cashflow-table)' }}
       >
-        <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+        <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)] opacity-0 md:opacity-100">
           origem
         </span>
         <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
@@ -643,11 +643,14 @@ function MonthSection({
         <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
           descrição
         </span>
-        <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+        <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)] hidden md:inline">
           débito
         </span>
-        <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+        <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)] hidden md:inline">
           crédito
+        </span>
+        <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)] inline md:hidden">
+          movimentação
         </span>
         <span className="text-right font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
           saldo
@@ -1141,7 +1144,7 @@ function DescriptionCell({
         <button
           type="button"
           onClick={onHide}
-          className="ml-auto shrink-0 font-mono text-[10px] text-[color:var(--color-ink-faint)] opacity-0 transition-opacity hover:text-[color:var(--color-accent)] group-hover/desc:opacity-100"
+          className="ml-auto shrink-0 font-mono text-[10px] text-[color:var(--color-ink-faint)] opacity-0 transition-opacity hover:text-[color:var(--color-accent)] group-hover/desc:opacity-100 hidden md:inline"
           title="Esconder do fluxo de caixa"
         >
           esconder
