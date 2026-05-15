@@ -138,8 +138,6 @@ const BANK_COLORS = [
   '#5b7fa6', '#8b6fa6', '#5b9e8f', '#b08d57', '#a0756a',
 ];
 
-const GRID_COLS = '80px 64px 1fr 110px 110px 120px';
-
 // ── Main Component ──
 
 export function CashFlow({
@@ -633,8 +631,8 @@ function MonthSection({
 
       {/* Column headers */}
       <div
-        className="rule-bottom grid items-baseline gap-x-6 pb-2"
-        style={{ gridTemplateColumns: GRID_COLS }}
+        className="rule-bottom grid items-baseline gap-x-2 md:gap-x-6 pb-2"
+        style={{ gridTemplateColumns: 'var(--cashflow-table)' }}
       >
         <span className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
           origem
@@ -840,13 +838,13 @@ function EntryRow({
     <div
       ref={setNodeRef}
       style={{
-        gridTemplateColumns: GRID_COLS,
+        gridTemplateColumns: 'var(--cashflow-table)',
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.4 : 1,
         position: 'relative',
       }}
-      className={`group grid items-center gap-x-6 py-[7px] ${day.isPast ? 'bg-[color:var(--color-paper-tint)]' : ''}`}
+      className={`group grid items-center gap-x-2 md:gap-x-6 py-[7px] ${day.isPast ? 'bg-[color:var(--color-paper-tint)]' : ''}`}
     >
       {draggable && (
         <button
@@ -1111,7 +1109,7 @@ function DescriptionCell({
       )}
 
       {manualId !== null && (
-        <div className="ml-auto flex shrink-0 gap-2 opacity-0 transition-opacity group-hover/desc:opacity-100">
+        <div className="ml-auto flex shrink-0 gap-2 opacity-0 transition-opacity group-hover/desc:opacity-100 hidden md:inline">
           <button
             type="button"
             onClick={onDuplicate}
@@ -1304,7 +1302,7 @@ function NewEntryRow({
     return (
       <div
         className="rule-top grid items-center gap-x-6 py-[7px] opacity-0 transition-opacity hover:opacity-100 cursor-pointer"
-        style={{ gridTemplateColumns: GRID_COLS }}
+        style={{ gridTemplateColumns: 'var(--cashflow-table)' }}
         onClick={onActivate}
       >
         <span />
@@ -1320,7 +1318,7 @@ function NewEntryRow({
   return (
     <div
       className="rule-top grid items-center gap-x-6 py-[7px]"
-      style={{ gridTemplateColumns: GRID_COLS }}
+      style={{ gridTemplateColumns: 'var(--cashflow-table)' }}
     >
       <span />
       <input
@@ -1379,7 +1377,7 @@ function LedgerSkeleton() {
         <div
           key={i}
           className="rule-top grid items-center gap-x-6 py-3"
-          style={{ gridTemplateColumns: GRID_COLS }}
+          style={{ gridTemplateColumns: 'var(--cashflow-table)' }}
         >
           <div className="h-3 w-10 rounded-sm bg-[color:var(--color-paper-tint)]" />
           <div className="h-3 w-8 rounded-sm bg-[color:var(--color-paper-tint)]" />

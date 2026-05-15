@@ -39,6 +39,16 @@
   /* Spacing scale is Tailwind default (4px) */
 }
 
+:root {
+  --cashflow-table: 10px 30px 1fr 110px 90px;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --cashflow-table: 80px 64px 1fr 110px 110px 100px;
+  }
+}
+
 /* Reset + base */
 *,
 *::before,
