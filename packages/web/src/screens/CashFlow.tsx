@@ -1002,9 +1002,10 @@ function RowBody({
               onDuplicateNext={() => onDuplicateNext(entry, dayOfMonth)}
               onHide={entry.type === 'bank_transaction' ? () => onHide(entry) : undefined}
             />
-
+  
             {/* Debit column */}
             <AmountCell
+              classname='hidden md:inline'
               amount={isDebit ? entry.amount : null}
               color="var(--color-ink)"
               editable={entry.type === 'manual_entry'}
@@ -1013,16 +1014,26 @@ function RowBody({
 
             {/* Credit column */}
             <AmountCell
+              classname='hidden md:inline'
               amount={!isDebit ? entry.amount : null}
               color="var(--color-positive)"
               editable={entry.type === 'manual_entry'}
               onSubmit={(val) => onEditAmount(entry, val)}
             />
 
-      {/* Running balance — only on last row of the group */}
-      <div className="text-right font-mono text-[11px] tabular-nums text-[color:var(--color-ink-muted)]">
-        {isLast && balance !== null ? formatBRL(balance) : ''}
-      </div>
+            {/* Mobile amount column */}
+            <AmountCell
+              classname="inline md:hidden"
+              amount={entry.amount} // placeholder to keep the cell width consistent
+              color={isDebit ? "var(--color-ink)" : "var(--color-positive)"}
+              editable={entry.type === 'manual_entry'}
+              onSubmit={(val) => onEditAmount(entry, val)}
+            />
+
+            {/* Running balance — only on last row of the group */}
+            <div className="text-right font-mono text-[11px] tabular-nums text-[color:var(--color-ink-muted)]">
+              {isLast && balance !== null ? formatBRL(balance) : ''}
+            </div>
     </>
   );
 }
@@ -1200,11 +1211,13 @@ function DayCell({
 // ── Amount cell ──
 
 function AmountCell({
+  classname,
   amount,
   color,
   editable,
   onSubmit,
 }: {
+  classname?: string;
   amount: number | null;
   color: string;
   editable: boolean;
@@ -1213,7 +1226,7 @@ function AmountCell({
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  if (amount === null) return <div />;
+  if (amount === null) return <div className={classname} />;
 
   const handleSubmit = () => {
     const val = Number(inputRef.current?.value);
@@ -1243,7 +1256,7 @@ function AmountCell({
 
   return (
     <div
-      className={`text-right font-mono text-[13px] tabular-nums ${editable ? 'cursor-pointer hover:text-[color:var(--color-accent)]' : ''}`}
+      className={`${classname} text-right font-mono text-[13px] tabular-nums ${editable ? 'cursor-pointer hover:text-[color:var(--color-accent)]' : ''}`}
       style={{ color }}
       onClick={() => { if (editable) setEditing(true); }}
       title={editable ? 'Editar valor' : undefined}
