@@ -74,15 +74,15 @@ Both dev servers bind to `0.0.0.0`, so other devices on the local network can ac
 
 ### Data model
 
-Four independent domains in SQLite, deliberately not merged:
+SQLite, five domains deliberately not merged so each can evolve independently:
 
-1. **Pluggy credit cache** (`items`, `accounts`, `transactions`, `bills`) — read-through cache of CREDIT-account data. `accounts` is populated during sync from `fetchAccounts(itemId, 'CREDIT')` and `fetchAccounts(itemId, 'BANK')` (same table for both subtypes). BANK accounts carry `balance` and `subtype` (e.g. `CHECKING_ACCOUNT`). `raw_json` on each row keeps the full payload so new fields can surface later without a backfill. The `transactions.source` column distinguishes `'pluggy'` (synced) from `'manual'` (user-created). Manual transactions persist across re-syncs; Pluggy-sourced rows can be wiped and re-synced without losing user work.
-2. **Pluggy bank cache** (`bank_transactions`, `bank_transaction_description_overrides`, `bank_bill_payment_tags`, `bank_transaction_hidden`, `balance_snapshots`) — BANK-account transactions live in their own table to isolate CashFlow concerns from credit-card sync. Sister tables hold description overrides, the bill-payment tag (clickable source column that links a bank outflow to a credit-card bill), and a hide flag for visually-duplicate rows the bank reported twice. `balance_snapshots` stores periodic account balances used to anchor the CashFlow running balance.
-3. **User configuration** (`account_settings`, `card_groups`, `card_group_members`) — per-account closing/due days (Pluggy does not expose these), plus the user's optional grouping of physical cards by `card_last4` scoped per account. Card groups are used only to filter the transaction list (chips above the inbox); they no longer drive per-card bill totals. One card belongs to at most one group (composite primary key enforces exclusivity). Legacy `card_settings` (per-item) table remains for backward compat but the frontend writes to `account_settings`.
-4. **User work** (`user_categories`, `transaction_categories`, `category_rules`, `transaction_bill_overrides`, `transaction_description_overrides`, `transaction_splits`, `transaction_sync_conflicts`) — categorization, learned rules, manual bill-cycle shifts, description overrides, bill splitting, and recycled-ID sync audits. These are **separate join tables**, not columns on `transactions`, so a Pluggy re-sync never wipes them. `transaction_splits` only stores explicit shared markings (`'half'` = 50/50, `'theirs'` = partner owes 100%); categorized transactions without a split row are implicitly mine in split summaries.
-5. **Cash flow projections** (`manual_entries`) — recurring entries (salary, rent, etc.) with `day_of_month` for placement. Each entry is scoped to a specific `month` (`YYYY-MM`) so each month edits independently — duplicate-to-next-month is the workflow for propagating recurring items. `sort_key` (also on `bank_transactions`) enables drag-and-drop reordering within a day group; NULL means "natural order".
+1. **Pluggy credit cache** — `items`, `accounts`, `transactions`, `bills`.
+2. **Pluggy bank cache** — `bank_transactions` (+ description overrides, bill-payment tags, hide flag) and `balance_snapshots`.
+3. **User configuration** — `account_settings` (closing/due days, Pluggy doesn't expose them), `card_groups` (+ `card_group_members`, scoped per account).
+4. **User work** — `transaction_categories`, `category_rules`, `transaction_bill_overrides`, `transaction_description_overrides`, `transaction_splits`, `transaction_sync_conflicts`. **Separate join tables keyed on the local UUID**, so re-syncs never wipe them.
+5. **Cash flow projections** — `manual_entries` (per-month recurring rows with `day_of_month`, `sort_key` for drag-order).
 
-Column-level migrations use `addColumnIfMissing()` in [db/index.ts](packages/api/src/db/index.ts) — append-only, idempotent via `PRAGMA table_info`. New tables use `CREATE TABLE IF NOT EXISTS` directly.
+Schema definitions, sister-table relationships, and the cascade-delete trap (never `INSERT OR REPLACE` on cache tables) are documented in [docs/schema.md](docs/schema.md). The `CREATE TABLE` source of truth is [packages/api/src/db/index.ts](packages/api/src/db/index.ts) — append-only `addColumnIfMissing()` migrations, idempotent via `PRAGMA table_info`.
 
 ### Request flow
 
@@ -104,7 +104,7 @@ Full design language, screen-by-screen layout, and pattern catalog: [docs/fronte
 - **Zod at the edges.** Validate request bodies and query strings with Zod in the route file. The global error handler in [packages/api/src/index.ts](packages/api/src/index.ts) turns `ZodError` into a 400. Don't catch validation errors locally.
 - **Routes are thin.** Pure, testable logic (merchant slugging, bill-window math, color picking) lives under [packages/api/src/services/](packages/api/src/services/). Route files contain validation, SQL, and orchestration.
 - **SQLite access is synchronous.** `better-sqlite3` is intentionally sync — no `await db.something()`. Wrap multi-row writes in `db.transaction(...)` for speed and atomicity.
-- **Never use `INSERT OR REPLACE` on Pluggy cache tables.** It internally DELETEs then INSERTs, which triggers `ON DELETE CASCADE` on join tables (`transaction_categories`, `transaction_bill_overrides`) and silently destroys user work. Always use `INSERT ... ON CONFLICT(id) DO UPDATE SET ...` instead — it updates in place without firing cascade deletes.
+- **Never use `INSERT OR REPLACE` on Pluggy cache tables.** It internally DELETEs then INSERTs and triggers `ON DELETE CASCADE` on user-work join tables, silently wiping categories/splits/shifts. Always `INSERT ... ON CONFLICT(id) DO UPDATE SET ...`. Full explanation in [docs/schema.md](docs/schema.md).
 - **Pluggy data shape quirks** (sign convention, `Transaction.date` as `Date`, etc.) live in [docs/pluggy.md](docs/pluggy.md).
 
 ## Pluggy gotchas
