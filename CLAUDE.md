@@ -110,11 +110,3 @@ Full design language, screen-by-screen layout, and pattern catalog: [docs/fronte
 ## Pluggy gotchas
 
 SDK quirks (signature surprises, sign conventions, cardNumber shapes, "pagamento recebido" reconciliation rows, installment posting dates) are catalogued in [docs/pluggy.md](docs/pluggy.md). Read it before writing integration code — Pluggy's official docs have been wrong about this project's connectors multiple times.
-
-## Out of scope
-
-- Multi-user auth, hosted multi-tenant deployment (single-user password gate is the only auth)
-- Docker, Fly, Vercel — Railway/Nixpacks is the only deployment target checked in
-- Graphs, charts, CSV export, full-text search
-- Category hierarchy (categories are flat)
-- Manual color picking for categories or card groups (system assigns from a curated palette)
