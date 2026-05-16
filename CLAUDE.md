@@ -18,23 +18,17 @@ Mechanics for the bill engine, shift math, and learning loop live in [docs/sync.
 
 ## Current state
 
-Functional end-to-end: connect card via `react-pluggy-connect` → sync discovers credit accounts → configure `closing_day` / `due_day` per account → sync bills and transactions from Pluggy → categorize transactions (with learning, bulk, and undo) → optionally group physical cards (titular, adicional, virtual…) per account to filter the transaction list → see the bill headline with total, delta vs previous cycle, and category breakdown → manually shift individual transactions to a neighboring bill cycle when the purchase date lies about when the charge actually lands → navigate between historical bill cycles via ←/→ arrows.
+Functional end-to-end. What's shipped:
 
-Multi-bank support: multiple Pluggy items (bank connections) are fully supported. The Overview screen groups all credit accounts by due-month with ←/→ navigation, shows a grand total with aggregated category breakdown and delta vs previous period, and lets the user drill into any account's Dashboard. New banks are added via "Adicionar banco" (PluggyConnect) and removed via "remover" (with cascade delete). A single Pluggy item can also contain multiple credit accounts (e.g. different card brands); each account has its own billing cycle, card groups, and bill window.
-
-Cash flow: the CashFlow screen is the **top-level landing page**, showing a multi-month ledger spanning the months that have BANK transaction data plus a configurable number of projection months ahead, all on one scrollable page. Past days display actual BANK transactions from Pluggy (editable descriptions, draggable to reorder within a day, hideable when the bank reports visual duplicates). Future days show per-month manual recurring entries (salary, rent — each month edits independently) and credit card bill outflows on their due dates. Running balance carries across months with a single global realized/projected boundary. Rows can be dragged to reorder within their day group via `sort_key`. Clicking a credit card bill entry drills into the Overview for that month's bill detail.
-
-Auth: the API is password-gated when `APP_PASSWORD` is set in `packages/api/.env`. The frontend renders a Login screen until `/auth/me` reports authenticated; the session lives in an HTTP-only cookie. When `APP_PASSWORD` is unset (local dev), auth is bypassed entirely.
-
-Deployment: a Railway/Nixpacks config is checked in. In production, Express serves the built SPA from `packages/web/dist` on the same origin and strips the `/api/` prefix before routing, so the frontend can call `/api/*` without a separate host. `DATABASE_PATH` is a required env var (no default) — point it at a persistent volume.
-
-Manual bill transactions: when Pluggy fails to return transactions (connector gaps), the user can add manual entries directly in the bill inbox. Manual entries are stored in the `transactions` table with `source='manual'` and participate in all bill window queries, categorization, and shifts. The form accepts day/month/year, credit or debit direction, and optional installment metadata (`installmentNumber` / `totalInstallments`) so manual entries surface in the split summary's installments section like Pluggy-sourced parceladas. They can be edited/deleted via the `⋯` menu and are marked with an orange "manual" badge.
-
-Bill splitting: transactions can be marked as shared with a partner — "½" (50/50) or "→dela" (partner owes 100%). Categorized transactions without a split row are implicitly "meu". Per-row actions in the ⋯ menu plus bulk split in the selection bar. Both Dashboard and Overview render the unified `SplitSection` component: dynamic columns for ½, dela, and meu with totals, category breakdowns, and installments (the installments list shows the sum of selected parcelas at the top). Data lives in a `transaction_splits` join table for explicit shared rows only (`'half'` / `'theirs'`) and survives re-syncs.
-
-Responsive: the layout is mobile-aware. The CashFlow ledger collapses to a compact column set on small screens; BillHeader's action buttons sit inline with the bill-cycle nav and "gerenciar regras" / "gerenciar bancos" links hide below `md`; SplitSection collapses to a single column.
-
-56 tests covering `billWindow` (including `findOffsetForDueMonth`), `merchantSlug`, and `applyLearnedRules`.
+- **Credit cards.** Connect via `react-pluggy-connect`, per-account `closing_day` / `due_day` config, sync of bills + transactions, categorization (with learning, bulk, undo), optional card-grouping (titular/adicional/virtual…), bill headline with total + delta + category breakdown, per-transaction `bill_shift` to nudge edge-of-cycle rows, ←/→ navigation across cycles.
+- **Multi-bank.** Multiple Pluggy items, multiple accounts per item. Overview groups all credit accounts by due-month with ←/→ nav, grand total, aggregated category breakdown, drill-in to each account's Dashboard. Banks added/removed via `ManageBankButton`.
+- **Cash flow.** `CashFlow` is the landing page: multi-month ledger anchored on `balance_snapshots`, BANK transactions for past days, manual recurring entries (`manual_entries`, per-month) + credit-card bill outflows for future days, single global realized/projected boundary, drag-and-drop reordering within a day, hide flag for bank-side duplicates, click-to-drill on bill outflows.
+- **Manual transactions.** Add/edit/delete rows directly in a bill inbox when Pluggy misses them (`source='manual'`). Supports day/month/year, debit or credit direction, and installment metadata so they surface in the split summary's parceladas list.
+- **Bill splitting.** Mark transactions ½ or →dela (otherwise implicitly "meu"). Per-row + bulk. Unified `SplitSection` on both Dashboard and Overview.
+- **Auth.** Optional password gate (`APP_PASSWORD` env var) with HTTP-only cookie session. Local dev bypasses when unset.
+- **Deployment.** Railway/Nixpacks config checked in. Production Express serves the SPA from `packages/web/dist` on the same origin and strips the `/api/` prefix. `DATABASE_PATH` required (no default) — point at a persistent volume.
+- **Responsive.** Mobile-aware layout (compact CashFlow columns, inline BillHeader actions, single-column SplitSection).
+- **Tests.** 56 tests covering `billWindow` (including `findOffsetForDueMonth`), `merchantSlug`, `applyLearnedRules`.
 
 ## Repository layout
 
