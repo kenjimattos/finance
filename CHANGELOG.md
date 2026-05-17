@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Gerenciar bancos.** O menu listava contas (cartões) ao invés de bancos (items), o que duplicava o mesmo banco várias vezes quando havia mais de um cartão. Agora lista um item por banco conectado, usando `connector_name` como rótulo.
+
 ## [1.6.0] - 2026-05-17
 
 ### Added
