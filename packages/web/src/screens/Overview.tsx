@@ -1008,18 +1008,6 @@ function RemoveItemGroup({
           🅧
         </button>
       </div>
-      {accounts.length > 0 && (
-        <ul className="mt-1 pl-3">
-          {accounts.map((a) => (
-            <li
-              key={a.id}
-              className="py-1 font-body text-xs tracking-[0.14em] text-[color:var(--color-ink-muted)]"
-            >
-              {a.name ?? 'Conta sem nome'}
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
