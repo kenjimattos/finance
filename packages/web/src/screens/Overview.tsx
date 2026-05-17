@@ -479,7 +479,7 @@ export function Overview({
           </div>
           <div className="flex items-center gap-4">
             <SyncAllButton items={items} />
-            <ManageBankButton accounts={allAccountsAnyType}  />
+            <ManageBankButton items={items} accounts={allAccountsAnyType} />
   
           </div>
         </div>
@@ -935,44 +935,69 @@ function AddBank() {
 }
 // ─── Remove bank Button ─────────────────────────────────────────
 
-function RemoveBank({ account, item }: { item: Item; account: Account }) {
+function RemoveItemGroup({
+  item,
+  accounts,
+}: {
+  item: Item;
+  accounts: Account[];
+}) {
   const queryClient = useQueryClient();
   const deleteMut = useMutation({
-    mutationFn: (item: Item) => api.deleteItem(item.id),
+    mutationFn: (id: string) => api.deleteItem(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['items'] });
       queryClient.invalidateQueries({ queryKey: ['accounts'] });
       queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
     },
   });
-  const label = account.name ?? item.connector_name ?? 'Conta';
+  const connectorLabel = item.connector_name ?? 'Banco';
+  const isOrphan = accounts.length === 0;
+
   return (
-    <div className="flex items-center justify-center gap-2 px-5 py-4">
-      <span className="w-full font-body text-xs tracking-[0.14em] text-[color:var(--color-ink-muted)]">
-        {label}
-      </span>
-      <button
-        key={account.id}
-        type="button"
-        onClick={() => {
-          if (window.confirm(`Tem certeza que deseja remover o banco "${item.connector_name ?? label}" (e todas as contas associadas)?`)) {
-            deleteMut.mutate(item);
-          }
-        }}
-        className="text-left transition-colors hover:border-[color:var(--color-ink-muted)] disabled:opacity-50"
-      >
-        <span className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50">
-          🅧
+    <div className="border-b border-[color:var(--color-ink-faint)] px-5 py-3 last:border-b-0">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-body text-[11px] uppercase tracking-[0.14em] text-[color:var(--color-ink)]">
+          {connectorLabel}
+          {isOrphan && (
+            <span className="ml-2 text-[color:var(--color-accent)]">(sem contas)</span>
+          )}
         </span>
-      </button>
+        <button
+          type="button"
+          onClick={() => {
+            const msg = isOrphan
+              ? `Remover o item "${connectorLabel}"?`
+              : `Remover "${connectorLabel}" e todas as ${accounts.length} conta(s) associadas?`;
+            if (window.confirm(msg)) deleteMut.mutate(item.id);
+          }}
+          className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
+        >
+          🅧
+        </button>
+      </div>
+      {accounts.length > 0 && (
+        <ul className="mt-1 pl-3">
+          {accounts.map((a) => (
+            <li
+              key={a.id}
+              className="py-1 font-body text-xs tracking-[0.14em] text-[color:var(--color-ink-muted)]"
+            >
+              {a.name ?? 'Conta sem nome'}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
 // ── Manage banks ───────────────────────────────────────────────
 function ManageBankButton({
+  items,
   accounts,
 }: {
+  items: Item[];
   accounts: Array<{ item: Item; account: Account }>;
 }) {
   const [showMenu, setShowMenu] = useState(false);
@@ -1003,13 +1028,22 @@ function ManageBankButton({
       </button>
 
       {showMenu && (
-        <div className="mt-2 border shadow-lg absolute">
-          {accounts.length > 0 && (
-            <ul>
-              {accounts.map(({ item, account }) => (
-                <RemoveBank key={account.id} item={item} account={account} />
-              ))}
-            </ul>
+        <div className="mt-2 border shadow-lg absolute bg-[color:var(--color-paper)] min-w-[280px]">
+          {items.length > 0 && (
+            <div>
+              {items.map((item) => {
+                const itemAccounts = accounts
+                  .filter((a) => a.item.id === item.id)
+                  .map((a) => a.account);
+                return (
+                  <RemoveItemGroup
+                    key={item.id}
+                    item={item}
+                    accounts={itemAccounts}
+                  />
+                );
+              })}
+            </div>
           )}
           <AddBank />
         </div>
