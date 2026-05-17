@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
-- **Gerenciar bancos.** O menu agora mostra o nome da conta (`account.name`) ao invés do `connector_name` do item, evitando que várias contas do mesmo conector apareçam como "Meu Pluggy" repetido. Importante com multi-usuário, onde cada conta precisa ser identificável. O 🅧 continua removendo o item Pluggy inteiro (com todas as contas associadas), e o confirm deixa isso explícito.
+- **Gerenciar bancos.** O menu agora lista todas as contas (BANK + CREDIT) com o `account.name` da tabela `accounts`, ao invés de só os cartões de crédito configurados. Importante com multi-usuário e múltiplos itens, onde cada conta precisa ser identificável pelo nome. O 🅧 continua removendo o item Pluggy inteiro (com todas as contas associadas) — o confirm deixa isso explícito.
 
 ## [1.6.0] - 2026-05-17
 
