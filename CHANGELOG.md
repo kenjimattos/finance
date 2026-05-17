@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-05-17
+
+### Added
+
+- **Multi-usuário com SQLite por usuário.** A app deixou de ser single-tenant. Cada pessoa autentica com seu próprio par usuário/senha e o backend serve um arquivo SQLite isolado para cada uma.
+  - Credenciais por env var no formato `USER_<NOME>_PASSWORD` (ex: `USER_KENJI_PASSWORD=...`). O nome em minúsculas vira o username de login e o nome do arquivo (`DATABASE_DIR/kenji.sqlite`).
+  - `DATABASE_PATH` foi substituído por `DATABASE_DIR` (diretório onde os arquivos por usuário ficam).
+  - `APP_PASSWORD` foi removido; sem nenhuma `USER_*_PASSWORD` definida, a app cai pra modo aberto com usuário "default" (preserva o fluxo de dev local).
+  - Cookie de sessão agora carrega o username, assinado com HMAC; `SESSION_SECRET` opcional (mas recomendado em produção).
+  - Tela de login ganhou campo de usuário.
+  - Refactor: o singleton `db` foi extinto. `req.db` é injetado pelo `authMiddleware` e usado por todas as rotas; helpers que precisam de DB recebem `db: Db` como primeiro parâmetro.
+
+### Migração (Railway)
+
+1. Pare o serviço (replicas → 0).
+2. Mova o arquivo existente: `mv /data/finance.sqlite{,-wal,-shm} /data/users/<seu-username>.sqlite{,-wal,-shm}`.
+3. Substitua as env vars: remova `APP_PASSWORD` e `DATABASE_PATH`; adicione `DATABASE_DIR=/data/users`, `USER_<NOME>_PASSWORD=...` para cada usuário e (recomendado) `SESSION_SECRET`.
+4. Suba o serviço.
+
 ## [1.5.2] - 2026-05-14
 
 ### Changed
