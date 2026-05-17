@@ -987,7 +987,7 @@ function RemoveItemGroup({
   const isOrphan = accounts.length === 0;
 
   return (
-    <div className="border-b border-[color:var(--color-ink-faint)] px-5 py-3 last:border-b-0">
+    <div className="border-b border-[color:var(--color-ink-faint)] px-5 py-3">
       <div className="flex items-center justify-between gap-3">
         <span className="font-body text-[11px] uppercase tracking-[0.14em] text-[color:var(--color-ink)]">
           {connectorLabel}
