@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
-- **Gerenciar bancos.** O menu agora lista todas as contas (BANK + CREDIT) com o `account.name` da tabela `accounts`, ao invés de só os cartões de crédito configurados. Importante com multi-usuário e múltiplos itens, onde cada conta precisa ser identificável pelo nome. O 🅧 continua removendo o item Pluggy inteiro (com todas as contas associadas) — o confirm deixa isso explícito.
+- **Gerenciar bancos.** O menu agora agrupa por item Pluggy: cada conector aparece como header com suas contas (BANK + CREDIT) indentadas. Items órfãos (sem contas, restos de conexões falhas) também aparecem marcados como "sem contas" pra poderem ser removidos pelo próprio menu.
 
 ## [1.6.0] - 2026-05-17
 
