@@ -12,6 +12,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - **CashFlow:** a tabela de fluxo de caixa colapsa em mobile mostrando apenas as colunas essenciais (descrição + saldo); débito/crédito/dia ficam visíveis apenas a partir de `md:`. Os cabeçalhos "desktop-only" são ocultados na versão mobile e a coluna de valores ganhou variantes responsivas para caber sem quebrar.
   - **BillHeader:** os botões de ação ("gerenciar regras", "sincronizar") foram movidos para inline com a navegação de ciclo, e "gerenciar regras" é escondido em mobile (visível a partir de `md:`). O botão "adicionar banco" do Overview segue a mesma regra.
   - **SplitSection:** o grid das colunas (½ · dela · meu) agora é responsivo com breakpoints `md:`, evitando que as três colunas apertem em telas estreitas. Estilo de card com borda e `gap` reduzido.
+  - **TransactionInbox:** os cabeçalhos de seção ("a categorizar", "categorizadas") e seus controles (filtro de categoria, "selecionar tudo") foram reorganizados para empilhar verticalmente em mobile e ficar inline a partir de `md:`, eliminando o aperto e o overflow horizontal no inbox da fatura.
+  - **TransactionRow:** em mobile, as infos laterais (data, categoria, parcela, split) descem para uma segunda linha logo abaixo do valor, deixando a descrição com largura total na primeira linha. A partir de `md:` voltam ao layout inline original. O badge de parcela (`X/N`) foi movido para junto da descrição (em vez de ficar entre data e categoria), aproximando-o do contexto a que se refere.
+
+### Docs
+
+- **CLAUDE.md emagrecido; detalhes movidos para `docs/`.** O arquivo carregado em toda sessão era prosa longa repetindo mecânicas já implementadas; foi reduzido a invariantes, ponteiros e convenções, com o conteúdo de referência extraído para arquivos dedicados consultados sob demanda:
+  - [docs/api.md](docs/api.md) — catálogo completo de endpoints (auth, items, sync, bills, transactions, cash flow).
+  - [docs/pluggy.md](docs/pluggy.md) — gotchas do SDK da Pluggy (sign convention, shape de `cardNumber`, "pagamento recebido", datas de parcelas).
+  - [docs/sync.md](docs/sync.md) — engine de sync: identidade de transação, janela de fatura aberta, mecânica de `bill_shift`, regra "só categorizadas somam", learning loop.
+  - [docs/frontend.md](docs/frontend.md) — design editorial, hierarquia de telas e catálogo de padrões reusáveis (overlays via portal, toasts, `SplitSection`).
+  - [docs/schema.md](docs/schema.md) — modelo de dados detalhado, sister tables e a armadilha do `INSERT OR REPLACE` em tabelas de cache.
+  - "Current state" foi colapsado em uma checklist de bullets (um por área de feature) e a seção "Out of scope" foi removida.
 
 ## [1.5.1] - 2026-05-14
 
