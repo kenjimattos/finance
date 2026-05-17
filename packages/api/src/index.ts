@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { ZodError } from 'zod';
 
-import { config } from './config.js';
+import { config, users, AUTH_ENABLED } from './config.js';
 import { authRouter } from './routes/auth.js';
 import { authMiddleware } from './middleware/auth.js';
 import { connectRouter } from './routes/connect.js';
@@ -37,8 +37,15 @@ app.use(cookieParser());
 app.use(morgan('dev'));
 app.use(rateLimit({ windowMs: 60_000, max: 120 }));
 
-if (!config.APP_PASSWORD) {
-  console.warn('[auth] APP_PASSWORD not set — authentication disabled');
+if (!AUTH_ENABLED) {
+  console.warn(
+    '[auth] no USER_*_PASSWORD env vars set — running open with default user',
+  );
+} else {
+  console.log(`[auth] ${users.size} user(s) configured: ${[...users.keys()].join(', ')}`);
+  if (!config.SESSION_SECRET) {
+    console.warn('[auth] SESSION_SECRET not set — using insecure default (set it in production)');
+  }
 }
 
 // Match the Vite dev proxy behavior: in production the SPA is served from

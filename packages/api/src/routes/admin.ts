@@ -1,5 +1,6 @@
 import express, { Router, type Request, type Response } from 'express';
 import { writeFileSync, copyFileSync, existsSync, statSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import { config } from '../config.js';
 
 export const adminRouter = Router();
@@ -15,7 +16,10 @@ adminRouter.post(
       return;
     }
 
-    const target = config.DATABASE_PATH;
+    // Restore writes to the SQLite file of the currently authenticated user.
+    // The server must be restarted afterwards to reopen the connection on
+    // the freshly written file (see note in the response).
+    const target = join(config.DATABASE_DIR, `${req.username}.sqlite`);
     if (existsSync(target)) {
       const backup = `${target}.bak.${Date.now()}`;
       copyFileSync(target, backup);

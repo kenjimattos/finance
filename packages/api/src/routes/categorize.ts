@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { db } from '../db/index.js';
+import type { Db } from '../db/index.js';
 import { extractMerchantSlug } from '../services/merchantSlug.js';
 
 export const categorizeRouter = Router();
@@ -24,9 +24,10 @@ const assignSchema = z.object({
 // PUT /transactions/:id/category — assign a single transaction
 categorizeRouter.put('/transactions/:id/category', (req, res, next) => {
   try {
+    const { db } = req;
     const { categoryId } = assignSchema.parse(req.body);
     const transactionId = req.params.id;
-    const result = assignCategory(transactionId, categoryId, 'manual');
+    const result = assignCategory(db, transactionId, categoryId, 'manual');
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;
@@ -42,6 +43,7 @@ categorizeRouter.delete('/transactions/:id/category', (req, res) => {
   // Note: we do NOT bump override_count here, because a bare "uncategorize"
   // is different from "replace with a different category". If the user
   // wants to correct a learned guess, they should re-assign, not just clear.
+  const { db } = req;
   const info = db
     .prepare('DELETE FROM transaction_categories WHERE transaction_id = ?')
     .run(req.params.id);
@@ -60,6 +62,7 @@ const bulkSchema = z.object({
 // POST /transactions/bulk-categorize — assign many at once
 categorizeRouter.post('/transactions/bulk-categorize', (req, res, next) => {
   try {
+    const { db } = req;
     const { categoryId, transactionIds } = bulkSchema.parse(req.body);
 
     // Verify category exists
@@ -74,7 +77,7 @@ categorizeRouter.post('/transactions/bulk-categorize', (req, res, next) => {
     let applied = 0;
     db.transaction(() => {
       for (const txId of transactionIds) {
-        const result = assignCategoryInTransaction(txId, categoryId, 'bulk');
+        const result = assignCategoryInTransaction(db, txId, categoryId, 'bulk');
         if (result.ok) applied++;
       }
     })();
@@ -88,6 +91,7 @@ categorizeRouter.post('/transactions/bulk-categorize', (req, res, next) => {
 // GET /rules?q=... — list auto-categorization rules, optionally filtered by slug
 categorizeRouter.get('/rules', (req, res, next) => {
   try {
+    const { db } = req;
     const { q } = z.object({ q: z.string().optional() }).parse(req.query);
     const rows = q
       ? db
@@ -120,6 +124,7 @@ categorizeRouter.get('/rules', (req, res, next) => {
 // PATCH /rules/:id { categoryId } — reassign a rule to a different category
 categorizeRouter.patch('/rules/:id', (req, res, next) => {
   try {
+    const { db } = req;
     const { categoryId } = z.object({ categoryId: z.number().int().positive() }).parse(req.body);
 
     const category = db
@@ -146,6 +151,7 @@ categorizeRouter.patch('/rules/:id', (req, res, next) => {
 
 // DELETE /rules/:id — forget a rule entirely
 categorizeRouter.delete('/rules/:id', (req, res) => {
+  const { db } = req;
   const info = db
     .prepare('DELETE FROM category_rules WHERE id = ?')
     .run(req.params.id);
@@ -165,13 +171,14 @@ type AssignErr = { ok: false; status: number; error: string };
 type AssignResult = AssignOk | AssignErr;
 
 function assignCategory(
+  db: Db,
   transactionId: string,
   categoryId: number,
   assignedBy: 'manual' | 'bulk',
 ): AssignResult {
   let result: AssignResult = { ok: false, status: 500, error: 'Unknown' };
   db.transaction(() => {
-    result = assignCategoryInTransaction(transactionId, categoryId, assignedBy);
+    result = assignCategoryInTransaction(db, transactionId, categoryId, assignedBy);
   })();
   return result;
 }
@@ -182,6 +189,7 @@ function assignCategory(
  * successes without aborting the whole batch on one missing row.
  */
 function assignCategoryInTransaction(
+  db: Db,
   transactionId: string,
   categoryId: number,
   assignedBy: 'manual' | 'bulk',

@@ -3,7 +3,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { Transaction, CreditCardMetadata } from 'pluggy-sdk';
 import { pluggy } from '../services/pluggy.js';
-import { db } from '../db/index.js';
+import type { Db } from '../db/index.js';
 import { applyLearnedRules } from '../services/applyLearnedRules.js';
 import { extractMerchantSlug } from '../services/merchantSlug.js';
 
@@ -72,6 +72,7 @@ interface TransactionRow {
  */
 transactionsRouter.get('/transactions', async (req, res, next) => {
   try {
+    const { db } = req;
     const {
       itemId,
       accountId,
@@ -87,7 +88,7 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
     } = querySchema.parse(req.query);
 
     if (refresh === 'true') {
-      await syncItem(itemId);
+      await syncItem(db, itemId);
     }
 
     const onlyUncategorized = uncategorized === 'true';
@@ -174,6 +175,7 @@ const shiftSchema = z.object({
 
 transactionsRouter.put('/transactions/:id/bill-shift', (req, res, next) => {
   try {
+    const { db } = req;
     const { shift } = shiftSchema.parse(req.body);
     const transactionId = req.params.id;
 
@@ -255,6 +257,7 @@ function manualTransactionType(amount: number): 'DEBIT' | 'CREDIT' {
 // POST /transactions/manual — create a manual transaction
 transactionsRouter.post('/transactions/manual', (req, res, next) => {
   try {
+    const { db } = req;
     const body = manualTxSchema.parse(req.body);
     const id = randomUUID();
 
@@ -333,6 +336,7 @@ const manualTxUpdateSchema = z
 
 transactionsRouter.put('/transactions/manual/:id', (req, res, next) => {
   try {
+    const { db } = req;
     const id = req.params.id;
     const body = manualTxUpdateSchema.parse(req.body);
 
@@ -389,6 +393,7 @@ transactionsRouter.put('/transactions/manual/:id', (req, res, next) => {
 // DELETE /transactions/manual/:id — delete a manual transaction
 transactionsRouter.delete('/transactions/manual/:id', (req, res, next) => {
   try {
+    const { db } = req;
     const id = req.params.id;
     const result = db
       .prepare("DELETE FROM transactions WHERE id = ? AND source = 'manual'")
@@ -406,10 +411,11 @@ transactionsRouter.delete('/transactions/manual/:id', (req, res, next) => {
 // POST /transactions/sync?itemId=... — explicit sync endpoint (mutating)
 transactionsRouter.post('/transactions/sync', async (req, res, next) => {
   try {
+    const { db } = req;
     const { itemId } = z
       .object({ itemId: z.string().min(1) })
       .parse(req.query);
-    const counts = await syncItem(itemId);
+    const counts = await syncItem(db, itemId);
     res.json({ ok: true, ...counts });
   } catch (err) {
     next(err);
@@ -424,7 +430,7 @@ transactionsRouter.post('/transactions/sync', async (req, res, next) => {
  * yyyy-mm-dd at the storage boundary so every downstream comparison
  * (billWindow ranges, UI date pills, etc.) can use plain string math.
  */
-async function syncItem(itemId: string) {
+async function syncItem(db: Db, itemId: string) {
   const { results: creditAccounts } = await pluggy.fetchAccounts(itemId, 'CREDIT');
   console.log(`[sync] itemId=${itemId} found ${creditAccounts.length} CREDIT account(s):`, creditAccounts.map(a => ({ id: a.id, name: a.name, number: a.number })));
 

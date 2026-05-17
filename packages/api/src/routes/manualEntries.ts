@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { db } from '../db/index.js';
 
 export const manualEntriesRouter = Router();
 
@@ -29,6 +28,7 @@ function toResponse(row: ManualEntryRow) {
 // GET /manual-entries?month=YYYY-MM — list entries for a specific month
 manualEntriesRouter.get('/manual-entries', (req, res, next) => {
   try {
+    const { db } = req;
     const { month } = z
       .object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() })
       .parse(req.query);
@@ -56,6 +56,7 @@ const createSchema = z.object({
 // POST /manual-entries — create a new entry for a specific month
 manualEntriesRouter.post('/manual-entries', (req, res, next) => {
   try {
+    const { db } = req;
     const { description, amount, dayOfMonth, month } = createSchema.parse(req.body);
     const result = db
       .prepare(
@@ -82,6 +83,7 @@ const updateSchema = z.object({
 // PUT /manual-entries/:id — update an entry
 manualEntriesRouter.put('/manual-entries/:id', (req, res, next) => {
   try {
+    const { db } = req;
     const id = Number(req.params.id);
     const updates = updateSchema.parse(req.body);
 
@@ -136,6 +138,7 @@ manualEntriesRouter.put('/manual-entries/:id', (req, res, next) => {
 // DELETE /manual-entries/:id — remove an entry
 manualEntriesRouter.delete('/manual-entries/:id', (req, res, next) => {
   try {
+    const { db } = req;
     const id = Number(req.params.id);
     const result = db
       .prepare('DELETE FROM manual_entries WHERE id = ?')

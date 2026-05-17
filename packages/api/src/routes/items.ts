@@ -1,13 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { pluggy } from '../services/pluggy.js';
-import { db } from '../db/index.js';
 
 export const itemsRouter = Router();
 
 // GET /items — list locally saved items (connections the user has linked)
-itemsRouter.get('/items', (_req, res) => {
-  const rows = db.prepare('SELECT * FROM items ORDER BY created_at DESC').all();
+itemsRouter.get('/items', (req, res) => {
+  const rows = req.db.prepare('SELECT * FROM items ORDER BY created_at DESC').all();
   res.json(rows);
 });
 
@@ -22,7 +21,7 @@ itemsRouter.post('/items', async (req, res, next) => {
     const item = await pluggy.fetchItem(itemId);
     console.log('[items] POST /items — itemId:', item.id, 'connector:', item.connector?.name, 'status:', item.status);
 
-    db.prepare(
+    req.db.prepare(
       'INSERT OR REPLACE INTO items (id, connector_name) VALUES (?, ?)',
     ).run(item.id, item.connector?.name ?? null);
 
@@ -37,7 +36,7 @@ itemsRouter.post('/items', async (req, res, next) => {
 // User-level data (user_categories, category_rules) is preserved.
 itemsRouter.delete('/items/:id', (req, res) => {
   const { id } = req.params;
-  const result = db.prepare('DELETE FROM items WHERE id = ?').run(id);
+  const result = req.db.prepare('DELETE FROM items WHERE id = ?').run(id);
   if (result.changes === 0) {
     res.status(404).json({ error: 'Item not found' });
     return;
