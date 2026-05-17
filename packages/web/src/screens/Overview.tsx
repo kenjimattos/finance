@@ -469,7 +469,7 @@ export function Overview({
           </div>
           <div className="flex items-center gap-4">
             <SyncAllButton items={items} />
-            <ManageBankButton items={items}  />
+            <ManageBankButton configuredCards={configured}  />
   
           </div>
         </div>
@@ -925,7 +925,7 @@ function AddBank() {
 }
 // ─── Remove bank Button ─────────────────────────────────────────
 
-function RemoveBank({ item }: { item: Item }) {
+function RemoveBank({ account, item }: { item: Item; account: Account }) {
   const queryClient = useQueryClient();
   const deleteMut = useMutation({
     mutationFn: (item: Item) => api.deleteItem(item.id),
@@ -935,17 +935,17 @@ function RemoveBank({ item }: { item: Item }) {
       queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
     },
   });
-  const label = item.connector_name ?? 'Banco';
+  const label = account.name ?? item.connector_name ?? 'Conta';
   return (
     <div className="flex items-center justify-center gap-2 px-5 py-4">
       <span className="w-full font-body text-xs tracking-[0.14em] text-[color:var(--color-ink-muted)]">
         {label}
       </span>
       <button
-        key={item.id}
+        key={account.id}
         type="button"
         onClick={() => {
-          if (window.confirm(`Tem certeza que deseja remover o banco "${label}"?`)) {
+          if (window.confirm(`Tem certeza que deseja remover o banco "${item.connector_name ?? label}" (e todas as contas associadas)?`)) {
             deleteMut.mutate(item);
           }
         }}
@@ -961,9 +961,9 @@ function RemoveBank({ item }: { item: Item }) {
 
 // ── Manage banks ───────────────────────────────────────────────
 function ManageBankButton({
-  items,
+  configuredCards,
 }: {
-  items: Item[];
+  configuredCards?: Array<{ item: Item; account: Account; settings: AccountSettings }>;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -994,10 +994,10 @@ function ManageBankButton({
 
       {showMenu && (
         <div className="mt-2 border shadow-lg absolute">
-          {items.length > 0 && (
+          {configuredCards && configuredCards.length > 0 && (
             <ul>
-              {items.map((item) => (
-                <RemoveBank key={item.id} item={item} />
+              {configuredCards.map(({ item, account }) => (
+                <RemoveBank key={account.id} item={item} account={account} />
               ))}
             </ul>
           )}
