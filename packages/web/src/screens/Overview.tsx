@@ -79,6 +79,16 @@ export function Overview({
     return result;
   }, [accountQueries, items]);
 
+  const allAccountsAnyType = useMemo(() => {
+    const result: { item: Item; account: Account }[] = [];
+    accountQueries.forEach((q, i) => {
+      if (!q.data) return;
+      const item = items[i];
+      q.data.forEach((account) => result.push({ item, account }));
+    });
+    return result;
+  }, [accountQueries, items]);
+
   const settingsQueries = useQueries({
     queries: allAccounts.map(({ account }) => ({
       queryKey: ['accountSettings', account.id],
@@ -469,7 +479,7 @@ export function Overview({
           </div>
           <div className="flex items-center gap-4">
             <SyncAllButton items={items} />
-            <ManageBankButton configuredCards={configured}  />
+            <ManageBankButton accounts={allAccountsAnyType}  />
   
           </div>
         </div>
@@ -961,9 +971,9 @@ function RemoveBank({ account, item }: { item: Item; account: Account }) {
 
 // ── Manage banks ───────────────────────────────────────────────
 function ManageBankButton({
-  configuredCards,
+  accounts,
 }: {
-  configuredCards?: Array<{ item: Item; account: Account; settings: AccountSettings }>;
+  accounts: Array<{ item: Item; account: Account }>;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -994,9 +1004,9 @@ function ManageBankButton({
 
       {showMenu && (
         <div className="mt-2 border shadow-lg absolute">
-          {configuredCards && configuredCards.length > 0 && (
+          {accounts.length > 0 && (
             <ul>
-              {configuredCards.map(({ item, account }) => (
+              {accounts.map(({ item, account }) => (
                 <RemoveBank key={account.id} item={item} account={account} />
               ))}
             </ul>
