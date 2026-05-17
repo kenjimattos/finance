@@ -102,11 +102,6 @@ export function TransactionRow({
     return(
       <div className={`${classname}`}>
           <div className={`flex items-baseline gap-3`}>
-            {tx.installmentNumber && tx.totalInstallments && (
-              <span className="font-mono text-[10px] text-[color:var(--color-ink-faint)]">
-                {tx.installmentNumber}/{tx.totalInstallments}
-              </span>
-            )}
             {tx.cardLast4 && (
               <span className="font-mono text-[10px] tracking-wider text-[color:var(--color-ink-faint)] hidden md:inline">
                 {formatCardLabel(tx.cardLast4)}
@@ -126,6 +121,7 @@ export function TransactionRow({
         </div>
     )
   }
+  
 
   return (
     <div
@@ -149,10 +145,18 @@ export function TransactionRow({
       </div>
 
       <div className="min-w-0">
+        
+        <div className="flex flex-row items-center gap-3">
           <span className="line-clamp-1 font-body text-[15px] text-[color:var(--color-ink)]">
             {tx.description ?? '—'}
           </span>
-          <SideInfos classname={"hidden md:inline"} />
+              {tx.installmentNumber && tx.totalInstallments && (
+            <span className="font-mono text-[10px] text-[color:var(--color-ink-faint)]">
+              {tx.installmentNumber}/{tx.totalInstallments}
+            </span>
+              )}
+        </div>
+
         <div className="mt-1.5 flex items-center gap-2">
           <CategoryTrigger
             label={tx.userCategory?.name ?? 'sem categoria'}
@@ -166,6 +170,7 @@ export function TransactionRow({
               auto
             </span>
           )}
+          <SideInfos classname={"hidden md:inline"} />
         </div>
       </div>
 
