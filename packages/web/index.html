@@ -12,6 +12,18 @@
     />
   </head>
   <body>
+    <script>
+      // Resolve theme before first paint to avoid a light→dark flash.
+      (function () {
+        try {
+          var saved = localStorage.getItem('finance.theme');
+          var mode = saved === 'light' || saved === 'dark' || saved === 'auto' ? saved : 'auto';
+          document.documentElement.setAttribute('data-theme', mode);
+        } catch (_) {
+          document.documentElement.setAttribute('data-theme', 'auto');
+        }
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- **Modo escuro.** Novo seletor de tema no header do Overview com três estados: `auto` (segue o sistema), `☼` (claro) e `☾` (escuro). A preferência é persistida em `localStorage` e aplicada antes do primeiro paint via script inline no `index.html`, evitando flash de tema. A paleta escura mantém o caráter editorial — "darkroom print" do papel quente original, com creme sobre preto-marrom e o mesmo laranja queimado (ligeiramente mais brilhante pra segurar o contraste no escuro). O overlay de grão também troca `mix-blend-mode` de `multiply` pra `screen` no escuro pra não virar lama.
+
 ### Fixed
 
 - **Gerenciar bancos.** O menu agora agrupa por item Pluggy: cada conector aparece como header com suas contas (BANK + CREDIT) indentadas. Items órfãos (sem contas, restos de conexões falhas) também aparecem marcados como "sem contas" pra poderem ser removidos pelo próprio menu. O label de cada item tenta derivar o banco real (Itaú, Nubank, PicPay…) a partir dos nomes das contas, com fallback pro `connector_name` da Pluggy — útil no sandbox onde tudo vem como "Meu Pluggy".
