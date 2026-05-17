@@ -290,14 +290,14 @@ export function TransactionInbox({
         title="A categorizar"
         count={uncategorized.length}
         right={
-          <div className="flex items-center gap-4">
+          <div className="flex flex-col md:flex-row items-center gap-4">
             <button
               type="button"
               onClick={() => {
                 setEditingTx(null);
                 setShowAddForm((v) => !v);
               }}
-              className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)]"
+              className="flex font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)]"
             >
               {showAddForm ? 'cancelar' : '+ lançamento'}
             </button>
@@ -390,7 +390,14 @@ export function TransactionInbox({
         title="Já categorizadas"
         count={categorized.length}
         right={
-          <div className="flex items-center gap-4">
+          <div className="flex flex-col md:flex-row items-center gap-4">
+            <button
+              type="button"
+              onClick={() => setShowCategorized((v) => !v)}
+              className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-accent)]"
+            >
+              {showCategorized ? 'ocultar' : 'mostrar'}
+            </button>
             {showCategorized && categorized.length > 0 && (
               <button
                 type="button"
@@ -402,13 +409,6 @@ export function TransactionInbox({
                   : 'selecionar todas'}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => setShowCategorized((v) => !v)}
-              className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-accent)]"
-            >
-              {showCategorized ? 'ocultar' : 'mostrar'}
-            </button>
           </div>
         }
       >
@@ -545,11 +545,11 @@ function Section({
   return (
     <section className="mt-12 first:mt-0">
       <header className="mb-4 flex items-baseline justify-between">
-        <div className="flex items-baseline gap-3">
-          <h3 className="font-display text-2xl tracking-tight text-[color:var(--color-ink)]">
+        <div className="flex items-center gap-3">
+          <h3 className="font-display md:text-2xl tracking-tight text-[color:var(--color-ink)]">
             {title}
           </h3>
-          <span className="font-mono text-xs text-[color:var(--color-ink-faint)]">
+          <span className="font-mono text-xs text-[color:var(--color-ink-faint)] hidden md:inline">
             ({count})
           </span>
         </div>
