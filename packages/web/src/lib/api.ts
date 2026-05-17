@@ -604,11 +604,12 @@ export const api = {
     return request<SplitSummary>(`/bills/current/split-summary?${qs}`);
   },
 
-  getAuthMe: () => request<{ authenticated: boolean }>('/auth/me'),
-  login: (password: string) =>
-    request<{ ok: boolean }>('/auth/login', {
+  getAuthMe: () =>
+    request<{ authenticated: boolean; username?: string }>('/auth/me'),
+  login: (username: string, password: string) =>
+    request<{ ok: boolean; username?: string }>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username, password }),
     }),
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 };

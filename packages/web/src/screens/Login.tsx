@@ -6,13 +6,15 @@ interface Props {
 }
 
 export function Login({ onAuthenticated }: Props) {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    usernameRef.current?.focus();
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -20,16 +22,16 @@ export function Login({ onAuthenticated }: Props) {
     setError('');
     setLoading(true);
     try {
-      await api.login(password);
+      await api.login(username.trim(), password);
       onAuthenticated();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        setError('Senha incorreta.');
+      if (err instanceof ApiError && (err.status === 401 || err.status === 400)) {
+        setError('Credenciais inválidas.');
       } else {
         setError('Erro ao conectar com o servidor.');
       }
       setPassword('');
-      inputRef.current?.focus();
+      passwordRef.current?.focus();
     } finally {
       setLoading(false);
     }
@@ -47,13 +49,35 @@ export function Login({ onAuthenticated }: Props) {
       <form onSubmit={handleSubmit} className="max-w-sm space-y-6">
         <div className="space-y-2">
           <label
+            htmlFor="username"
+            className="block font-mono text-xs uppercase tracking-widest text-[color:var(--color-ink-muted)]"
+          >
+            usuário
+          </label>
+          <input
+            ref={usernameRef}
+            id="username"
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            disabled={loading}
+            className="w-full border-b border-[color:var(--color-rule)] bg-transparent pb-2 font-mono text-lg text-[color:var(--color-ink)] placeholder-[color:var(--color-ink-muted)] outline-none focus:border-[color:var(--color-accent)]"
+            autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label
             htmlFor="password"
             className="block font-mono text-xs uppercase tracking-widest text-[color:var(--color-ink-muted)]"
           >
             senha
           </label>
           <input
-            ref={inputRef}
+            ref={passwordRef}
             id="password"
             type="password"
             value={password}
@@ -70,7 +94,7 @@ export function Login({ onAuthenticated }: Props) {
 
         <button
           type="submit"
-          disabled={loading || !password}
+          disabled={loading || !username || !password}
           className="font-mono text-sm uppercase tracking-widest text-[color:var(--color-ink)] underline underline-offset-4 decoration-[color:var(--color-rule)] hover:decoration-[color:var(--color-accent)] disabled:opacity-40 disabled:no-underline transition-colors"
         >
           {loading ? 'entrando…' : 'entrar →'}
