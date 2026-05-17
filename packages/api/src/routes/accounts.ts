@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { db } from '../db/index.js';
 
 export const accountsRouter = Router();
 
@@ -18,6 +17,7 @@ interface AccountRow {
 // GET /accounts?itemId=... — list accounts for a given Pluggy item
 accountsRouter.get('/accounts', (req, res, next) => {
   try {
+    const { db } = req;
     const { itemId } = querySchema.parse(req.query);
     const rows = db
       .prepare(

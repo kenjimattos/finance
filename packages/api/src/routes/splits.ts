@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { db } from '../db/index.js';
 import { computeBillWindowAtOffset } from '../services/billWindow.js';
 
 export const splitsRouter = Router();
@@ -12,6 +11,7 @@ const splitTypeSchema = z.object({
 // PUT /transactions/:id/split — mark a transaction as shared
 splitsRouter.put('/transactions/:id/split', (req, res, next) => {
   try {
+    const { db } = req;
     const { splitType } = splitTypeSchema.parse(req.body);
     const txId = req.params.id;
 
@@ -35,6 +35,7 @@ splitsRouter.put('/transactions/:id/split', (req, res, next) => {
 
 // DELETE /transactions/:id/split — remove split marking
 splitsRouter.delete('/transactions/:id/split', (req, res) => {
+  const { db } = req;
   const info = db
     .prepare('DELETE FROM transaction_splits WHERE transaction_id = ?')
     .run(req.params.id);
@@ -53,6 +54,7 @@ const bulkSplitSchema = z.object({
 // POST /transactions/bulk-split — mark many transactions at once
 splitsRouter.post('/transactions/bulk-split', (req, res, next) => {
   try {
+    const { db } = req;
     const { splitType, transactionIds } = bulkSplitSchema.parse(req.body);
 
     let applied = 0;
@@ -81,6 +83,7 @@ const bulkUnsplitSchema = z.object({
 
 splitsRouter.post('/transactions/bulk-unsplit', (req, res, next) => {
   try {
+    const { db } = req;
     const { transactionIds } = bulkUnsplitSchema.parse(req.body);
 
     let removed = 0;
@@ -123,6 +126,7 @@ interface SplitSummaryRow {
  */
 splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
   try {
+    const { db } = req;
     const { accountId, offset } = z
       .object({
         accountId: z.string().min(1),

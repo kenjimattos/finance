@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { db } from '../db/index.js';
 
 export const cardSettingsRouter = Router();
 
@@ -16,6 +15,7 @@ const upsertSchema = z.object({
 
 // GET /account-settings/:accountId
 cardSettingsRouter.get('/account-settings/:accountId', (req, res) => {
+  const { db } = req;
   const row = db
     .prepare('SELECT * FROM account_settings WHERE account_id = ?')
     .get(req.params.accountId);
@@ -29,6 +29,7 @@ cardSettingsRouter.get('/account-settings/:accountId', (req, res) => {
 // PUT /account-settings/:accountId
 cardSettingsRouter.put('/account-settings/:accountId', (req, res, next) => {
   try {
+    const { db } = req;
     const body = upsertSchema.parse(req.body);
     const { accountId } = req.params;
 
@@ -63,6 +64,7 @@ cardSettingsRouter.put('/account-settings/:accountId', (req, res, next) => {
 
 // GET /card-settings/:itemId
 cardSettingsRouter.get('/card-settings/:itemId', (req, res) => {
+  const { db } = req;
   const row = db
     .prepare('SELECT * FROM card_settings WHERE item_id = ?')
     .get(req.params.itemId);
@@ -76,6 +78,7 @@ cardSettingsRouter.get('/card-settings/:itemId', (req, res) => {
 // PUT /card-settings/:itemId — upsert closing/due configuration for a card
 cardSettingsRouter.put('/card-settings/:itemId', (req, res, next) => {
   try {
+    const { db } = req;
     const body = upsertSchema.parse(req.body);
     const { itemId } = req.params;
 

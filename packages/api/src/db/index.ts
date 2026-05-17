@@ -1,17 +1,40 @@
-import Database from 'better-sqlite3';
+import Database, { type Database as Db } from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 
-const DB_PATH = config.DATABASE_PATH;
-mkdirSync(dirname(DB_PATH), { recursive: true });
+export type { Db };
 
-export const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// Per-user handle cache. Each username maps to its own SQLite file under
+// DATABASE_DIR; the file is opened on first request and the handle is
+// cached for the lifetime of the process. better-sqlite3 connections are
+// synchronous and thread-safe within a single process, so a Map is enough
+// — no pooling needed.
+const handles = new Map<string, Db>();
 
-db.exec(`
+mkdirSync(config.DATABASE_DIR, { recursive: true });
+
+export function getDb(username: string): Db {
+  const cached = handles.get(username);
+  if (cached) return cached;
+  const filePath = join(config.DATABASE_DIR, `${username}.sqlite`);
+  const handle = initDb(filePath);
+  handles.set(username, handle);
+  return handle;
+}
+
+function initDb(filePath: string): Db {
+  const db = new Database(filePath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  runSchema(db);
+  runMigrations(db);
+  return db;
+}
+
+function runSchema(db: Db): void {
+  db.exec(`
   -- Bank connections ("items" in Pluggy's lingo). One row per linked card.
   CREATE TABLE IF NOT EXISTS items (
     id TEXT PRIMARY KEY,
@@ -334,6 +357,9 @@ db.exec(`
     FOREIGN KEY (transaction_id) REFERENCES bank_transactions(id) ON DELETE CASCADE
   );
 `);
+}
+
+function runMigrations(db: Db): void {
 
 // -----------------------------------------------------------------------------
 // Migrations
@@ -344,9 +370,9 @@ db.exec(`
 // PRAGMA table_info and only runs if the column is missing. Keep these
 // append-only — never delete or edit past migrations, because someone's
 // DB out there has already run them.
-addColumnIfMissing('transactions', 'card_last4', 'TEXT');
-addColumnIfMissing('transactions', 'amount_in_account_currency', 'REAL');
-addColumnIfMissing('manual_entries', 'month', 'TEXT');
+addColumnIfMissing(db, 'transactions', 'card_last4', 'TEXT');
+addColumnIfMissing(db, 'transactions', 'amount_in_account_currency', 'REAL');
+addColumnIfMissing(db, 'manual_entries', 'month', 'TEXT');
 
 // Backfill: assign existing month-less manual entries to the current month.
 // Manual entries are now per-month (independent editing). Legacy rows without
@@ -358,15 +384,15 @@ addColumnIfMissing('manual_entries', 'month', 'TEXT');
 }
 
 // Phase 5: add balance and subtype to accounts for BANK account support.
-addColumnIfMissing('accounts', 'balance', 'REAL');
-addColumnIfMissing('accounts', 'subtype', 'TEXT');
+addColumnIfMissing(db, 'accounts', 'balance', 'REAL');
+addColumnIfMissing(db, 'accounts', 'subtype', 'TEXT');
 
 // sort_key for user-controlled ordering within the cashflow day grouping.
 // NULL means "use the natural order" (bank_transactions: id ASC; manual_entries: id ASC).
 // Set to a fractional REAL when the user drags a row; new positions are placed
 // midway between neighbors so any sequence of drags stays representable.
-addColumnIfMissing('bank_transactions', 'sort_key', 'REAL');
-addColumnIfMissing('manual_entries', 'sort_key', 'REAL');
+addColumnIfMissing(db, 'bank_transactions', 'sort_key', 'REAL');
+addColumnIfMissing(db, 'manual_entries', 'sort_key', 'REAL');
 
 // Backfill balance and subtype from raw_json for existing accounts.
 db.exec(`
@@ -402,7 +428,7 @@ db.exec(`
 // Source column distinguishes Pluggy-synced transactions from manual entries
 // added by the user. Manual entries persist across re-syncs and can be
 // edited/deleted via the API.
-addColumnIfMissing('transactions', 'source', "TEXT DEFAULT 'pluggy'");
+addColumnIfMissing(db, 'transactions', 'source', "TEXT DEFAULT 'pluggy'");
 
 // Re-enable all category rules that were auto-disabled by the old
 // "2 overrides = disabled" logic. Rules now stay active regardless of
@@ -455,8 +481,8 @@ db.exec(`
 }
 
 // Phase 2: add account_id to card_groups and card_group_members.
-addColumnIfMissing('card_groups', 'account_id', 'TEXT');
-addColumnIfMissing('card_group_members', 'account_id', 'TEXT');
+addColumnIfMissing(db, 'card_groups', 'account_id', 'TEXT');
+addColumnIfMissing(db, 'card_group_members', 'account_id', 'TEXT');
 
 // Backfill: for card_groups where account_id is NULL, look up the CREDIT
 // account for the group's item_id. If there is exactly one, assign it.
@@ -765,7 +791,9 @@ db.exec(
   }
 }
 
-function addColumnIfMissing(table: string, column: string, decl: string): void {
+}
+
+function addColumnIfMissing(db: Db, table: string, column: string, decl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
     name: string;
   }>;

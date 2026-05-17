@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { db } from '../db/index.js';
 import { pickNextColor } from '../services/categoryColors.js';
 
 export const cardGroupsRouter = Router();
@@ -43,6 +42,7 @@ interface CardGroupRow {
  */
 cardGroupsRouter.get('/cards', (req, res, next) => {
   try {
+    const { db } = req;
     const { itemId, accountId } = itemIdQuery.parse(req.query);
     const filterByAccount = !!accountId;
     const rows = db
@@ -91,6 +91,7 @@ cardGroupsRouter.get('/cards', (req, res, next) => {
 // GET /card-groups?itemId=... — list groups scoped to an item
 cardGroupsRouter.get('/card-groups', (req, res, next) => {
   try {
+    const { db } = req;
     const { itemId, accountId } = itemIdQuery.parse(req.query);
     const filterByAccount = !!accountId;
     const rows = db
@@ -112,6 +113,7 @@ cardGroupsRouter.get('/card-groups', (req, res, next) => {
 // POST /card-groups — create a group { itemId, name }, auto color
 cardGroupsRouter.post('/card-groups', (req, res, next) => {
   try {
+    const { db } = req;
     const { itemId, accountId, name } = createSchema.parse(req.body);
 
     // Validate the item exists — clean 404 instead of FK error
@@ -151,6 +153,7 @@ cardGroupsRouter.post('/card-groups', (req, res, next) => {
 // PUT /card-groups/:id — rename
 cardGroupsRouter.put('/card-groups/:id', (req, res, next) => {
   try {
+    const { db } = req;
     const { name } = renameSchema.parse(req.body);
     const info = db
       .prepare(
@@ -178,6 +181,7 @@ cardGroupsRouter.put('/card-groups/:id', (req, res, next) => {
 
 // DELETE /card-groups/:id — cascades to members (they lose their assignment)
 cardGroupsRouter.delete('/card-groups/:id', (req, res) => {
+  const { db } = req;
   const info = db
     .prepare('DELETE FROM card_groups WHERE id = ?')
     .run(req.params.id);
@@ -191,6 +195,7 @@ cardGroupsRouter.delete('/card-groups/:id', (req, res) => {
 // PUT /cards/:last4/group — assign a card to a group, or clear it (null)
 cardGroupsRouter.put('/cards/:last4/group', (req, res, next) => {
   try {
+    const { db } = req;
     const { itemId, cardGroupId } = assignSchema.parse(req.body);
     const last4 = decodeURIComponent(req.params.last4).trim();
     if (!last4) {

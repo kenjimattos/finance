@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { db } from '../db/index.js';
 import { pickNextColor } from '../services/categoryColors.js';
 
 export const categoriesRouter = Router();
@@ -8,7 +7,8 @@ export const categoriesRouter = Router();
 const nameSchema = z.object({ name: z.string().min(1).max(40).trim() });
 
 // GET /categories — list with usage_count, most used first
-categoriesRouter.get('/categories', (_req, res) => {
+categoriesRouter.get('/categories', (req, res) => {
+  const { db } = req;
   const rows = db
     .prepare(
       `SELECT id, name, color, usage_count, created_at
@@ -22,6 +22,7 @@ categoriesRouter.get('/categories', (_req, res) => {
 // POST /categories — creates a new category with an auto-assigned color
 categoriesRouter.post('/categories', (req, res, next) => {
   try {
+    const { db } = req;
     const { name } = nameSchema.parse(req.body);
     const existing = db
       .prepare('SELECT color FROM user_categories')
@@ -51,6 +52,7 @@ categoriesRouter.post('/categories', (req, res, next) => {
 // PUT /categories/:id — rename (color is not user-editable in V1)
 categoriesRouter.put('/categories/:id', (req, res, next) => {
   try {
+    const { db } = req;
     const { name } = nameSchema.parse(req.body);
     const info = db
       .prepare('UPDATE user_categories SET name = ? WHERE id = ?')
@@ -70,6 +72,7 @@ categoriesRouter.put('/categories/:id', (req, res, next) => {
 
 // DELETE /categories/:id — cascades to transaction_categories and category_rules
 categoriesRouter.delete('/categories/:id', (req, res) => {
+  const { db } = req;
   const info = db
     .prepare('DELETE FROM user_categories WHERE id = ?')
     .run(req.params.id);

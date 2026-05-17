@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Transaction } from 'pluggy-sdk';
 import { pluggy } from '../services/pluggy.js';
-import { db } from '../db/index.js';
 import {
   computeBillWindowAtOffset,
   findOffsetForDueMonth,
@@ -15,7 +14,8 @@ export const cashflowRouter = Router();
  * GET /cashflow/range — returns the first and last month that have BANK
  * transactions, so the frontend knows which months to render.
  */
-cashflowRouter.get('/cashflow/range', (_req, res) => {
+cashflowRouter.get('/cashflow/range', (req, res) => {
+  const { db } = req;
   const row = db
     .prepare(
       `SELECT MIN(date) AS first_date, MAX(date) AS last_date
@@ -40,6 +40,7 @@ cashflowRouter.get('/cashflow/range', (_req, res) => {
  * DELETE /cashflow/bill-tag/:transactionId — remove the tag.
  */
 cashflowRouter.put('/cashflow/bill-tag/:transactionId', (req, res) => {
+  const { db } = req;
   const { transactionId } = req.params;
   db.prepare(
     `INSERT OR IGNORE INTO bank_bill_payment_tags (transaction_id) VALUES (?)`,
@@ -48,6 +49,7 @@ cashflowRouter.put('/cashflow/bill-tag/:transactionId', (req, res) => {
 });
 
 cashflowRouter.delete('/cashflow/bill-tag/:transactionId', (req, res) => {
+  const { db } = req;
   const { transactionId } = req.params;
   db.prepare('DELETE FROM bank_bill_payment_tags WHERE transaction_id = ?').run(transactionId);
   res.json({ ok: true, transactionId, tagged: false });
@@ -60,6 +62,7 @@ cashflowRouter.delete('/cashflow/bill-tag/:transactionId', (req, res) => {
  * DELETE /cashflow/hide/:transactionId — un-hide.
  */
 cashflowRouter.put('/cashflow/hide/:transactionId', (req, res) => {
+  const { db } = req;
   const { transactionId } = req.params;
   db.prepare(
     'INSERT OR IGNORE INTO bank_transaction_hidden (transaction_id) VALUES (?)',
@@ -68,6 +71,7 @@ cashflowRouter.put('/cashflow/hide/:transactionId', (req, res) => {
 });
 
 cashflowRouter.delete('/cashflow/hide/:transactionId', (req, res) => {
+  const { db } = req;
   const { transactionId } = req.params;
   db.prepare('DELETE FROM bank_transaction_hidden WHERE transaction_id = ?').run(transactionId);
   res.json({ ok: true, transactionId, hidden: false });
@@ -79,6 +83,7 @@ cashflowRouter.delete('/cashflow/hide/:transactionId', (req, res) => {
  */
 cashflowRouter.put('/bank-transactions/:id/description', (req, res, next) => {
   try {
+    const { db } = req;
     const txId = req.params.id;
     const { description } = z
       .object({ description: z.string().min(1) })
@@ -108,6 +113,7 @@ cashflowRouter.put('/bank-transactions/:id/description', (req, res, next) => {
  */
 cashflowRouter.put('/bank-transactions/:id/sort-key', (req, res, next) => {
   try {
+    const { db } = req;
     const txId = req.params.id;
     const { sortKey } = z
       .object({ sortKey: z.number().nullable() })
@@ -128,6 +134,7 @@ cashflowRouter.put('/bank-transactions/:id/sort-key', (req, res, next) => {
 
 cashflowRouter.delete('/bank-transactions/:id/description', (req, res, next) => {
   try {
+    const { db } = req;
     const txId = req.params.id;
     db.prepare(
       'DELETE FROM bank_transaction_description_overrides WHERE transaction_id = ?',
@@ -221,6 +228,7 @@ const BANK_TX_NOT_HIDDEN_SQL =
  */
 cashflowRouter.get('/cashflow', (req, res, next) => {
   try {
+    const { db } = req;
     const { month: monthParam } = z
       .object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() })
       .parse(req.query);
@@ -534,8 +542,9 @@ function toYmd(d: Date | string): string {
  * syncs. If a real recycle ever happens, the new payload simply overwrites
  * the old row — we will see it in the data and react then.
  */
-cashflowRouter.post('/cashflow/sync', async (_req, res, next) => {
+cashflowRouter.post('/cashflow/sync', async (req, res, next) => {
   try {
+    const { db } = req;
     const items = db
       .prepare('SELECT id FROM items')
       .all() as Array<{ id: string }>;

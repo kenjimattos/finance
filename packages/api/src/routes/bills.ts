@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { db } from '../db/index.js';
+import type { Db } from '../db/index.js';
 import {
   computeBillWindowAtOffset,
   type BillWindow,
@@ -40,7 +40,7 @@ function scopeClause(s: Scope): { column: string; value: string } {
     : { column: 't.item_id', value: s.itemId };
 }
 
-function requireAccountSettings(accountId: string): AccountSettingsRow | null {
+function requireAccountSettings(db: Db, accountId: string): AccountSettingsRow | null {
   return (
     (db
       .prepare('SELECT * FROM account_settings WHERE account_id = ?')
@@ -48,7 +48,7 @@ function requireAccountSettings(accountId: string): AccountSettingsRow | null {
   );
 }
 
-function requireCardSettings(itemId: string): CardSettingsRow | null {
+function requireCardSettings(db: Db, itemId: string): CardSettingsRow | null {
   return (
     (db
       .prepare('SELECT * FROM card_settings WHERE item_id = ?')
@@ -59,6 +59,7 @@ function requireCardSettings(itemId: string): CardSettingsRow | null {
 // GET /bills?itemId=... — list CLOSED bills cached from Pluggy
 billsRouter.get('/bills', (req, res, next) => {
   try {
+    const { db } = req;
     const { itemId } = z.object({ itemId: z.string().min(1) }).parse(req.query);
     const rows = db
       .prepare(
@@ -95,6 +96,7 @@ billsRouter.get('/bills', (req, res, next) => {
  */
 billsRouter.get('/bills/current/breakdown', (req, res, next) => {
   try {
+    const { db } = req;
     const { itemId, accountId, offset } = z
       .object({
         itemId: z.string().min(1),
@@ -110,7 +112,7 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
     let dueDay: number;
 
     if (accountId) {
-      const as = requireAccountSettings(accountId);
+      const as = requireAccountSettings(db, accountId);
       if (!as) {
         res.status(412).json({
           error: 'AccountSettingsMissing',
@@ -124,7 +126,7 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
       closingDay = as.closing_day;
       dueDay = as.due_day;
     } else {
-      const cs = requireCardSettings(itemId);
+      const cs = requireCardSettings(db, itemId);
       if (!cs) {
         res.status(412).json({
           error: 'CardSettingsMissing',
@@ -149,18 +151,20 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
     // using the same three-window shift-aware pattern.
     const nextNext = computeBillWindowAtOffset(settingsT, offset + 2);
 
-    const total = round2(sumBillTotalWithShifts(scope, current, previous, next));
+    const total = round2(sumBillTotalWithShifts(db, scope, current, previous, next));
     const previousTotal = round2(
-      sumBillTotalWithShifts(scope, previous, prevPrev, current),
+      sumBillTotalWithShifts(db, scope, previous, prevPrev, current),
     );
-    const categories = categoryBreakdownWithShifts(scope, current, previous, next);
+    const categories = categoryBreakdownWithShifts(db, scope, current, previous, next);
     const installments = installmentBreakdownWithShifts(
+      db,
       scope,
       current,
       previous,
       next,
     );
     const hasNextBillTransactions = countTransactionsWithShifts(
+      db,
       scope,
       next,
       current,
@@ -208,6 +212,7 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
  * exposes ±1 anyway.
  */
 function sumBillTotalWithShifts(
+  db: Db,
   scope: Scope,
   current: BillWindow,
   previous: BillWindow,
@@ -247,6 +252,7 @@ function sumBillTotalWithShifts(
  * transaction inbox convention.
  */
 function installmentBreakdownWithShifts(
+  db: Db,
   scope: Scope,
   current: BillWindow,
   previous: BillWindow,
@@ -301,6 +307,7 @@ function installmentBreakdownWithShifts(
  * Same windowing logic as sumBillTotalWithShifts.
  */
 function categoryBreakdownWithShifts(
+  db: Db,
   scope: Scope,
   current: BillWindow,
   previous: BillWindow,
@@ -343,6 +350,7 @@ function categoryBreakdownWithShifts(
  * navigate to.
  */
 function countTransactionsWithShifts(
+  db: Db,
   scope: Scope,
   current: BillWindow,
   previous: BillWindow,
