@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.6.0] - 2026-05-17
 
 ### Added
 
@@ -13,8 +13,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Fixed
 
 - **Gerenciar bancos.** O menu agora agrupa por item Pluggy: cada conector aparece como header com suas contas (BANK + CREDIT) indentadas. Items órfãos (sem contas, restos de conexões falhas) também aparecem marcados como "sem contas" pra poderem ser removidos pelo próprio menu. O label de cada item tenta derivar o banco real (Itaú, Nubank, PicPay…) a partir dos nomes das contas, com fallback pro `connector_name` da Pluggy — útil no sandbox onde tudo vem como "Meu Pluggy".
-
-## [1.6.0] - 2026-05-17
 
 ### Added
 
