@@ -933,6 +933,38 @@ function AddBank() {
     </>
   );
 }
+// Map of substrings → display name, ordered by specificity. First match wins.
+const BANK_NAME_PATTERNS: Array<[RegExp, string]> = [
+  [/banco do brasil|\bbb\b/i, 'Banco do Brasil'],
+  [/ita[uú]/i, 'Itaú'],
+  [/bradesco/i, 'Bradesco'],
+  [/santander/i, 'Santander'],
+  [/nubank|nu pagamentos/i, 'Nubank'],
+  [/caixa/i, 'Caixa'],
+  [/inter\b/i, 'Inter'],
+  [/c6\b/i, 'C6'],
+  [/picpay/i, 'PicPay'],
+  [/mercado ?pago/i, 'Mercado Pago'],
+  [/pag(seguro|bank)/i, 'PagBank'],
+  [/safra/i, 'Safra'],
+  [/btg/i, 'BTG'],
+  [/\bxp\b/i, 'XP'],
+  [/original/i, 'Original'],
+  [/next\b/i, 'Next'],
+  [/neon/i, 'Neon'],
+  [/will\b/i, 'Will'],
+];
+
+function deriveBankName(accounts: Account[], fallback: string): string {
+  for (const account of accounts) {
+    if (!account.name) continue;
+    for (const [pattern, display] of BANK_NAME_PATTERNS) {
+      if (pattern.test(account.name)) return display;
+    }
+  }
+  return fallback;
+}
+
 // ─── Remove bank Button ─────────────────────────────────────────
 
 function RemoveItemGroup({
@@ -951,7 +983,7 @@ function RemoveItemGroup({
       queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
     },
   });
-  const connectorLabel = item.connector_name ?? 'Banco';
+  const connectorLabel = deriveBankName(accounts, item.connector_name ?? 'Banco');
   const isOrphan = accounts.length === 0;
 
   return (
