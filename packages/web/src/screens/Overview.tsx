@@ -13,6 +13,7 @@ import {
 import { formatBRL, formatDateLong, formatDelta } from '../lib/format';
 import { findOffsetForDueMonth, currentDueMonth } from '../lib/billWindow';
 import { SplitSection } from '../components/SplitSection';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 // ─── Month label ────────────────────────────────────────────────────
 
@@ -480,7 +481,7 @@ export function Overview({
           <div className="flex items-center gap-4">
             <SyncAllButton items={items} />
             <ManageBankButton items={items} accounts={allAccountsAnyType} />
-  
+            <ThemeToggle />
           </div>
         </div>
       </div>

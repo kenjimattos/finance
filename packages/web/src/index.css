@@ -41,6 +41,64 @@
 
 :root {
   --cashflow-table: 10px 30px 1fr 110px 90px;
+  /* Grain blend mode — overridden in dark theme so the noise doesn't
+   * crush the paper background into mud. */
+  --paper-grain-blend: multiply;
+  --paper-grain-opacity: 0.35;
+}
+
+/*
+ * Dark theme — a "darkroom print" of the light palette. Warm near-black
+ * paper, cream ink, the same burnt-orange accent (nudged brighter so it
+ * holds against the dark ground). Applied either explicitly via
+ * data-theme="dark" or via data-theme="auto" + OS preference.
+ */
+[data-theme='dark'] {
+  --color-paper: #14110e;
+  --color-paper-tint: #1d1916;
+  --color-paper-rule: #2a2520;
+  --color-paper-shadow: #3a322a;
+
+  --color-ink: #f4ede0;
+  --color-ink-soft: #d8cfbf;
+  --color-ink-muted: #9c9384;
+  --color-ink-faint: #6a6155;
+
+  --color-accent: #e88a55;
+  --color-accent-soft: #f0a578;
+
+  --color-positive: #9ec460;
+  --color-negative: #f4ede0;
+
+  --paper-grain-blend: screen;
+  --paper-grain-opacity: 0.18;
+
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme='auto'] {
+    --color-paper: #14110e;
+    --color-paper-tint: #1d1916;
+    --color-paper-rule: #2a2520;
+    --color-paper-shadow: #3a322a;
+
+    --color-ink: #f4ede0;
+    --color-ink-soft: #d8cfbf;
+    --color-ink-muted: #9c9384;
+    --color-ink-faint: #6a6155;
+
+    --color-accent: #e88a55;
+    --color-accent-soft: #f0a578;
+
+    --color-positive: #9ec460;
+    --color-negative: #f4ede0;
+
+    --paper-grain-blend: screen;
+    --paper-grain-opacity: 0.18;
+
+    color-scheme: dark;
+  }
 }
 
 @media (min-width: 768px) {
@@ -83,13 +141,13 @@ body::before {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.35;
+  opacity: var(--paper-grain-opacity);
   background-image:
     radial-gradient(circle at 20% 30%, var(--color-paper-shadow) 0.5px, transparent 0.5px),
     radial-gradient(circle at 80% 60%, var(--color-paper-shadow) 0.5px, transparent 0.5px),
     radial-gradient(circle at 40% 80%, var(--color-paper-shadow) 0.5px, transparent 0.5px);
   background-size: 3px 3px, 5px 5px, 7px 7px;
-  mix-blend-mode: multiply;
+  mix-blend-mode: var(--paper-grain-blend);
 }
 
 /*
