@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-A **self-hosted, single-user** credit card spending manager backed by [Pluggy](https://pluggy.ai) (Brazilian Open Finance aggregator). The value is not just viewing transactions — it's **categorizing them** with user-defined categories that the system learns to auto-apply, seeing the **currently open bill** with category breakdown and installment detail, and splitting shared spend with a partner. Each user runs their own copy with their own Pluggy credentials in `packages/api/.env`; there is no multi-tenant auth and adding one is not a goal.
+A **self-hosted, small-group** credit card spending manager backed by [Pluggy](https://pluggy.ai) (Brazilian Open Finance aggregator). The value is not just viewing transactions — it's **categorizing them** with user-defined categories that the system learns to auto-apply, seeing the **currently open bill** with category breakdown and installment detail, and splitting shared spend with a partner. One Pluggy account in `packages/api/.env` powers everyone; each user gets an isolated SQLite file under `DATABASE_DIR/<username>.sqlite`, and credentials are declared as `USER_<NAME>_PASSWORD` env vars (no signup flow, the operator manages users by editing env).
 
 ## Key invariants
 
@@ -25,8 +25,9 @@ Functional end-to-end. What's shipped:
 - **Cash flow.** `CashFlow` is the landing page: multi-month ledger anchored on `balance_snapshots`, BANK transactions for past days, manual recurring entries (`manual_entries`, per-month) + credit-card bill outflows for future days, single global realized/projected boundary, drag-and-drop reordering within a day, hide flag for bank-side duplicates, click-to-drill on bill outflows.
 - **Manual transactions.** Add/edit/delete rows directly in a bill inbox when Pluggy misses them (`source='manual'`). Supports day/month/year, debit or credit direction, and installment metadata so they surface in the split summary's parceladas list.
 - **Bill splitting.** Mark transactions ½ or →dela (otherwise implicitly "meu"). Per-row + bulk. Unified `SplitSection` on both Dashboard and Overview.
-- **Auth.** Optional password gate (`APP_PASSWORD` env var) with HTTP-only cookie session. Local dev bypasses when unset.
-- **Deployment.** Railway/Nixpacks config checked in. Production Express serves the SPA from `packages/web/dist` on the same origin and strips the `/api/` prefix. `DATABASE_PATH` required (no default) — point at a persistent volume.
+- **Auth.** Per-user passwords via `USER_<NAME>_PASSWORD` env vars; cookie session carries the username (HMAC-signed with `SESSION_SECRET`). When no `USER_*_PASSWORD` is set, the API falls back to an open "default" user for local dev.
+- **Per-user SQLite.** Each authenticated user has their own database file at `DATABASE_DIR/<username>.sqlite`, opened on first request and cached per-process. Migrations run automatically on first open. Routes access the DB via `req.db` (injected by `authMiddleware`); never import a `db` singleton.
+- **Deployment.** Railway/Nixpacks config checked in. Production Express serves the SPA from `packages/web/dist` on the same origin and strips the `/api/` prefix. `DATABASE_DIR` required (no default) — point at a persistent volume.
 - **Responsive.** Mobile-aware layout (compact CashFlow columns, inline BillHeader actions, single-column SplitSection).
 - **Tests.** 56 tests covering `billWindow` (including `findOffsetForDueMonth`), `merchantSlug`, `applyLearnedRules`.
 
