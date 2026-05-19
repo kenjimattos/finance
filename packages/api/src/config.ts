@@ -33,6 +33,26 @@ function parseUsers(env: NodeJS.ProcessEnv): UserCredentials {
 
 export const users = parseUsers(process.env);
 
+// Optional partnership map: USER_KENJI_PARTNER=alessandra declares that the
+// `kenji` account shares credit-card splits with `alessandra`. The link is
+// directional — if you want both users to see each other's shared spend,
+// declare it from both sides. Only used by the /partner/* routes.
+function parsePartners(env: NodeJS.ProcessEnv): Map<string, string> {
+  const partners = new Map<string, string>();
+  const re = /^USER_([A-Z0-9_]+)_PARTNER$/;
+  for (const [key, value] of Object.entries(env)) {
+    const m = key.match(re);
+    if (!m || !value) continue;
+    const owner = m[1].toLowerCase();
+    const partner = value.trim().toLowerCase();
+    if (!partner) continue;
+    partners.set(owner, partner);
+  }
+  return partners;
+}
+
+export const partners = parsePartners(process.env);
+
 // When no users are configured the app falls back to an open mode for local
 // development (single anonymous user, DB file `default.sqlite`). The session
 // secret is still required in production for cookie signing.
