@@ -290,6 +290,51 @@ export interface SplitSummary {
 
 // ---------- Endpoints ----------
 
+export interface PartnerCard {
+  ownerUsername: string;
+  accountId: string;
+  accountName: string | null;
+  accountNumber: string | null;
+  itemId: string;
+  connectorName: string | null;
+  displayName: string | null;
+  closingDay: number;
+  dueDay: number;
+}
+
+export interface PartnerCardTransaction {
+  id: string;
+  date: string;
+  description: string | null;
+  amount: number;
+  owes: number;
+  splitType: 'half' | 'theirs';
+  installmentNumber: number | null;
+  totalInstallments: number | null;
+  category: { id: number; name: string; color: string } | null;
+}
+
+export interface PartnerCardBreakdown {
+  ownerUsername: string;
+  accountId: string;
+  itemId: string;
+  accountName: string | null;
+  connectorName: string | null;
+  displayName: string | null;
+  closingDay: number;
+  dueDay: number;
+  offset: number;
+  periodStart: string;
+  periodEnd: string;
+  closingDate: string;
+  dueDate: string;
+  total: number;
+  previousTotal: number;
+  delta: number;
+  categories: Array<{ id: number; name: string; color: string; total: number }>;
+  transactions: PartnerCardTransaction[];
+}
+
 export const api = {
   connectToken: () =>
     request<{ accessToken: string }>('/connect-token', { method: 'POST' }),
@@ -602,6 +647,14 @@ export const api = {
     const qs = new URLSearchParams({ accountId });
     if (offset !== undefined && offset !== 0) qs.set('offset', String(offset));
     return request<SplitSummary>(`/bills/current/split-summary?${qs}`);
+  },
+
+  listPartnerCards: () => request<PartnerCard[]>('/partner/cards'),
+
+  getPartnerCardBreakdown: (owner: string, accountId: string, offset?: number) => {
+    const qs = new URLSearchParams({ owner, accountId });
+    if (offset !== undefined && offset !== 0) qs.set('offset', String(offset));
+    return request<PartnerCardBreakdown>(`/partner/cards/breakdown?${qs}`);
   },
 
   getAuthMe: () =>
