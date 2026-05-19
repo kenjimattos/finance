@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
-- **Compartilhamento de divisão entre usuários parceiros.** O env var `USER_<NOME>_PARTNER=<outro_usuario>` declara que o usuário dono divide cartões de crédito com o parceiro indicado. O parceiro passa a enxergar, em modo somente leitura, as transações marcadas como `½` ou `dela` nos cartões do dono — cada cartão compartilhado aparece como um card a parte na Overview com o total que o parceiro deve. CashFlow não é afetado; só cartões de crédito participam do compartilhamento. Novas rotas `GET /partner/cards` e `GET /partner/cards/breakdown` materializam a leitura cruzada direto da SQLite do dono, sem duplicar dados.
+- **Compartilhamento de divisão entre usuários parceiros.** O env var `USER_<NOME>_PARTNER=<outro_usuario>` declara que o usuário dono divide cartões de crédito com o parceiro indicado. O parceiro passa a enxergar, em modo somente leitura, as transações marcadas como `½` ou `dela` nos cartões do dono — cada cartão compartilhado aparece como um card a parte na Overview com o total que o parceiro deve, com drill-in que lista as transações, categorias e variação vs fatura anterior (também só leitura). CashFlow não é afetado; só cartões de crédito participam do compartilhamento. Novas rotas `GET /partner/cards` e `GET /partner/cards/breakdown` materializam a leitura cruzada direto da SQLite do dono, sem duplicar dados.
 
 ## [1.6.0] - 2026-05-17
 

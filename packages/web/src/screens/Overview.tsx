@@ -9,6 +9,8 @@ import {
   type AccountSettings,
   type BillBreakdown,
   type SplitSummary,
+  type PartnerCard,
+  type PartnerCardBreakdown,
 } from '../lib/api';
 import { formatBRL, formatDateLong, formatDelta } from '../lib/format';
 import { findOffsetForDueMonth, currentDueMonth } from '../lib/billWindow';
@@ -48,6 +50,7 @@ export function Overview({
   targetMonth: controlledMonth,
   onMonthChange,
   onSelectAccount,
+  onSelectPartnerCard,
   onOpenCashFlow,
 }: {
   items: Item[];
@@ -55,6 +58,7 @@ export function Overview({
   targetMonth: { year: number; month: number } | null;
   onMonthChange: (m: { year: number; month: number }) => void;
   onSelectAccount: (itemId: string, accountId: string, offset: number) => void;
+  onSelectPartnerCard: (owner: string, accountId: string, offset: number) => void;
   onOpenCashFlow: () => void;
 }) {
   const today = useMemo(() => new Date(), []);
@@ -299,6 +303,35 @@ export function Overview({
       return {
         queryKey: ['billBreakdown', item.id, account.id, offset],
         queryFn: () => api.getBillBreakdown(item.id, account.id, offset ?? 0),
+        enabled: offset !== null,
+      };
+    }),
+  });
+
+  // ── Partner shared cards (read-only) ──
+
+  const partnerCardsQ = useQuery({
+    queryKey: ['partnerCards'],
+    queryFn: api.listPartnerCards,
+  });
+
+  const partnerCards = partnerCardsQ.data ?? [];
+
+  const partnerOffsets = useMemo(
+    () =>
+      partnerCards.map((c) => {
+        const cs = { closingDay: c.closingDay, dueDay: c.dueDay };
+        return findOffsetForDueMonth(cs, year, month, today);
+      }),
+    [partnerCards, year, month, today],
+  );
+
+  const partnerBreakdownQueries = useQueries({
+    queries: partnerCards.map((c, i) => {
+      const offset = partnerOffsets[i];
+      return {
+        queryKey: ['partnerCardBreakdown', c.ownerUsername, c.accountId, offset],
+        queryFn: () => api.getPartnerCardBreakdown(c.ownerUsername, c.accountId, offset ?? 0),
         enabled: offset !== null,
       };
     }),
@@ -645,6 +678,36 @@ export function Overview({
         </div>
       </div>
 
+      {/* ═══ COMPARTILHADOS ═══ */}
+      {partnerCards.length > 0 && (
+        <div className="mt-14">
+          <div className="eyebrow mb-6 uppercase">compartilhados</div>
+          <p className="mb-6 font-body text-sm text-[color:var(--color-ink-muted)]">
+            Cartões de parceiros que dividem despesas com você. Valores são a
+            sua parte (½ pela metade, dela pelo total).
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {partnerCards.map((card, i) => {
+              const offset = partnerOffsets[i];
+              const bq = partnerBreakdownQueries[i];
+              return (
+                <PartnerAccountCard
+                  key={`${card.ownerUsername}:${card.accountId}`}
+                  card={card}
+                  breakdown={bq?.data ?? null}
+                  loading={bq?.isLoading ?? false}
+                  onClick={() => {
+                    if (offset !== null) {
+                      onSelectPartnerCard(card.ownerUsername, card.accountId, offset);
+                    }
+                  }}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ═══ DIVISÃO ═══ */}
       {aggregatedSplit && (
         <SplitSection split={aggregatedSplit} variant="section" />
@@ -799,6 +862,72 @@ function AccountCard({
             </span>
           );
         })()}
+
+        {breakdown && (
+          <span className="mt-3 flex flex-wrap gap-x-5 gap-y-1 font-body text-xs text-[color:var(--color-ink-muted)]">
+            <span>
+              fecha{' '}
+              <span className="text-[color:var(--color-ink-soft)]">
+                {formatDateLong(breakdown.closingDate)}
+              </span>
+            </span>
+            <span>
+              vence{' '}
+              <span className="text-[color:var(--color-ink-soft)]">
+                {formatDateLong(breakdown.dueDate)}
+              </span>
+            </span>
+          </span>
+        )}
+      </button>
+    </div>
+  );
+}
+
+// ─── Partner (shared) account card ──────────────────────────────────
+
+function PartnerAccountCard({
+  card,
+  breakdown,
+  loading,
+  onClick,
+}: {
+  card: PartnerCard;
+  breakdown: PartnerCardBreakdown | null;
+  loading: boolean;
+  onClick: () => void;
+}) {
+  const total = breakdown?.total ?? 0;
+  const displayName =
+    card.displayName ?? card.accountName ?? card.connectorName ?? 'Cartão';
+
+  return (
+    <div className="group relative flex flex-col items-start border border-dashed border-[color:var(--color-paper-rule)] px-5 py-5 text-left transition-colors hover:border-[color:var(--color-ink-muted)]">
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex w-full flex-col items-start text-left"
+      >
+        <span className="eyebrow mb-2 flex items-center gap-2 text-[color:var(--color-ink-muted)] transition-colors group-hover:text-[color:var(--color-accent)]">
+          <span>{displayName}</span>
+          <span className="rounded-sm border border-[color:var(--color-paper-rule)] px-1.5 py-[1px] text-[9px] tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+            {card.ownerUsername}
+          </span>
+        </span>
+
+        {loading ? (
+          <span className="inline-block h-10 w-2/3 animate-pulse rounded-sm bg-[color:var(--color-paper-tint)]" />
+        ) : (
+          <span className="font-display text-[40px] leading-none tracking-[-0.02em] text-[color:var(--color-ink)]">
+            {formatBRL(total)}
+          </span>
+        )}
+
+        {breakdown && (
+          <span className="mt-2 font-body text-xs text-[color:var(--color-ink-muted)]">
+            sua parte
+          </span>
+        )}
 
         {breakdown && (
           <span className="mt-3 flex flex-wrap gap-x-5 gap-y-1 font-body text-xs text-[color:var(--color-ink-muted)]">

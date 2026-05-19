@@ -6,6 +6,7 @@ import { Onboarding } from './screens/Onboarding';
 import { Overview } from './screens/Overview';
 import { Dashboard } from './screens/Dashboard';
 import { CashFlow } from './screens/CashFlow';
+import { SharedCardDetail } from './screens/SharedCardDetail';
 
 /**
  * App routes between four screens:
@@ -35,6 +36,12 @@ export function App() {
 
   const [drillDown, setDrillDown] = useState<{
     itemId: string;
+    accountId: string;
+    offset: number;
+  } | null>(null);
+
+  const [partnerDrill, setPartnerDrill] = useState<{
+    owner: string;
     accountId: string;
     offset: number;
   } | null>(null);
@@ -83,6 +90,13 @@ export function App() {
               initialOffset={drillDown.offset}
               onBack={() => setDrillDown(null)}
             />
+          ) : partnerDrill ? (
+            <SharedCardDetail
+              owner={partnerDrill.owner}
+              accountId={partnerDrill.accountId}
+              initialOffset={partnerDrill.offset}
+              onBack={() => setPartnerDrill(null)}
+            />
           ) : cashflowOpen ? (
             <CashFlow
               onSelectBill={(year, month) => {
@@ -98,6 +112,9 @@ export function App() {
               onMonthChange={setOverviewMonth}
               onSelectAccount={(itemId, accountId, offset) =>
                 setDrillDown({ itemId, accountId, offset })
+              }
+              onSelectPartnerCard={(owner, accountId, offset) =>
+                setPartnerDrill({ owner, accountId, offset })
               }
               onOpenCashFlow={() => setCashflowOpen(true)}
             />
