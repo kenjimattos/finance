@@ -187,27 +187,41 @@ partnerRouter.get('/partner/cards/breakdown', (req, res, next) => {
       };
     });
 
-    // Category breakdown — sum the *owed* portion per category so the bar
-    // chart adds up to the headline total.
-    const catMap = new Map<number, { id: number; name: string; color: string; total: number }>();
+    // Category breakdown — sum the *owed* portion per category, kept split
+    // by half vs theirs so the Overview can show each separately. half +
+    // theirs adds up to the headline total.
+    const catMap = new Map<
+      number,
+      { id: number; name: string; color: string; halfTotal: number; theirsTotal: number }
+    >();
     for (const r of cur.rows) {
       if (r.user_category_id == null) continue;
       const owed =
         r.split_type === 'half'
           ? Math.round((r.amount / 2) * 100) / 100
           : Math.round(r.amount * 100) / 100;
-      const existing = catMap.get(r.user_category_id);
-      if (existing) existing.total += owed;
-      else
-        catMap.set(r.user_category_id, {
+      const existing =
+        catMap.get(r.user_category_id) ??
+        {
           id: r.user_category_id,
           name: r.user_category_name!,
           color: r.user_category_color!,
-          total: owed,
-        });
+          halfTotal: 0,
+          theirsTotal: 0,
+        };
+      if (r.split_type === 'half') existing.halfTotal += owed;
+      else existing.theirsTotal += owed;
+      catMap.set(r.user_category_id, existing);
     }
     const categories = Array.from(catMap.values())
-      .map((c) => ({ ...c, total: round2(c.total) }))
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        color: c.color,
+        halfTotal: round2(c.halfTotal),
+        theirsTotal: round2(c.theirsTotal),
+        total: round2(c.halfTotal + c.theirsTotal),
+      }))
       .sort((a, b) => b.total - a.total);
 
     res.json({
