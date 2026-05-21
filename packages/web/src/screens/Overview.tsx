@@ -383,6 +383,30 @@ export function Overview({
     };
   }, [partnerBreakdownQueries]);
 
+  // Installment ("parcela") transactions across every shared card, kept
+  // split by ½ vs dela so each column lists its own. `owes` is the viewer's
+  // share for that installment (half/2 or full).
+  const partnerInstallments = useMemo(() => {
+    const half: PartnerInstallmentItem[] = [];
+    const theirs: PartnerInstallmentItem[] = [];
+    for (const q of partnerBreakdownQueries) {
+      if (!q.data) continue;
+      for (const t of q.data.transactions) {
+        if (t.installmentNumber == null || t.totalInstallments == null) continue;
+        const item: PartnerInstallmentItem = {
+          id: t.id,
+          description: t.description,
+          owes: t.owes,
+          installmentNumber: t.installmentNumber,
+          totalInstallments: t.totalInstallments,
+        };
+        if (t.splitType === 'half') half.push(item);
+        else theirs.push(item);
+      }
+    }
+    return { half, theirs };
+  }, [partnerBreakdownQueries]);
+
   // ── Split summaries across all configured accounts ──
 
   const splitQueries = useQueries({
@@ -762,6 +786,7 @@ export function Overview({
                   .filter((c) => c.halfTotal > 0)
                   .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.halfTotal }))
                   .sort((a, b) => b.total - a.total)}
+                installments={partnerInstallments.half}
               />
               <PartnerCategoryColumn
                 label="dela"
@@ -771,6 +796,7 @@ export function Overview({
                   .filter((c) => c.theirsTotal > 0)
                   .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.theirsTotal }))
                   .sort((a, b) => b.total - a.total)}
+                installments={partnerInstallments.theirs}
               />
             </div>
           )}
@@ -1021,19 +1047,32 @@ function PartnerAccountCard({
 
 // ─── Partner category column (½ / dela) ────────────────────────────
 
+interface PartnerInstallmentItem {
+  id: string;
+  description: string | null;
+  owes: number;
+  installmentNumber: number;
+  totalInstallments: number;
+}
+
+const PARTNER_INSTALLMENT_SUFFIX = /\s*PARC\d{1,2}\/\d{1,2}\s*$/i;
+
 function PartnerCategoryColumn({
   label,
   total,
   categories,
+  installments,
   accent,
 }: {
   label: string;
   total: number;
   categories: Array<{ id: number; name: string; color: string; total: number }>;
+  installments: PartnerInstallmentItem[];
   accent?: boolean;
 }) {
   const denominator = categories.reduce((acc, c) => acc + Math.max(0, c.total), 0) || 1;
   const totalColor = accent ? 'var(--color-accent)' : 'var(--color-ink)';
+  const installmentsTotal = installments.reduce((acc, i) => acc + i.owes, 0);
 
   return (
     <div className="border border-[color:var(--color-paper-rule)] px-5 py-5">
@@ -1075,6 +1114,43 @@ function PartnerCategoryColumn({
         <p className="mt-4 font-body text-xs text-[color:var(--color-ink-faint)]">
           Nada nesta categoria.
         </p>
+      )}
+
+      {installments.length > 0 && (
+        <div className="mt-5 border-t border-[color:var(--color-paper-rule)] pt-3">
+          <div className="mb-2.5 flex items-baseline justify-between gap-2">
+            <span className="font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
+              parcelas · {installments.length}
+            </span>
+            <span
+              className="font-mono text-[12px] tabular-nums"
+              style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
+            >
+              {formatBRL(installmentsTotal)}
+            </span>
+          </div>
+          <ul className="space-y-2">
+            {installments.map((inst) => (
+              <li
+                key={inst.id}
+                className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]"
+              >
+                <span className="truncate text-[color:var(--color-ink-soft)]">
+                  {(inst.description ?? '—').replace(PARTNER_INSTALLMENT_SUFFIX, '').trim() || '—'}
+                </span>
+                <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
+                  {inst.installmentNumber}/{inst.totalInstallments}
+                </span>
+                <span
+                  className="font-mono tabular-nums"
+                  style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
+                >
+                  {formatBRL(inst.owes)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
