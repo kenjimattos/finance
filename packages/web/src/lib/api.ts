@@ -331,8 +331,20 @@ export interface PartnerCardBreakdown {
   total: number;
   previousTotal: number;
   delta: number;
-  categories: Array<{ id: number; name: string; color: string; total: number }>;
+  categories: PartnerCardCategory[];
   transactions: PartnerCardTransaction[];
+}
+
+export interface PartnerCardCategory {
+  id: number;
+  name: string;
+  color: string;
+  /** Viewer's owed share from ½ transactions (amount/2 summed). */
+  halfTotal: number;
+  /** Viewer's owed share from "dela" transactions (full amount summed). */
+  theirsTotal: number;
+  /** halfTotal + theirsTotal. */
+  total: number;
 }
 
 export const api = {

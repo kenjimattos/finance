@@ -337,6 +337,52 @@ export function Overview({
     }),
   });
 
+  // Aggregate partner-card categories across every shared card, keeping the
+  // ½ (metade) and dela portions separate so each can be shown on its own.
+  const partnerCategorySummary = useMemo(() => {
+    const map = new Map<
+      number,
+      { id: number; name: string; color: string; halfTotal: number; theirsTotal: number }
+    >();
+    let halfTotal = 0;
+    let theirsTotal = 0;
+    for (const q of partnerBreakdownQueries) {
+      if (!q.data) continue;
+      for (const cat of q.data.categories) {
+        halfTotal += cat.halfTotal;
+        theirsTotal += cat.theirsTotal;
+        const existing = map.get(cat.id);
+        if (existing) {
+          existing.halfTotal += cat.halfTotal;
+          existing.theirsTotal += cat.theirsTotal;
+        } else {
+          map.set(cat.id, {
+            id: cat.id,
+            name: cat.name,
+            color: cat.color,
+            halfTotal: cat.halfTotal,
+            theirsTotal: cat.theirsTotal,
+          });
+        }
+      }
+    }
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const categories = Array.from(map.values())
+      .map((c) => ({
+        ...c,
+        halfTotal: round2(c.halfTotal),
+        theirsTotal: round2(c.theirsTotal),
+        total: round2(c.halfTotal + c.theirsTotal),
+      }))
+      .sort((a, b) => b.total - a.total);
+    return {
+      categories,
+      halfTotal: round2(halfTotal),
+      theirsTotal: round2(theirsTotal),
+      grandTotal: round2(halfTotal + theirsTotal),
+    };
+  }, [partnerBreakdownQueries]);
+
   // ── Split summaries across all configured accounts ──
 
   const splitQueries = useQueries({
@@ -705,6 +751,29 @@ export function Overview({
               );
             })}
           </div>
+
+          {/* Aggregated category breakdown — ½ vs dela, separated */}
+          {partnerCategorySummary.categories.length > 0 && (
+            <div className="mt-8 grid gap-x-8 gap-y-8 md:grid-cols-2">
+              <PartnerCategoryColumn
+                label="½ metade"
+                total={partnerCategorySummary.halfTotal}
+                categories={partnerCategorySummary.categories
+                  .filter((c) => c.halfTotal > 0)
+                  .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.halfTotal }))
+                  .sort((a, b) => b.total - a.total)}
+              />
+              <PartnerCategoryColumn
+                label="dela"
+                total={partnerCategorySummary.theirsTotal}
+                accent
+                categories={partnerCategorySummary.categories
+                  .filter((c) => c.theirsTotal > 0)
+                  .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c.theirsTotal }))
+                  .sort((a, b) => b.total - a.total)}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -946,6 +1015,67 @@ function PartnerAccountCard({
           </span>
         )}
       </button>
+    </div>
+  );
+}
+
+// ─── Partner category column (½ / dela) ────────────────────────────
+
+function PartnerCategoryColumn({
+  label,
+  total,
+  categories,
+  accent,
+}: {
+  label: string;
+  total: number;
+  categories: Array<{ id: number; name: string; color: string; total: number }>;
+  accent?: boolean;
+}) {
+  const denominator = categories.reduce((acc, c) => acc + Math.max(0, c.total), 0) || 1;
+  const totalColor = accent ? 'var(--color-accent)' : 'var(--color-ink)';
+
+  return (
+    <div className="border border-[color:var(--color-paper-rule)] px-5 py-5">
+      <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+        {label}
+      </div>
+      <div
+        className="mt-1 font-display text-[32px] leading-none tracking-[-0.02em]"
+        style={{ color: totalColor }}
+      >
+        {formatBRL(total)}
+      </div>
+      {categories.length > 0 ? (
+        <ul className="mt-5 space-y-2.5">
+          {categories.map((cat) => (
+            <li key={cat.id}>
+              <div className="flex items-baseline justify-between gap-4 font-body text-[12px]">
+                <span className="truncate text-[color:var(--color-ink-soft)]">{cat.name}</span>
+                <span
+                  className="shrink-0 font-mono tabular-nums"
+                  style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
+                >
+                  {formatBRL(cat.total)}
+                </span>
+              </div>
+              <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
+                <div
+                  className="h-full"
+                  style={{
+                    background: cat.color,
+                    width: `${Math.round((Math.max(0, cat.total) / denominator) * 100)}%`,
+                  }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-4 font-body text-xs text-[color:var(--color-ink-faint)]">
+          Nada nesta categoria.
+        </p>
+      )}
     </div>
   );
 }
