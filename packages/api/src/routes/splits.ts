@@ -174,9 +174,9 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
                 uc.color AS user_category_color
          FROM transactions t
          INNER JOIN transaction_splits sp ON sp.transaction_id = t.id
+         INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
+         INNER JOIN user_categories       uc ON uc.id = tc.user_category_id
          LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-         LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
-         LEFT JOIN user_categories       uc ON uc.id = tc.user_category_id
          WHERE ${windowClause}
          ORDER BY t.date ASC, t.id ASC`,
       )

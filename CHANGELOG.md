@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Fixed
 
 - **Divisão no Dashboard.** A seção "Divisão" deixava de aparecer quando nenhuma transação estava marcada como `½` ou `dela`. Agora, mesmo sem divisões, o quadro "meu" continua visível com a quebra de categorias do total da fatura.
+- **Totais da divisão ignoram transações sem categoria.** Uma transação marcada como `½`/`dela` mas ainda sem categoria entrava nos totais dos cards de divisão (`partnerOwes`, total de cada coluna e contagens), violando a invariante de que só transações categorizadas somam. Agora ela é excluída dos totais, como já acontecia com o quadro "meu".
 
 ## [1.6.1] - 2026-05-21
 
