@@ -209,7 +209,9 @@ function AccountDashboard({
         }}
         onManageRules={() => setRulesOpen(true)}
       />
-      {splitSummaryQ.data && splitSummaryQ.data.totalSplitTransactions > 0 && (
+      {splitSummaryQ.data &&
+        (splitSummaryQ.data.totalSplitTransactions > 0 ||
+          splitSummaryQ.data.breakdown.mine.count > 0) && (
         <SplitSection
           variant="card"
           split={{

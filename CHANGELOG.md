@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Não lançado]
+
+### Fixed
+
+- **Divisão no Dashboard.** A seção "Divisão" deixava de aparecer quando nenhuma transação estava marcada como `½` ou `dela`. Agora, mesmo sem divisões, o quadro "meu" continua visível com a quebra de categorias do total da fatura.
+
 ## [1.6.1] - 2026-05-21
 
 ### Added
