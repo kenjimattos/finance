@@ -317,8 +317,14 @@ export function CategoryTrigger({
     // Done before the portal mounts, so its scroll listener doesn't fire on
     // this programmatic scroll.
     const margin = 8;
+    // Extra room scrolled below the dropdown so the result never lands exactly
+    // on the flip boundary — fractional pixels and the mobile dynamic viewport
+    // (URL bar showing/hiding) would otherwise tip it just over and flip it
+    // back above the trigger.
+    const buffer = 40;
     const r0 = buttonRef.current.getBoundingClientRect();
-    const overflowBelow = r0.bottom + margin + MAX_HEIGHT - window.innerHeight;
+    const overflowBelow =
+      r0.bottom + margin + MAX_HEIGHT + buffer - window.innerHeight;
     let applied = 0;
     if (overflowBelow > 0) {
       const maxScroll = r0.top - margin; // keep the trigger's top visible
