@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - **Limpeza de lançamentos manuais realizados no sync.** Ao sincronizar as contas correntes (`POST /cashflow/sync`), o sistema agora remove as `manual_entries` de meses já totalmente cobertos por dados reais do banco — qualquer entrada de um mês anterior ao mês da última transação bancária realizada, além das linhas legadas sem `month` (que nunca eram renderizadas). O mês corrente é preservado para não apagar projeções que o banco ainda não alcançou. A resposta do sync passa a incluir `prunedManualEntries`.
 
+### Changed
+
+- **Ações de lançamentos manuais no CashFlow agora funcionam no mobile.** Os botões de duplicar (`++`, `+→`), remover (`×`) e esconder eram visíveis só no hover e escondidos no mobile (`hidden md:inline`), ficando inacessíveis em telas de toque e pouco descobríveis no desktop. Foram substituídos por um menu de ações "⋯" (o `RowActionsMenu` já usado na lista de transações), acionado por clique/toque — visível no desktop e operável no mobile. Os símbolos crípticos viraram rótulos legíveis ("Duplicar neste mês", "Duplicar no próximo mês", "Remover" em destaque, "Esconder do fluxo de caixa").
+
 ### Fixed
 
 - **Divisão no Dashboard.** A seção "Divisão" deixava de aparecer quando nenhuma transação estava marcada como `½` ou `dela`. Agora, mesmo sem divisões, o quadro "meu" continua visível com a quebra de categorias do total da fatura.

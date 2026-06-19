@@ -18,6 +18,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { api } from '../lib/api';
 import type { CashFlowEntry, CashFlowDay, CashFlowResponse } from '../lib/api';
 import { formatBRL, formatDateShort } from '../lib/format';
+import { RowActionsMenu } from '../components/RowActionsMenu';
 
 const isDraggable = (e: CashFlowEntry) =>
   e.type === 'bank_transaction' || e.type === 'manual_entry';
@@ -1112,43 +1113,31 @@ function DescriptionCell({
       )}
 
       {manualId !== null && (
-        <div className="ml-auto flex shrink-0 gap-2 opacity-0 transition-opacity group-hover/desc:opacity-100 hidden md:inline">
-          <button
-            type="button"
-            onClick={onDuplicate}
-            className="font-mono text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
-            title="Duplicar neste mês"
-          >
-            ++
-          </button>
-          <button
-            type="button"
-            onClick={onDuplicateNext}
-            className="font-mono text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
-            title="Duplicar no próximo mês"
-          >
-            +→
-          </button>
-          <button
-            type="button"
-            onClick={() => onDeleteManual(manualId)}
-            className="font-mono text-[10px] text-[color:var(--color-ink-faint)] hover:text-[color:var(--color-accent)]"
-            title="Remover"
-          >
-            ×
-          </button>
+        <div className="ml-auto shrink-0">
+          <RowActionsMenu
+            ariaLabel="Ações da entrada"
+            actions={[
+              { label: 'Duplicar neste mês', onClick: onDuplicate },
+              { label: 'Duplicar no próximo mês', onClick: onDuplicateNext },
+              {
+                label: 'Remover',
+                onClick: () => onDeleteManual(manualId),
+                tone: 'danger',
+              },
+            ]}
+          />
         </div>
       )}
 
-      {onHide && (
-        <button
-          type="button"
-          onClick={onHide}
-          className="ml-auto shrink-0 font-mono text-[10px] text-[color:var(--color-ink-faint)] opacity-0 transition-opacity hover:text-[color:var(--color-accent)] group-hover/desc:opacity-100 hidden md:inline"
-          title="Esconder do fluxo de caixa"
-        >
-          esconder
-        </button>
+      {onHide && manualId === null && (
+        <div className="ml-auto shrink-0">
+          <RowActionsMenu
+            ariaLabel="Ações da linha"
+            actions={[
+              { label: 'Esconder do fluxo de caixa', onClick: onHide },
+            ]}
+          />
+        </div>
       )}
     </div>
   );
