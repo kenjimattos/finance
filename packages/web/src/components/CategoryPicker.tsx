@@ -313,25 +313,35 @@ export function CategoryTrigger({
     if (!open || !buttonRef.current) return;
     // The dropdown should always open BELOW the trigger — flipping above it is
     // disorienting. If there isn't room below, scroll the page up just enough
-    // to create it (capped so the trigger itself never scrolls off the top),
-    // then measure. Done before the portal mounts, so its scroll listener
-    // doesn't fire on this programmatic scroll.
+    // to create it (capped so the trigger itself never scrolls off the top).
+    // Done before the portal mounts, so its scroll listener doesn't fire on
+    // this programmatic scroll.
     const margin = 8;
     const r0 = buttonRef.current.getBoundingClientRect();
     const overflowBelow = r0.bottom + margin + MAX_HEIGHT - window.innerHeight;
+    let applied = 0;
     if (overflowBelow > 0) {
       const maxScroll = r0.top - margin; // keep the trigger's top visible
       const delta = Math.min(overflowBelow, maxScroll);
-      if (delta > 0) window.scrollBy(0, delta);
+      if (delta > 0) {
+        const before = window.scrollY;
+        window.scrollBy(0, delta);
+        // window.scrollY updates synchronously even when a re-measured
+        // getBoundingClientRect() doesn't reflect the scroll yet on mobile —
+        // so derive the post-scroll rect from how much we actually scrolled
+        // instead of re-measuring (which returned a stale, pre-scroll position
+        // and made computePosition flip the dropdown back above the trigger).
+        applied = window.scrollY - before;
+      }
     }
-    const r = buttonRef.current.getBoundingClientRect();
+    // The trigger moved up by `applied` in viewport coordinates.
     setRect({
-      top: r.top,
-      left: r.left,
-      bottom: r.bottom,
-      right: r.right,
-      width: r.width,
-      height: r.height,
+      top: r0.top - applied,
+      left: r0.left,
+      bottom: r0.bottom - applied,
+      right: r0.right,
+      width: r0.width,
+      height: r0.height,
     });
   }, [open]);
 
