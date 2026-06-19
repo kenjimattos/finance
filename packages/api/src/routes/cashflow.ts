@@ -661,7 +661,35 @@ cashflowRouter.post('/cashflow/sync', async (req, res, next) => {
       }
     }
 
-    res.json({ ok: true, transactions: txCount });
+    // ── Prune realized manual entries ──
+    // Manual entries are projections for *future* days; once real bank data
+    // has fully covered a month, that month's entries are dead weight (the
+    // CashFlow render already hides any entry whose date is <= the realized
+    // boundary, so they never show). Drop whole months strictly before the
+    // last realized month, plus legacy rows with no `month` (never rendered).
+    // Conservative on the boundary month: keep the current month in sync so a
+    // mid-month entry the bank hasn't reached yet survives. Skips entirely
+    // when there are no bank transactions (nothing is realized).
+    const realizedRow = db
+      .prepare('SELECT MAX(date) AS max_date FROM bank_transactions')
+      .get() as { max_date: string | null };
+    let prunedManualEntries = 0;
+    if (realizedRow.max_date) {
+      const realizedMonth = realizedRow.max_date.slice(0, 7);
+      const result = db
+        .prepare(
+          `DELETE FROM manual_entries
+           WHERE month IS NULL OR month < ?`,
+        )
+        .run(realizedMonth);
+      prunedManualEntries = result.changes;
+    }
+
+    res.json({
+      ok: true,
+      transactions: txCount,
+      prunedManualEntries,
+    });
   } catch (err) {
     next(err);
   }
