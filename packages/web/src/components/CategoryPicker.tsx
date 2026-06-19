@@ -51,10 +51,12 @@ function CategoryPickerPortal({
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
-  // Page scroll position captured at open. The trigger may scroll the page on
-  // open (to make room below); that settle event reports this same scrollY, so
-  // we ignore it instead of closing. A real user scroll changes scrollY → close.
-  const openScrollY = useRef(window.scrollY);
+  // Timestamp of open. The trigger may scroll the page on open (to make room
+  // below); on mobile that scroll also collapses the URL bar, firing scroll
+  // AND resize events. Both would otherwise close the picker the instant it
+  // opens (forcing the user to tap twice), so we ignore close-triggering
+  // scroll/resize during a short grace window right after open.
+  const openedAt = useRef(performance.now());
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -88,15 +90,16 @@ function CategoryPickerPortal({
     // (the category list itself) is expected behavior and must not close.
     // Using capture:true to catch events in the document tree, then checking
     // the target so internal scroll is ignored.
+    const GRACE_MS = 500;
     function onScroll(e: Event) {
       if (!rootRef.current) return;
       if (rootRef.current.contains(e.target as Node)) return;
-      // Ignore the settling event from the open-time auto-scroll: the page is
-      // already at the position we captured, so nothing detached.
-      if (window.scrollY === openScrollY.current) return;
+      // Ignore the open-time auto-scroll (and its URL-bar churn on mobile).
+      if (performance.now() - openedAt.current < GRACE_MS) return;
       onClose();
     }
     function onResize() {
+      if (performance.now() - openedAt.current < GRACE_MS) return;
       onClose();
     }
     document.addEventListener('mousedown', onDocMouseDown);
