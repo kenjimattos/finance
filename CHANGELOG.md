@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- **Seletor de categorias abrindo a lista pra cima.** Quando o gatilho estava na metade de baixo da tela, o dropdown de categorias virava pra cima (flip), o que confundia. Agora, ao abrir, a página rola o mínimo necessário pra abrir espaço e a lista aparece sempre logo abaixo do gatilho (o flip pra cima fica só como último recurso em telas baixas demais). A rolagem automática não fecha mais o dropdown.
 - **Teclado do mobile abrindo sozinho no seletor de categorias.** No Dashboard, abrir o dropdown de categorias dava `focus()` imediato no campo de busca, o que disparava o teclado virtual e cobria a lista antes do usuário escolher digitar. Agora o foco automático só acontece quando o ponteiro principal é um mouse/trackpad (`(pointer: fine)`); em telas de toque o teclado só aparece quando o campo de busca é tocado de propósito. O fluxo por teclado no desktop (digitar pra filtrar, setas, Enter) continua igual.
 
 ## [1.6.2] - 2026-06-19
