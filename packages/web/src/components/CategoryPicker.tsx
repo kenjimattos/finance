@@ -51,6 +51,10 @@ function CategoryPickerPortal({
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+  // Page scroll position captured at open. The trigger may scroll the page on
+  // open (to make room below); that settle event reports this same scrollY, so
+  // we ignore it instead of closing. A real user scroll changes scrollY → close.
+  const openScrollY = useRef(window.scrollY);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -87,6 +91,9 @@ function CategoryPickerPortal({
     function onScroll(e: Event) {
       if (!rootRef.current) return;
       if (rootRef.current.contains(e.target as Node)) return;
+      // Ignore the settling event from the open-time auto-scroll: the page is
+      // already at the position we captured, so nothing detached.
+      if (window.scrollY === openScrollY.current) return;
       onClose();
     }
     function onResize() {
@@ -301,6 +308,19 @@ export function CategoryTrigger({
   // one-frame flash at (0,0) before the position is computed.
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return;
+    // The dropdown should always open BELOW the trigger — flipping above it is
+    // disorienting. If there isn't room below, scroll the page up just enough
+    // to create it (capped so the trigger itself never scrolls off the top),
+    // then measure. Done before the portal mounts, so its scroll listener
+    // doesn't fire on this programmatic scroll.
+    const margin = 8;
+    const r0 = buttonRef.current.getBoundingClientRect();
+    const overflowBelow = r0.bottom + margin + MAX_HEIGHT - window.innerHeight;
+    if (overflowBelow > 0) {
+      const maxScroll = r0.top - margin; // keep the trigger's top visible
+      const delta = Math.min(overflowBelow, maxScroll);
+      if (delta > 0) window.scrollBy(0, delta);
+    }
     const r = buttonRef.current.getBoundingClientRect();
     setRect({
       top: r.top,
