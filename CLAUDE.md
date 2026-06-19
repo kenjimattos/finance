@@ -29,7 +29,7 @@ Functional end-to-end. What's shipped:
 - **Per-user SQLite.** Each authenticated user has their own database file at `DATABASE_DIR/<username>.sqlite`, opened on first request and cached per-process. Migrations run automatically on first open. Routes access the DB via `req.db` (injected by `authMiddleware`); never import a `db` singleton.
 - **Deployment.** Railway/Nixpacks config checked in. Production Express serves the SPA from `packages/web/dist` on the same origin and strips the `/api/` prefix. `DATABASE_DIR` required (no default) — point at a persistent volume.
 - **Responsive.** Mobile-aware layout (compact CashFlow columns, inline BillHeader actions, single-column SplitSection).
-- **Tests.** 56 tests covering `billWindow` (including `findOffsetForDueMonth`), `merchantSlug`, `applyLearnedRules`.
+- **Tests.** 61 tests covering `billWindow` (including `findOffsetForDueMonth`), `merchantSlug`, `applyLearnedRules`, `pruneRealizedManualEntries`.
 
 ## Repository layout
 
