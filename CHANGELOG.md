@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Não lançado]
+
+### Fixed
+
+- **Teclado do mobile abrindo sozinho no seletor de categorias.** No Dashboard, abrir o dropdown de categorias dava `focus()` imediato no campo de busca, o que disparava o teclado virtual e cobria a lista antes do usuário escolher digitar. Agora o foco automático só acontece quando o ponteiro principal é um mouse/trackpad (`(pointer: fine)`); em telas de toque o teclado só aparece quando o campo de busca é tocado de propósito. O fluxo por teclado no desktop (digitar pra filtrar, setas, Enter) continua igual.
+
 ## [1.6.2] - 2026-06-19
 
 ### Added

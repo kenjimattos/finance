@@ -63,7 +63,14 @@ function CategoryPickerPortal({
   }, [query]);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    // On touch devices, auto-focusing the search input immediately pops the
+    // on-screen keyboard, which covers the category list before the user has
+    // chosen to type anything. Only steal focus when the primary pointer is a
+    // mouse/trackpad — that's where the keyboard-driven flow (type-to-filter,
+    // arrows, Enter) is the point. Touch users tap the input when they want it.
+    if (window.matchMedia('(pointer: fine)').matches) {
+      inputRef.current?.focus();
+    }
   }, []);
 
   // Close on outside-click, scroll, resize, or Escape.
