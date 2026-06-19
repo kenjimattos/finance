@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Não lançado]
 
+### Added
+
+- **Limpeza de lançamentos manuais realizados no sync.** Ao sincronizar as contas correntes (`POST /cashflow/sync`), o sistema agora remove as `manual_entries` de meses já totalmente cobertos por dados reais do banco — qualquer entrada de um mês anterior ao mês da última transação bancária realizada, além das linhas legadas sem `month` (que nunca eram renderizadas). O mês corrente é preservado para não apagar projeções que o banco ainda não alcançou. A resposta do sync passa a incluir `prunedManualEntries`.
+
 ### Fixed
 
 - **Divisão no Dashboard.** A seção "Divisão" deixava de aparecer quando nenhuma transação estava marcada como `½` ou `dela`. Agora, mesmo sem divisões, o quadro "meu" continua visível com a quebra de categorias do total da fatura.

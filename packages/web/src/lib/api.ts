@@ -482,7 +482,7 @@ export const api = {
     ),
 
   syncCashFlow: () =>
-    request<{ ok: true; transactions: number }>(
+    request<{ ok: true; transactions: number; prunedManualEntries: number }>(
       '/cashflow/sync',
       { method: 'POST' },
     ),
