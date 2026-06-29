@@ -347,6 +347,31 @@ export interface PartnerCardCategory {
   total: number;
 }
 
+/** A transaction extracted from fatura screenshots, pending review/insert. */
+export interface ExtractedFaturaRow {
+  date: string;
+  description: string;
+  /** Signed: refunds (estornos) are negative. */
+  amount: number;
+  cardLast4: string | null;
+  installmentNumber: number | null;
+  totalInstallments: number | null;
+  isRefund: boolean;
+  /** Shift to land this row in the bill being viewed (0 = natural cycle). */
+  billShift: number;
+}
+
+/** The payload the user confirms for insertion. */
+export interface CommitFaturaRow {
+  date: string;
+  description: string;
+  amount: number;
+  cardLast4: string | null;
+  installmentNumber: number | null;
+  totalInstallments: number | null;
+  billShift: number;
+}
+
 export const api = {
   connectToken: () =>
     request<{ accessToken: string }>('/connect-token', { method: 'POST' }),
@@ -670,7 +695,30 @@ export const api = {
   },
 
   getAuthMe: () =>
-    request<{ authenticated: boolean; username?: string }>('/auth/me'),
+    request<{
+      authenticated: boolean;
+      username?: string;
+      features?: { importFaturaEnabled: boolean };
+    }>('/auth/me'),
+
+  // ----- Fatura import (screenshots → manual transactions) -----
+  extractFatura: (body: {
+    accountId: string;
+    billOffset: number;
+    images: { data: string; mediaType: string }[];
+  }) =>
+    request<{
+      window: { periodStart: string; periodEnd: string; nextDueDate: string };
+      rows: ExtractedFaturaRow[];
+    }>('/transactions/import-fatura/extract', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  commitFaturaImport: (body: { accountId: string; rows: CommitFaturaRow[] }) =>
+    request<{ ok: true; count: number; ids: string[] }>(
+      '/transactions/import-fatura/commit',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
   login: (username: string, password: string) =>
     request<{ ok: boolean; username?: string }>('/auth/login', {
       method: 'POST',
