@@ -8,6 +8,13 @@ const schema = z.object({
   CORS_ORIGIN: z.string().optional(),
   DATABASE_DIR: z.string().min(1, 'DATABASE_DIR is required'),
   SESSION_SECRET: z.string().optional(),
+  // Anthropic vision — powers the "import fatura from screenshots" feature.
+  // All optional: when ANTHROPIC_API_KEY is absent the import endpoints return
+  // 503 and the UI hides the upload button. baseURL lets us point at a gateway
+  // (both apiKey and baseURL are supplied via Railway variables).
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_BASE_URL: z.string().url().optional(),
+  ANTHROPIC_MODEL: z.string().default('claude-sonnet-4-6'),
 });
 
 export const config = schema.parse(process.env);
