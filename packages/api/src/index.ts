@@ -15,6 +15,7 @@ import { authMiddleware } from './middleware/auth.js';
 import { connectRouter } from './routes/connect.js';
 import { itemsRouter } from './routes/items.js';
 import { transactionsRouter } from './routes/transactions.js';
+import { faturaImportRouter } from './routes/faturaImport.js';
 import { cardSettingsRouter } from './routes/cardSettings.js';
 import { categoriesRouter } from './routes/categories.js';
 import { billsRouter } from './routes/bills.js';
@@ -33,7 +34,13 @@ app.use(helmet({ contentSecurityPolicy: false }));
 if (config.CORS_ORIGIN) {
   app.use(cors({ origin: config.CORS_ORIGIN, credentials: true }));
 }
-app.use(express.json());
+// Global JSON parser keeps the small default limit, but skips the fatura-import
+// path — that router installs its own larger limit for base64 screenshots.
+const globalJson = express.json();
+app.use((req, res, next) => {
+  if (req.path.startsWith('/transactions/import-fatura')) return next();
+  return globalJson(req, res, next);
+});
 app.use(cookieParser());
 app.use(morgan('dev'));
 app.use(rateLimit({ windowMs: 60_000, max: 120 }));
@@ -83,6 +90,7 @@ app.use(cardGroupsRouter);
 app.use(categoriesRouter);
 app.use(billsRouter);
 app.use(transactionsRouter);
+app.use(faturaImportRouter);
 app.use(categorizeRouter);
 app.use(manualEntriesRouter);
 app.use(cashflowRouter);
