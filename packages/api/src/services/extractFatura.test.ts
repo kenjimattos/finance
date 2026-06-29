@@ -1,6 +1,20 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeExtraction } from './extractFatura.js';
+import { normalizeExtraction, normalizeBaseUrl } from './extractFatura.js';
+
+describe('normalizeBaseUrl', () => {
+  it('strips a trailing /v1 (OpenRouter gateway footgun)', () => {
+    assert.equal(normalizeBaseUrl('https://openrouter.ai/api/v1'), 'https://openrouter.ai/api');
+  });
+  it('strips trailing slashes', () => {
+    assert.equal(normalizeBaseUrl('https://openrouter.ai/api/'), 'https://openrouter.ai/api');
+    assert.equal(normalizeBaseUrl('https://openrouter.ai/api/v1/'), 'https://openrouter.ai/api');
+  });
+  it('leaves a clean base untouched', () => {
+    assert.equal(normalizeBaseUrl('https://openrouter.ai/api'), 'https://openrouter.ai/api');
+    assert.equal(normalizeBaseUrl('https://api.anthropic.com'), 'https://api.anthropic.com');
+  });
+});
 
 describe('normalizeExtraction', () => {
   it('keeps a plain charge positive', () => {
