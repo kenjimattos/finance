@@ -4,7 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Não lançado]
+## [1.7.1] - 2026-06-29
+
+### Corrigido
+
+- **Upload de fatura dando "request entity too large" (413) em produção.** O middleware que remove o prefixo `/api/` rodava _depois_ do parser de JSON, então em produção a rota de import chegava como `/api/transactions/import-fatura/...` e não casava com a exceção que concede o limite de 25 MB — caindo no parser default (~100 kb), que rejeitava os screenshots em base64. O proxy do Vite remove o `/api` no dev, o que mascarava o problema. Agora o prefixo é removido antes do parser, então o limite maior vale e o upload funciona. Não tinha relação com o modelo de visão.
+
+## [1.7.0] - 2026-06-29
 
 ### Adicionado
 
