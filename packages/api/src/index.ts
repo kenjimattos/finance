@@ -34,6 +34,20 @@ app.use(helmet({ contentSecurityPolicy: false }));
 if (config.CORS_ORIGIN) {
   app.use(cors({ origin: config.CORS_ORIGIN, credentials: true }));
 }
+// Match the Vite dev proxy behavior: in production the SPA is served from
+// the same origin and calls /api/*, so strip the prefix before routing.
+// MUST run before the body parser so the path-based skip below sees the
+// normalized path (otherwise large screenshot uploads hit the default-limit
+// parser → 413 "request entity too large").
+app.use((req, _res, next) => {
+  if (req.url.startsWith('/api/')) {
+    req.url = req.url.slice(4);
+  } else if (req.url === '/api') {
+    req.url = '/';
+  }
+  next();
+});
+
 // Global JSON parser keeps the small default limit, but skips the fatura-import
 // path — that router installs its own larger limit for base64 screenshots.
 const globalJson = express.json();
@@ -55,17 +69,6 @@ if (!AUTH_ENABLED) {
     console.warn('[auth] SESSION_SECRET not set — using insecure default (set it in production)');
   }
 }
-
-// Match the Vite dev proxy behavior: in production the SPA is served from
-// the same origin and calls /api/*, so strip the prefix before routing.
-app.use((req, _res, next) => {
-  if (req.url.startsWith('/api/')) {
-    req.url = req.url.slice(4);
-  } else if (req.url === '/api') {
-    req.url = '/';
-  }
-  next();
-});
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
