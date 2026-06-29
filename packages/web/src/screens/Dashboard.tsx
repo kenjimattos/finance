@@ -15,6 +15,7 @@ import { TransactionInbox } from '../components/TransactionInbox';
 import { CardGroupsManager } from '../components/CardGroupsManager';
 import { RulesManager } from '../components/RulesManager';
 import { SplitSection } from '../components/SplitSection';
+import { FaturaImport } from '../components/FaturaImport';
 
 /**
  * The main screen, once a card is linked.
@@ -154,6 +155,10 @@ function AccountDashboard({
     setBillOffset(initialOffset ?? 0);
   }, [accountId, initialOffset]);
 
+  const [importOpen, setImportOpen] = useState(false);
+  const meQ = useQuery({ queryKey: ['authMe'], queryFn: () => api.getAuthMe(), staleTime: Infinity });
+  const importEnabled = meQ.data?.features?.importFaturaEnabled ?? false;
+
   const settingsQ = useQuery({
     queryKey: ['accountSettings', accountId],
     queryFn: () => api.getAccountSettings(accountId),
@@ -209,6 +214,17 @@ function AccountDashboard({
         }}
         onManageRules={() => setRulesOpen(true)}
       />
+      {importEnabled && (
+        <div className="mb-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="font-mono text-xs text-[color:var(--color-ink-muted)] underline-offset-4 hover:text-[color:var(--color-accent)] hover:underline"
+          >
+            + importar fatura (screenshots)
+          </button>
+        </div>
+      )}
       {splitSummaryQ.data &&
         (splitSummaryQ.data.totalSplitTransactions > 0 ||
           splitSummaryQ.data.breakdown.mine.count > 0) && (
@@ -259,6 +275,14 @@ function AccountDashboard({
       )}
       {rulesOpen && (
         <RulesManager onClose={() => setRulesOpen(false)} />
+      )}
+      {importOpen && (
+        <FaturaImport
+          itemId={itemId}
+          accountId={accountId}
+          billOffset={billOffset}
+          onClose={() => setImportOpen(false)}
+        />
       )}
     </>
   );
