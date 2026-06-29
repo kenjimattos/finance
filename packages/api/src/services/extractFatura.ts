@@ -45,6 +45,18 @@ export function isImportEnabled(): boolean {
   return Boolean(config.ANTHROPIC_API_KEY);
 }
 
+/**
+ * Normalize a configured base URL for the Anthropic SDK.
+ *
+ * The SDK appends `/v1/messages` to baseURL itself. Gateways like OpenRouter
+ * document their base as `https://openrouter.ai/api/v1` (OpenAI convention), so
+ * a naive copy yields `…/api/v1/v1/messages` → 404. Strip a trailing `/v1` (and
+ * any trailing slash) so both `…/api` and `…/api/v1` work.
+ */
+export function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, '').replace(/\/v1$/, '');
+}
+
 // The tool the model is forced to call. Amounts come back as a POSITIVE
 // magnitude plus an `isRefund` flag; normalizeExtraction applies the sign.
 const RECORD_TOOL: Anthropic.Tool = {
@@ -188,7 +200,9 @@ export async function extractFaturaFromImages(
   }
   const client = new Anthropic({
     apiKey: config.ANTHROPIC_API_KEY,
-    ...(config.ANTHROPIC_BASE_URL ? { baseURL: config.ANTHROPIC_BASE_URL } : {}),
+    ...(config.ANTHROPIC_BASE_URL
+      ? { baseURL: normalizeBaseUrl(config.ANTHROPIC_BASE_URL) }
+      : {}),
   });
 
   const imageBlocks: Anthropic.ImageBlockParam[] = images.map((img) => ({
