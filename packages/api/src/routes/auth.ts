@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { users, AUTH_ENABLED } from '../config.js';
+import { isImportEnabled } from '../services/extractFatura.js';
 import {
   makeSessionCookie,
   cookieOptions,
@@ -11,12 +12,13 @@ import {
 export const authRouter = Router();
 
 authRouter.get('/auth/me', (req, res) => {
+  const features = { importFaturaEnabled: isImportEnabled() };
   const username = readSessionUser(req);
   if (username) {
-    res.json({ authenticated: true, username });
+    res.json({ authenticated: true, username, features });
     return;
   }
-  res.json({ authenticated: false });
+  res.json({ authenticated: false, features });
 });
 
 authRouter.post('/auth/login', (req, res) => {

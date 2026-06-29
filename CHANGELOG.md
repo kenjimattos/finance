@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Não lançado]
+
+### Adicionado
+
+- **Importar fatura por screenshots.** Novo botão no Dashboard ("importar fatura") que abre um modal onde você sobe os prints da fatura do app do cartão. As imagens são reduzidas no navegador (máx. 1568px) e enviadas ao Claude (visão), que lê cada linha e devolve as transações estruturadas: data, descrição, valor, cartão (últimos 4), parcela ("Parcela X de Y") e estorno (valores verdes viram negativos). Antes de gravar, aparece uma **tela de revisão editável** — dá pra ajustar qualquer campo, desmarcar linhas e conferir o total. Os lançamentos entram como `source='manual'`.
+  - **Bill shift automático.** O import é contextual à fatura que você está vendo. Um lançamento cuja data cai naturalmente em outro ciclo (ex.: 17/06 numa fatura que fechou 16/06) é puxado para a fatura atual automaticamente, gravando o `bill_shift` correspondente. Cada linha mostra um seletor "nesta fatura (shift)" que vem ligado e pode ser desligado.
+  - **Configuração.** A feature liga quando o servidor tem `ANTHROPIC_API_KEY` (com `ANTHROPIC_BASE_URL` e `ANTHROPIC_MODEL` opcionais). Sem a chave, o botão some e os endpoints respondem 503.
+
 ## [1.6.3] - 2026-06-19
 
 ### Fixed

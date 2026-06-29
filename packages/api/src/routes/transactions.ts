@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Transaction, CreditCardMetadata } from 'pluggy-sdk';
 import { pluggy } from '../services/pluggy.js';
 import type { Db } from '../db/index.js';
+import { insertManualTransaction } from '../db/manualTransaction.js';
 import { applyLearnedRules } from '../services/applyLearnedRules.js';
 import { extractMerchantSlug } from '../services/merchantSlug.js';
 
@@ -259,7 +260,6 @@ transactionsRouter.post('/transactions/manual', (req, res, next) => {
   try {
     const { db } = req;
     const body = manualTxSchema.parse(req.body);
-    const id = randomUUID();
 
     // Look up item_id from the account.
     const account = db
@@ -270,36 +270,17 @@ transactionsRouter.post('/transactions/manual', (req, res, next) => {
       return;
     }
 
-    db.prepare(
-      `INSERT INTO transactions
-        (id, account_id, item_id, date, description, amount, currency_code,
-         type, source, installment_number, total_installments, raw_json, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'BRL', ?, 'manual', ?, ?, '{}', datetime('now'))`,
-    ).run(
-      id,
-      body.accountId,
-      account.item_id,
-      body.date,
-      body.description,
-      body.amount,
-      manualTransactionType(body.amount),
-      body.installmentNumber ?? null,
-      body.totalInstallments ?? null,
-    );
-
-    if (body.cardLast4) {
-      db.prepare('UPDATE transactions SET card_last4 = ? WHERE id = ?').run(
-        body.cardLast4,
-        id,
-      );
-    }
-
-    if (body.categoryId) {
-      db.prepare(
-        `INSERT INTO transaction_categories (transaction_id, user_category_id, assigned_by)
-         VALUES (?, ?, 'manual')`,
-      ).run(id, body.categoryId);
-    }
+    const id = insertManualTransaction(db, {
+      accountId: body.accountId,
+      itemId: account.item_id,
+      date: body.date,
+      description: body.description,
+      amount: body.amount,
+      cardLast4: body.cardLast4 ?? null,
+      installmentNumber: body.installmentNumber ?? null,
+      totalInstallments: body.totalInstallments ?? null,
+      categoryId: body.categoryId ?? null,
+    });
 
     res.status(201).json({ ok: true, id });
   } catch (err) {
