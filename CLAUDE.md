@@ -24,6 +24,7 @@ Functional end-to-end. What's shipped:
 - **Multi-bank.** Multiple Pluggy items, multiple accounts per item. Overview groups all credit accounts by due-month with ←/→ nav, grand total, aggregated category breakdown, drill-in to each account's Dashboard. Banks added/removed via `ManageBankButton`.
 - **Cash flow.** `CashFlow` is the landing page: multi-month ledger anchored on `balance_snapshots`, BANK transactions for past days, manual recurring entries (`manual_entries`, per-month) + credit-card bill outflows for future days, single global realized/projected boundary, drag-and-drop reordering within a day, hide flag for bank-side duplicates, click-to-drill on bill outflows.
 - **Manual transactions.** Add/edit/delete rows directly in a bill inbox when Pluggy misses them (`source='manual'`). Supports day/month/year, debit or credit direction, and installment metadata so they surface in the split summary's parceladas list.
+- **Fatura screenshot import.** Upload screenshots of the issuer app's statement on the Dashboard; Claude vision (`@anthropic-ai/sdk`) extracts each line into structured rows (date, amount, card last4, installments, estorno→negative), shown in an editable review list before inserting as `source='manual'`. Import is contextual to the viewed bill: each row auto-computes the `bill_shift` to land in that bill (e.g. a 17/06 charge on the bill that closed 16/06). Gated on `ANTHROPIC_API_KEY`; endpoints 503 and the button hides when absent. Extraction prompt + `normalizeExtraction` live in [services/extractFatura.ts](packages/api/src/services/extractFatura.ts); routes in [routes/faturaImport.ts](packages/api/src/routes/faturaImport.ts) (own 25mb JSON limit for base64 images). No dedup against existing rows — same caveat as manual transactions.
 - **Bill splitting.** Mark transactions ½ or →dela (otherwise implicitly "meu"). Per-row + bulk. Unified `SplitSection` on both Dashboard and Overview.
 - **Auth.** Per-user passwords via `USER_<NAME>_PASSWORD` env vars; cookie session carries the username (HMAC-signed with `SESSION_SECRET`). When no `USER_*_PASSWORD` is set, the API falls back to an open "default" user for local dev.
 - **Per-user SQLite.** Each authenticated user has their own database file at `DATABASE_DIR/<username>.sqlite`, opened on first request and cached per-process. Migrations run automatically on first open. Routes access the DB via `req.db` (injected by `authMiddleware`); never import a `db` singleton.
@@ -97,7 +98,7 @@ Full design language, screen-by-screen layout, and pattern catalog: [docs/fronte
 
 ### Config boundary
 
-[packages/api/src/config.ts](packages/api/src/config.ts) is the single place that reads `process.env`, validated with Zod. Everything else imports `config`. Missing/invalid env fails fast at boot.
+[packages/api/src/config.ts](packages/api/src/config.ts) is the single place that reads `process.env`, validated with Zod. Everything else imports `config`. Missing/invalid env fails fast at boot. The fatura-import feature reads three optional vars here — `ANTHROPIC_API_KEY` (gates the feature), `ANTHROPIC_BASE_URL` (point the SDK at a gateway), and `ANTHROPIC_MODEL` (default `claude-sonnet-4-6`).
 
 ## Conventions
 
