@@ -150,6 +150,31 @@ export function computeNextBillWindow(
 }
 
 /**
+ * Find the bill offset whose window naturally contains a given date.
+ *
+ * "Natural" means: ignoring any per-transaction bill_shift override — purely
+ * which closing→closing cycle the calendar date falls into. The import flow
+ * uses this to auto-shift a transaction into the bill the user is viewing:
+ * `shift = targetOffset - naturalOffset`. A 17/06 purchase whose natural cycle
+ * is the next bill, dropped into the bill that closed 16/06, yields shift -1.
+ *
+ * Searches ±`bound` cycles around offset 0. Returns `null` if the date is
+ * outside that range (caller can treat it as "too far to auto-place").
+ */
+export function findOffsetForDate(
+  settings: CardSettings,
+  isoDate: string,
+  today: Date = new Date(),
+  bound = 18,
+): number | null {
+  for (let offset = -bound; offset <= bound; offset++) {
+    const w = computeBillWindowAtOffset(settings, offset, today);
+    if (isoDate >= w.periodStart && isoDate <= w.periodEnd) return offset;
+  }
+  return null;
+}
+
+/**
  * Find the bill offset whose due date falls in the target year/month.
  *
  * Different accounts have different closing_day/due_day, so the same calendar
