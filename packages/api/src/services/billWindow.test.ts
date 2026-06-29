@@ -6,6 +6,7 @@ import {
   computePreviousBillWindow,
   computeNextBillWindow,
   findOffsetForDueMonth,
+  findOffsetForDate,
 } from './billWindow.js';
 
 /** Helper: create a Date from yyyy-mm-dd without timezone surprises. */
@@ -286,5 +287,55 @@ describe('window contiguity', () => {
     // Current ends on closing day, next starts the day after
     assert.equal(curr.periodEnd, '2025-07-10');
     assert.equal(next.periodStart, '2025-07-11');
+  });
+});
+
+// ─── findOffsetForDate ──────────────────────────────────────────────
+
+describe('findOffsetForDate', () => {
+  // The real PicPay scenario that motivated this helper: closing 16, due 25.
+  const settings = { closingDay: 16, dueDay: 25 };
+
+  it('date inside the open bill window → offset 0', () => {
+    // Today 2026-06-19 (after closing 16) → open bill Jun 17 – Jul 16.
+    const off = findOffsetForDate(settings, '2026-06-17', date('2026-06-19'));
+    assert.equal(off, 0);
+  });
+
+  it('date in the bill that closed 16/06 → offset -1', () => {
+    // The June bill (due 25/06) is offset -1: May 17 – Jun 16.
+    const off = findOffsetForDate(settings, '2026-06-05', date('2026-06-19'));
+    assert.equal(off, -1);
+  });
+
+  it('17/06 dropped into the June bill yields shift -1', () => {
+    // This is the auto-shift the import performs: targetOffset (June bill = -1)
+    // minus naturalOffset of 17/06 (= 0) = -1.
+    const today = date('2026-06-19');
+    const targetOffset = -1; // user viewing the bill due 25/06
+    const natural = findOffsetForDate(settings, '2026-06-17', today);
+    assert.equal(natural, 0);
+    assert.equal(targetOffset - natural!, -1);
+  });
+
+  it('a row already in the target bill needs no shift (shift 0)', () => {
+    const today = date('2026-06-19');
+    const targetOffset = -1;
+    const natural = findOffsetForDate(settings, '2026-06-10', today);
+    assert.equal(natural, -1);
+    assert.equal(targetOffset - natural!, 0);
+  });
+
+  it('boundary: the closing day itself belongs to the closing cycle', () => {
+    // periodEnd is inclusive — 16/06 is the last day of the June bill (offset -1).
+    assert.equal(findOffsetForDate(settings, '2026-06-16', date('2026-06-19')), -1);
+    // 17/06 is the first day of the next cycle (offset 0).
+    assert.equal(findOffsetForDate(settings, '2026-06-17', date('2026-06-19')), 0);
+  });
+
+  it('returns null for a date beyond the search bound', () => {
+    // Two years out, well past the default ±18 cycles.
+    const off = findOffsetForDate(settings, '2028-12-01', date('2026-06-19'));
+    assert.equal(off, null);
   });
 });
