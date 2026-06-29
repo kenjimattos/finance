@@ -200,6 +200,11 @@ export async function extractFaturaFromImages(
   }
   const client = new Anthropic({
     apiKey: config.ANTHROPIC_API_KEY,
+    // Free gateway tiers (e.g. OpenRouter's :free models) 429 under load. The
+    // SDK backs off and retries on 429/5xx; bump the count so transient upstream
+    // rate-limits usually clear within one import attempt.
+    maxRetries: 5,
+    timeout: 120_000,
     ...(config.ANTHROPIC_BASE_URL
       ? { baseURL: normalizeBaseUrl(config.ANTHROPIC_BASE_URL) }
       : {}),

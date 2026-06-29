@@ -100,6 +100,15 @@ faturaImportRouter.post('/transactions/import-fatura/extract', async (req, res, 
       res.status(503).json({ error: 'Importação por screenshot não está configurada.' });
       return;
     }
+    // Surface upstream rate-limits (common on free gateway tiers) as 429 with a
+    // retry hint instead of a generic 500.
+    if (typeof (err as { status?: number }).status === 'number') {
+      const status = (err as { status: number }).status;
+      if (status === 429) {
+        res.status(429).json({ error: 'Provedor de visão ocupado (limite temporário). Tente de novo em alguns segundos.' });
+        return;
+      }
+    }
     next(err);
   }
 });

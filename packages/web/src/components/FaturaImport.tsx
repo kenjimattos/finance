@@ -120,10 +120,12 @@ export function FaturaImport({
       }
     },
     onError: (err) => {
-      const msg =
-        err instanceof ApiError && err.status === 503
-          ? 'Importação não configurada no servidor.'
-          : 'Falha ao ler os screenshots. Tente novamente.';
+      let msg = 'Falha ao ler os screenshots. Tente novamente.';
+      if (err instanceof ApiError && err.status === 503) {
+        msg = 'Importação não configurada no servidor.';
+      } else if (err instanceof ApiError && err.status === 429) {
+        msg = 'Provedor de visão ocupado. Tente de novo em alguns segundos.';
+      }
       toast.show({ message: msg });
     },
   });
