@@ -254,16 +254,38 @@ function runSchema(db: Db): void {
     FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
   );
 
-  -- Balance snapshots: record the Pluggy-reported balance at each sync so
-  -- historical opening-balance calculations remain stable even after Pluggy
-  -- ages out old transactions. One row per (account, date) — the most recent
-  -- snapshot before a target month is the anchor for that month's opening.
+  -- Balance snapshots: a raw, write-only DIAGNOSTIC log of the Pluggy-reported
+  -- balance at each sync. One row per (account, date). NOT used for balance
+  -- math — that field oscillates wildly for some connectors (see balance_anchors),
+  -- so the opening balance is grounded on a confirmed anchor instead. Kept only
+  -- to audit/inspect connector behaviour over time (it's what surfaced the
+  -- Nubank balance oscillation in the first place).
   CREATE TABLE IF NOT EXISTS balance_snapshots (
     account_id TEXT NOT NULL,
     date TEXT NOT NULL,              -- yyyy-mm-dd of the sync
     balance REAL NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (account_id, date),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+  );
+
+  -- User-confirmed balance anchor: a TRUSTED absolute balance at a known date,
+  -- used to ground the CashFlow running balance instead of Pluggy's live
+  -- balance field (which oscillates wildly for some connectors). The opening
+  -- balance of every month is derived from the single most recent anchor by
+  -- walking the transaction history forward/backward, so the displayed saldo is
+  -- consistent regardless of which months are loaded and immune to a bad Pluggy
+  -- reading. Refreshed at each year-end (a new anchor row), older rows kept for
+  -- audit. Absent → fall back to the live balance. Distinct from
+  -- balance_snapshots, which are raw (untrusted) per-sync readings never used
+  -- for balance math.
+  CREATE TABLE IF NOT EXISTS balance_anchors (
+    account_id TEXT NOT NULL,
+    anchor_date TEXT NOT NULL,       -- yyyy-mm-dd; balance is as of END of this day
+    balance REAL NOT NULL,
+    source TEXT NOT NULL DEFAULT 'manual', -- 'manual' | 'pluggy' | ...
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (account_id, anchor_date),
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
   );
 

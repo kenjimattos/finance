@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Corrigido
+
+- **Saldo do CashFlow mudava ao abrir/fechar o histórico — e o valor errado ia para o resumo.** O saldo corrente é acumulado só a partir dos meses carregados, ancorando no saldo de abertura do **primeiro mês visível**. Esse saldo de abertura era calculado ancorando no _snapshot de saldo mais próximo de cada mês_; como o campo de saldo da Pluggy oscila absurdamente em alguns conectores (o Nubank reporta valores pulando entre ~0 e milhares no mesmo dia), o mês atual ancorava num snapshot-lixo e o saldo não batia com o do banco. Ao abrir o histórico a âncora passava a ser um mês antigo somando todas as transações, o que reconcilia com o saldo real — daí "abrir o histórico conserta". Agora todo mês deriva de uma **única âncora**, então o saldo é idêntico independente do histórico estar aberto ou fechado.
+
+### Adicionado
+
+- **Âncora de saldo confirmada (`balance_anchors`).** O saldo de abertura passa a ser ancorado num valor **confirmado** pelo usuário (ex.: saldo real em 31/12/2025), rolando o histórico de transações por cima — imune à oscilação do campo de saldo da Pluggy. Usa a âncora mais recente da conta (atualizável a cada virada de ano). Sem âncora, cai no saldo ao vivo rolado para trás. A tabela `balance_snapshots` deixa de participar do cálculo e vira apenas um **log de diagnóstico** das leituras de saldo da Pluggy (foi o que permitiu identificar a oscilação do Nubank). _Input de âncora na criação de conta e refresh anual automático ainda pendentes._
+
 ## [1.7.1] - 2026-06-29
 
 ### Corrigido

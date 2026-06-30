@@ -201,12 +201,6 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function addDaysIso(iso: string, days: number): string {
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d + days));
-  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
-}
-
 /**
  * BANK transactions are excluded from listings and sums only when the user
  * has explicitly hidden them via `bank_transaction_hidden`. There is no
@@ -270,78 +264,81 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
     const lastRealizedDate = realizedRow.max_date ?? '0000-00-00';
 
     // ── Compute opening balance per bank account ──
-    // Find the best anchor: the closest balance snapshot to the target month.
-    // If the snapshot is AFTER firstDay: opening = snap − sum(firstDay..snap)
-    // If the snapshot is BEFORE firstDay: opening = snap + sum(snap+1..day before firstDay)
-    // Falls back to the live Pluggy balance when no snapshots exist.
-    const openingBalances = new Map<string, number>();
-    for (const ba of bankAccounts) {
-      // Try nearest snapshot AFTER (or on) firstDay, then nearest BEFORE.
-      const snapAfter = db
-        .prepare(
-          `SELECT date, balance FROM balance_snapshots
-           WHERE account_id = ? AND date >= ?
-           ORDER BY date ASC LIMIT 1`,
-        )
-        .get(ba.id, firstDay) as { date: string; balance: number } | undefined;
+    // Every month's opening derives from a SINGLE anchor by walking the
+    // transaction history, so the running balance is identical no matter which
+    // months are loaded (the CashFlow ledger seeds from the first visible
+    // month's opening, so a per-month-specific anchor would make the displayed
+    // saldo drift when history is toggled open/closed).
+    //
+    // Preferred anchor: a user-confirmed `balance_anchors` row (a TRUSTED
+    // absolute balance at a known date). We deliberately do NOT anchor on
+    // balance_snapshots / the live Pluggy balance as the primary source: that
+    // field oscillates wildly for some connectors (Nubank reports values
+    // swinging between ~0 and thousands intra-day), so any single reading can be
+    // garbage. A confirmed anchor + transaction walk is immune to that. The most
+    // recent anchor is used (refreshed yearly), giving the shortest walk over
+    // current data. When no anchor exists, fall back to the live balance rolled
+    // backward — still one anchor for all months, just less trustworthy.
+    const sumBetween = (accountId: string, fromExcl: string, toExcl: string): number =>
+      (
+        db
+          .prepare(
+            // tx strictly after `fromExcl`, strictly before `toExcl`.
+            `SELECT COALESCE(SUM(t.amount), 0) AS total
+             FROM bank_transactions t
+             WHERE t.account_id = ? AND t.date > ? AND t.date < ?
+               AND ${BANK_TX_NOT_HIDDEN_SQL}`,
+          )
+          .get(accountId, fromExcl, toExcl) as { total: number }
+      ).total;
 
-      const snapBefore = db
-        .prepare(
-          `SELECT date, balance FROM balance_snapshots
-           WHERE account_id = ? AND date < ?
-           ORDER BY date DESC LIMIT 1`,
-        )
-        .get(ba.id, firstDay) as { date: string; balance: number } | undefined;
-
-      let opening: number;
-
-      if (snapBefore) {
-        // Snapshot is before firstDay — roll forward:
-        // opening = snap.balance + sum(transactions from snap.date+1 to day before firstDay)
-        // But since there are no transactions between end-of-prev-month and firstDay
-        // in practice, and the snapshot IS end-of-day, we need transactions from
-        // day after snapshot through day before firstDay.
-        const dayAfterSnap = addDaysIso(snapBefore.date, 1);
-        const dayBeforeFirst = addDaysIso(firstDay, -1);
-        if (dayAfterSnap <= dayBeforeFirst) {
-          const row = db
-            .prepare(
-              `SELECT COALESCE(SUM(t.amount), 0) AS total
-               FROM bank_transactions t
-               WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
-                 AND ${BANK_TX_NOT_HIDDEN_SQL}`,
-            )
-            .get(ba.id, dayAfterSnap, dayBeforeFirst) as { total: number };
-          opening = round2(snapBefore.balance + row.total);
-        } else {
-          // Snapshot is the day before firstDay — balance IS the opening.
-          opening = snapBefore.balance;
-        }
-      } else if (snapAfter) {
-        // Snapshot is on or after firstDay — roll backward:
-        // opening = snap.balance − sum(transactions from firstDay through snap.date)
-        const row = db
+    const sumRange = (accountId: string, fromIncl: string, toIncl: string): number =>
+      (
+        db
           .prepare(
             `SELECT COALESCE(SUM(t.amount), 0) AS total
              FROM bank_transactions t
              WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
                AND ${BANK_TX_NOT_HIDDEN_SQL}`,
           )
-          .get(ba.id, firstDay, snapAfter.date) as { total: number };
-        opening = round2(snapAfter.balance - row.total);
-      } else {
-        // No snapshots at all — use live Pluggy balance (original fallback).
-        const row = db
-          .prepare(
-            `SELECT COALESCE(SUM(t.amount), 0) AS total
-             FROM bank_transactions t
-             WHERE t.account_id = ? AND t.date >= ?
-               AND ${BANK_TX_NOT_HIDDEN_SQL}`,
-          )
-          .get(ba.id, firstDay) as { total: number };
-        opening = round2((ba.balance ?? 0) - row.total);
-      }
+          .get(accountId, fromIncl, toIncl) as { total: number }
+      ).total;
 
+    const openingBalances = new Map<string, number>();
+    for (const ba of bankAccounts) {
+      // Most recent confirmed anchor for this account, if any.
+      const anchor = db
+        .prepare(
+          `SELECT anchor_date, balance FROM balance_anchors
+           WHERE account_id = ? ORDER BY anchor_date DESC LIMIT 1`,
+        )
+        .get(ba.id) as { anchor_date: string; balance: number } | undefined;
+
+      let opening: number;
+      if (anchor) {
+        // opening(month) = balance at END of the day before firstDay.
+        // Anchor balance is as of END of anchor_date. Walk the transaction
+        // history between the anchor and firstDay (exclusive of the month's own
+        // rows): forward if the month starts after the anchor, backward if
+        // before.
+        if (anchor.anchor_date < firstDay) {
+          // Add tx strictly after the anchor day, strictly before firstDay.
+          opening = round2(anchor.balance + sumBetween(ba.id, anchor.anchor_date, firstDay));
+        } else {
+          // Anchor is on/after firstDay — remove tx from firstDay..anchor_date.
+          opening = round2(anchor.balance - sumRange(ba.id, firstDay, anchor.anchor_date));
+        }
+      } else if (ba.balance != null) {
+        // Fallback: roll the live balance backward across every not-hidden
+        // transaction from firstDay onward (none are dated in the future).
+        opening = round2(ba.balance - sumRange(ba.id, firstDay, '9999-12-31'));
+      } else {
+        // No anchor and no live balance to ground on. balance_snapshots are
+        // deliberately NOT consulted here — they are raw, untrusted per-sync
+        // readings of the same oscillating Pluggy field, kept only as a
+        // diagnostic log. Show 0 rather than anchor on an unreliable reading.
+        opening = 0;
+      }
       openingBalances.set(ba.id, opening);
     }
 
