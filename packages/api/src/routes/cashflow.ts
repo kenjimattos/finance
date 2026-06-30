@@ -8,6 +8,7 @@ import {
   findOffsetForDueMonth,
 } from '../services/billWindow.js';
 import { pruneRealizedManualEntries } from '../services/pruneManualEntries.js';
+import { ensureYearEndAnchors } from '../services/yearEndAnchors.js';
 
 export const cashflowRouter = Router();
 
@@ -663,10 +664,15 @@ cashflowRouter.post('/cashflow/sync', async (req, res, next) => {
     // months before the realized boundary, plus legacy month-less rows).
     const prunedManualEntries = pruneRealizedManualEntries(db);
 
+    // Freeze a year-end balance anchor for any completed, settled year so the
+    // opening-balance walk stays bounded and survives Pluggy aging out old tx.
+    const yearEndAnchors = ensureYearEndAnchors(db);
+
     res.json({
       ok: true,
       transactions: txCount,
       prunedManualEntries,
+      yearEndAnchors,
     });
   } catch (err) {
     next(err);
