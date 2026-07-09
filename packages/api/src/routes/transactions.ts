@@ -7,6 +7,7 @@ import type { Db } from '../db/index.js';
 import { insertManualTransaction } from '../db/manualTransaction.js';
 import { applyLearnedRules } from '../services/applyLearnedRules.js';
 import { extractMerchantSlug } from '../services/merchantSlug.js';
+import { recomputeShiftForDateChange } from '../services/billWindow.js';
 
 export const transactionsRouter = Router();
 
@@ -562,6 +563,22 @@ async function syncItem(db: Db, itemId: string) {
     WHERE id = ?
   `);
 
+  // Bill shifts are relative to the transaction's date, so a repost that moves
+  // the date invalidates the stored shift (it would drag the row to a
+  // neighboring bill). These support recomputing it against the new date.
+  const getShiftOverride = db.prepare(
+    `SELECT shift FROM transaction_bill_overrides WHERE transaction_id = ?`,
+  );
+  const setShiftOverride = db.prepare(
+    `UPDATE transaction_bill_overrides SET shift = ? WHERE transaction_id = ?`,
+  );
+  const deleteShiftOverride = db.prepare(
+    `DELETE FROM transaction_bill_overrides WHERE transaction_id = ?`,
+  );
+  const getAccountSettings = db.prepare(
+    `SELECT closing_day, due_day FROM account_settings WHERE account_id = ?`,
+  );
+
   const insertConflict = db.prepare(`
     INSERT INTO transaction_sync_conflicts
       (provider_transaction_id, kept_transaction_id, new_transaction_id,
@@ -634,6 +651,41 @@ async function syncItem(db: Db, itemId: string) {
           `(status ${t.status ?? '?'}). Updating in place.`,
         );
         updateTxRepost.run(newDate, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existing.id);
+
+        // The date moved, so any bill shift the user applied under the old
+        // date now targets the wrong cycle. Recompute it so the row keeps
+        // displaying on the bill the user placed it on. Typical case: a
+        // pending Itaú installment dated on the bill's due date, shifted -1
+        // to land on the right bill — once it posts with the real date it
+        // falls on that bill naturally and the shift must go.
+        const override = getShiftOverride.get(existing.id) as { shift: number } | undefined;
+        if (override && override.shift !== 0 && existing.date !== newDate) {
+          const settings = getAccountSettings.get(accountId) as
+            | { closing_day: number; due_day: number }
+            | undefined;
+          if (settings) {
+            const newShift = recomputeShiftForDateChange(
+              { closingDay: settings.closing_day, dueDay: settings.due_day },
+              existing.date,
+              newDate,
+              override.shift,
+            );
+            if (newShift === null || Math.abs(newShift) > 1) {
+              // Can't place the row on the original target bill with a ±1
+              // shift — its natural cycle (usually the true bill after a
+              // repost) is the least wrong option.
+              console.warn(
+                `[sync] Repost of ${t.id} moved ${existing.date} → ${newDate} across ` +
+                `multiple cycles (required shift ${newShift}); clearing stale shift ${override.shift}.`,
+              );
+              deleteShiftOverride.run(existing.id);
+            } else if (newShift === 0) {
+              deleteShiftOverride.run(existing.id);
+            } else if (newShift !== override.shift) {
+              setShiftOverride.run(newShift, existing.id);
+            }
+          }
+        }
       } else {
         // Recycled Pluggy ID: the incoming payload is a materially different
         // purchase. Keep the old row intact and insert the new one separately.

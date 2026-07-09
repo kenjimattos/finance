@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Não lançado]
+
+### Corrigido
+
+- **Shifts de fatura "desconfigurando" sozinhos após o sync.** O Itaú publica parcelas futuras como lançamentos `PENDING` datados no _vencimento_ da fatura em que vão cair; para colocá-las na fatura certa, o usuário aplica `shift = -1`. Quando a parcela efetivamente posta, a Pluggy troca a data do lançamento (repost) — o sync atualizava a data preservando o shift, mas o shift é relativo à data, então o `-1` preservado passava a arrastar a linha para uma fatura antes da correta. Agora, quando um repost muda a data, o shift é **recalculado para manter a linha na mesma fatura-alvo**: se a data nova já cai naturalmente na fatura que o shift mirava, o override é removido; se a fatura-alvo ficou a mais de ±1 ciclo de distância, o override é limpo (com warning no log) e a linha fica no ciclo natural. Sem `account_settings` configurado, o comportamento antigo é mantido.
+
 ## [1.8.0] - 2026-06-30 
 
 ### Corrigido

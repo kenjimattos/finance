@@ -7,6 +7,7 @@ import {
   computeNextBillWindow,
   findOffsetForDueMonth,
   findOffsetForDate,
+  recomputeShiftForDateChange,
 } from './billWindow.js';
 
 /** Helper: create a Date from yyyy-mm-dd without timezone surprises. */
@@ -337,5 +338,43 @@ describe('findOffsetForDate', () => {
     // Two years out, well past the default ±18 cycles.
     const off = findOffsetForDate(settings, '2028-12-01', date('2026-06-19'));
     assert.equal(off, null);
+  });
+});
+
+// ─── recomputeShiftForDateChange ─────────────────────────────────────
+
+describe('recomputeShiftForDateChange', () => {
+  // The real-world case: Itaú LATAM card, closes on the 1st, due on the 10th.
+  const settings = { closingDay: 1, dueDay: 10 };
+  const today = date('2026-07-09');
+
+  it('clears the shift when the new date lands naturally on the target bill', () => {
+    // Pending installment dated on the due date (10/07) falls in the open
+    // window (02/07–01/08, offset 0); user shifted -1 to pull it onto the
+    // bill due 10/07 (offset -1). It posts re-dated 30/06 — which falls in
+    // offset -1 naturally, so the shift must go.
+    assert.equal(recomputeShiftForDateChange(settings, '2026-07-10', '2026-06-30', -1, today), 0);
+  });
+
+  it('keeps the shift when the date moves within the same cycle', () => {
+    // 10/07 → 12/07: both in the open window; -1 still targets the same bill.
+    assert.equal(recomputeShiftForDateChange(settings, '2026-07-10', '2026-07-12', -1, today), -1);
+  });
+
+  it('reports a multi-cycle shift when the date jumps several cycles', () => {
+    // Installment dated 13/10 (offset +3) shifted -1 targets offset +2; the
+    // repost re-dates it to 05/07 (offset 0) — reaching +2 needs shift +2,
+    // beyond what the UI supports. Caller clears the override.
+    assert.equal(recomputeShiftForDateChange(settings, '2026-10-13', '2026-07-05', -1, today), 2);
+  });
+
+  it('handles +1 shifts the same way (late-posting edge purchase)', () => {
+    // Purchase on 30/06 (offset -1) shifted +1 to the open bill; Pluggy
+    // re-dates it to 03/07 (offset 0) — naturally on the target bill now.
+    assert.equal(recomputeShiftForDateChange(settings, '2026-06-30', '2026-07-03', 1, today), 0);
+  });
+
+  it('returns null when a date is beyond the search bound', () => {
+    assert.equal(recomputeShiftForDateChange(settings, '2026-07-10', '2029-01-01', -1, today), null);
   });
 });

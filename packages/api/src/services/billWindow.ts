@@ -175,6 +175,36 @@ export function findOffsetForDate(
 }
 
 /**
+ * Recompute a bill-shift override after a transaction's date changes.
+ *
+ * A shift is relative to the transaction's date: shift `s` on a row whose
+ * natural cycle is N displays it on bill N+s. When a repost moves the date
+ * (Pluggy replaces a pending installment's due-date placeholder with the real
+ * posting date), the preserved `s` starts pointing at a different bill. This
+ * computes the shift that keeps the row on the bill the user placed it on:
+ *
+ *   target = naturalCycle(oldDate) + oldShift
+ *   newShift = target - naturalCycle(newDate)
+ *
+ * Returns the required shift (0 means "remove the override"), which may fall
+ * outside the ±1 the UI supports — the caller decides how to handle that.
+ * Returns `null` when either date is outside the searchable window bound,
+ * meaning the shift can't be recomputed reliably.
+ */
+export function recomputeShiftForDateChange(
+  settings: CardSettings,
+  oldDate: string,
+  newDate: string,
+  oldShift: number,
+  today: Date = new Date(),
+): number | null {
+  const oldNatural = findOffsetForDate(settings, oldDate, today);
+  const newNatural = findOffsetForDate(settings, newDate, today);
+  if (oldNatural === null || newNatural === null) return null;
+  return oldNatural + oldShift - newNatural;
+}
+
+/**
  * Find the bill offset whose due date falls in the target year/month.
  *
  * Different accounts have different closing_day/due_day, so the same calendar
