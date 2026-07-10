@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Alterado
+
+- **Divisão agora mostra os dois totais.** O headline da seção de divisão (Dashboard e Overview) deixa de exibir apenas quanto a parceira deve e passa a mostrar as duas partes lado a lado: **meu** (minhas transações + metade do valor dividido) e **dela** (transações dela + a outra metade). O valor "dela" continua sendo o mesmo `partnerOwes` de antes, agora com rótulo e em destaque na cor de acento.
+
 ## [1.8.1] - 2026-07-09
 
 ### Corrigido

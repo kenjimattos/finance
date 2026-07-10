@@ -89,7 +89,12 @@ export function SplitSection({
 }) {
   const v = VARIANTS[variant];
 
-  // Each split column is one independent list, derived from the shared
+  // Headline figures: each person's share of the divided spend. "dela" is
+  // partnerOwes (theirs + half of the ½ pot); "meu" mirrors it with my own
+  // rows plus the remaining half. Derived from owes (not total/2) so the two
+  // figures always sum to the categorized total despite rounding.
+  const myShare =
+    split.breakdown.mine.total + (split.breakdown.half.total - split.breakdown.half.owes);
   // per-category and per-installment figures.
   const makeCatList = (key: 'halfTotal' | 'theirsTotal' | 'mineTotal'): CategoryItem[] =>
     split.categories
@@ -172,7 +177,22 @@ export function SplitSection({
         <div className="eyebrow mb-6 uppercase">divisão</div>
       )}
 
-      <div className={v.headlineClass}>{formatBRL(split.partnerOwes)}</div>
+      <div className="flex flex-wrap items-baseline gap-x-10 gap-y-4">
+        <div>
+          <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+            meu
+          </div>
+          <div className={v.headlineClass}>{formatBRL(myShare)}</div>
+        </div>
+        <div>
+          <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
+            dela
+          </div>
+          <div className={v.headlineClass} style={{ color: 'var(--color-accent)' }}>
+            {formatBRL(split.partnerOwes)}
+          </div>
+        </div>
+      </div>
 
       {variant === 'section' && (
         <p className="mt-2 font-body text-sm text-[color:var(--color-ink-muted)]">
