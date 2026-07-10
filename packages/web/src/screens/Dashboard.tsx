@@ -232,6 +232,8 @@ function AccountDashboard({
           variant="card"
           split={{
             partnerOwes: splitSummaryQ.data.partnerOwes,
+            previousPartnerOwes: splitSummaryQ.data.previousPartnerOwes,
+            previousMyShare: splitSummaryQ.data.previousMyShare,
             totalCount: splitSummaryQ.data.totalSplitTransactions,
             breakdown: splitSummaryQ.data.breakdown,
             categories: splitSummaryQ.data.categories,

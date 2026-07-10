@@ -284,6 +284,9 @@ export interface SplitSummary {
   dueDate: string;
   totalSplitTransactions: number;
   partnerOwes: number;
+  /** Previous-cycle share totals — drive the "vs anterior" delta under the headline. */
+  previousPartnerOwes: number;
+  previousMyShare: number;
   breakdown: {
     half: { count: number; total: number; owes: number };
     theirs: { count: number; total: number; owes: number };

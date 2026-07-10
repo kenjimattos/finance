@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { formatBRL, variationLabel } from '../lib/format';
+import { formatBRL, formatDelta, variationLabel } from '../lib/format';
 
 /**
  * The "Divisão" section: partner-owes headline + three columns (½, dela,
@@ -15,6 +15,9 @@ import { formatBRL, variationLabel } from '../lib/format';
  */
 export interface SplitSectionData {
   partnerOwes: number;
+  /** Previous-cycle equivalents of the two headline shares. */
+  previousPartnerOwes: number;
+  previousMyShare: number;
   totalCount: number;
   breakdown: {
     half: { count: number; total: number; owes: number };
@@ -189,6 +192,7 @@ export function SplitSection({
             meu
           </div>
           <div className={v.headlineClass}>{formatBRL(myShare)}</div>
+          <ShareDelta value={myShare - split.previousMyShare} />
         </div>
         <div>
           <div className="font-body text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]">
@@ -197,6 +201,7 @@ export function SplitSection({
           <div className={v.headlineClass} style={{ color: 'var(--color-accent)' }}>
             {formatBRL(split.partnerOwes)}
           </div>
+          <ShareDelta value={split.partnerOwes - split.previousPartnerOwes} />
         </div>
       </div>
 
@@ -209,6 +214,30 @@ export function SplitSection({
 
       <div className={`md:m-${v.gridMargin} flex-col md:grid ${cols} ${v.gridGap}`}>{columns}</div>
     </section>
+  );
+}
+
+/**
+ * "▲ R$ x vs anterior" under a headline share — same visual convention as
+ * the cartões grand-total delta: accent when higher, positive when lower.
+ * Hidden when there is no variation.
+ */
+function ShareDelta({ value }: { value: number }) {
+  const dir = value > 0.01 ? 'higher' : value < -0.01 ? 'lower' : 'flat';
+  if (dir === 'flat') return null;
+  const d = formatDelta(value);
+  return (
+    <div className="mt-2 flex items-center gap-1.5 font-body text-xs text-[color:var(--color-ink-muted)]">
+      <span
+        className="font-mono"
+        style={{ color: dir === 'higher' ? 'var(--color-accent)' : 'var(--color-positive)' }}
+      >
+        {d.symbol}
+      </span>
+      <span>
+        {d.text} <span className="text-[color:var(--color-ink-faint)]">vs anterior</span>
+      </span>
+    </div>
   );
 }
 

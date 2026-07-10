@@ -241,6 +241,20 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
       mineTotal += Math.round(r.amount * 100) / 100;
     }
 
+    // Previous-cycle share totals, so the UI can show a "vs anterior" delta
+    // under the headline figures. Same per-row rounding as the current cycle.
+    let prevHalfTotal = 0;
+    let prevTheirsTotal = 0;
+    let prevMineTotal = 0;
+    for (const r of prevRows) {
+      const amt = Math.round(r.amount * 100) / 100;
+      if (r.split_type === 'half') prevHalfTotal += amt;
+      else prevTheirsTotal += amt;
+    }
+    for (const r of prevMineRows) {
+      prevMineTotal += Math.round(r.amount * 100) / 100;
+    }
+
     // Category breakdown: group by category, full amounts (not halved).
     // Built for the current cycle and the previous one; the previous totals
     // ride along per category so the UI can show the month-over-month delta.
@@ -321,6 +335,8 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
       dueDate: current.nextDueDate,
       totalSplitTransactions: transactions.length,
       partnerOwes: round2(halfTotal / 2 + theirsTotal),
+      previousPartnerOwes: round2(prevHalfTotal / 2 + prevTheirsTotal),
+      previousMyShare: round2(prevMineTotal + prevHalfTotal / 2),
       breakdown: {
         half: { count: rows.filter((r) => r.split_type === 'half').length, total: round2(halfTotal), owes: round2(halfTotal / 2) },
         theirs: { count: rows.filter((r) => r.split_type === 'theirs').length, total: round2(theirsTotal), owes: round2(theirsTotal) },

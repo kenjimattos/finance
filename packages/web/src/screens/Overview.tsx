@@ -422,6 +422,8 @@ export function Overview({
 
   const aggregatedSplit = useMemo(() => {
     let partnerOwes = 0;
+    let previousPartnerOwes = 0;
+    let previousMyShare = 0;
     let totalCount = 0;
     let halfCount = 0;
     let halfTotal = 0;
@@ -438,6 +440,8 @@ export function Overview({
       const s = q.data;
       if (!s) continue;
       partnerOwes += s.partnerOwes;
+      previousPartnerOwes += s.previousPartnerOwes;
+      previousMyShare += s.previousMyShare;
       totalCount += s.totalSplitTransactions;
       halfCount += s.breakdown.half.count;
       halfTotal += s.breakdown.half.total;
@@ -478,6 +482,8 @@ export function Overview({
     const round2 = (n: number) => Math.round(n * 100) / 100;
     return {
       partnerOwes: round2(partnerOwes),
+      previousPartnerOwes: round2(previousPartnerOwes),
+      previousMyShare: round2(previousMyShare),
       totalCount,
       breakdown: {
         half: { count: halfCount, total: round2(halfTotal), owes: round2(halfOwes) },
