@@ -139,7 +139,7 @@ export function SplitSection({
         variant={variant}
         label="dela"
         total={formatBRL(split.breakdown.theirs.owes)}
-        subtitle={`${split.breakdown.theirs.count}x — total ${formatBRL(split.breakdown.theirs.total)}`}
+        subtitle={`${split.breakdown.theirs.count}x`}
         categories={theirsCategories}
         installments={theirsInstallments}
         accent
