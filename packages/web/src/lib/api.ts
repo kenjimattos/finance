@@ -160,6 +160,8 @@ export interface BillCategoryBreakdown {
   name: string;
   color: string;
   total: number;
+  /** Same-category total for the previous bill cycle (0 when absent). */
+  previousTotal: number;
 }
 
 export interface BillInstallmentBreakdown {
@@ -258,6 +260,10 @@ export interface SplitCategoryBreakdown {
   theirsTotal: number;
   mineTotal: number;
   total: number;
+  /** Same-category totals for the previous bill cycle (0 when absent). */
+  prevHalfTotal: number;
+  prevTheirsTotal: number;
+  prevMineTotal: number;
 }
 
 export interface SplitInstallmentBreakdown {

@@ -85,3 +85,16 @@ export function formatDelta(value: number): { symbol: string; text: string } {
     text: formatBRL(abs),
   };
 }
+
+/**
+ * Month-over-month variation shown in parentheses next to a category value.
+ * "novo" when the category had nothing in the previous cycle; null (nothing
+ * rendered) when the value is unchanged. Compact BRL — cents are noise at
+ * this size.
+ */
+export function variationLabel(total: number, prev: number): string | null {
+  if (prev <= 0) return 'novo';
+  const delta = total - prev;
+  if (Math.abs(delta) < 0.01) return null;
+  return `${delta > 0 ? '+' : '−'}${formatBRLCompact(Math.abs(delta))}`;
+}

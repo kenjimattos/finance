@@ -144,15 +144,23 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
 
     const s = { closingDay: settings.closing_day, dueDay: settings.due_day };
     const current = computeBillWindowAtOffset(s, offset);
-    const previous = computeBillWindowAtOffset(s, offset - 1);
-    const next = computeBillWindowAtOffset(s, offset + 1);
 
-    const windowParams = [
-      accountId,
-      current.periodStart, current.periodEnd,
-      previous.periodStart, previous.periodEnd,
-      next.periodStart, next.periodEnd,
-    ];
+    // Shift-aware 3-window params for an arbitrary cycle, so the same
+    // queries can run for the current cycle and for the one before it
+    // (used for the month-over-month category variation).
+    const windowParamsAt = (off: number) => {
+      const cur = computeBillWindowAtOffset(s, off);
+      const prev = computeBillWindowAtOffset(s, off - 1);
+      const nxt = computeBillWindowAtOffset(s, off + 1);
+      return [
+        accountId,
+        cur.periodStart, cur.periodEnd,
+        prev.periodStart, prev.periodEnd,
+        nxt.periodStart, nxt.periodEnd,
+      ];
+    };
+    const windowParams = windowParamsAt(offset);
+    const prevWindowParams = windowParamsAt(offset - 1);
 
     const windowClause = `
       t.account_id = ?
@@ -163,44 +171,45 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
       )`;
 
     // Split-marked transactions (half / theirs)
-    const rows = db
-      .prepare(
-        `SELECT t.id, t.date, t.description,
-                COALESCE(t.amount_in_account_currency, t.amount) AS amount,
-                sp.split_type,
-                t.installment_number, t.total_installments,
-                uc.id    AS user_category_id,
-                uc.name  AS user_category_name,
-                uc.color AS user_category_color
-         FROM transactions t
-         INNER JOIN transaction_splits sp ON sp.transaction_id = t.id
-         INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
-         INNER JOIN user_categories       uc ON uc.id = tc.user_category_id
-         LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-         WHERE ${windowClause}
-         ORDER BY t.date ASC, t.id ASC`,
-      )
-      .all(...windowParams) as SplitSummaryRow[];
+    const splitStmt = db.prepare(
+      `SELECT t.id, t.date, t.description,
+              COALESCE(t.amount_in_account_currency, t.amount) AS amount,
+              sp.split_type,
+              t.installment_number, t.total_installments,
+              uc.id    AS user_category_id,
+              uc.name  AS user_category_name,
+              uc.color AS user_category_color
+       FROM transactions t
+       INNER JOIN transaction_splits sp ON sp.transaction_id = t.id
+       INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
+       INNER JOIN user_categories       uc ON uc.id = tc.user_category_id
+       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+       WHERE ${windowClause}
+       ORDER BY t.date ASC, t.id ASC`,
+    );
 
     // "Mine" = categorized transactions WITHOUT a split row
-    const mineRows = db
-      .prepare(
-        `SELECT t.id, t.date, t.description,
-                COALESCE(t.amount_in_account_currency, t.amount) AS amount,
-                t.installment_number, t.total_installments,
-                uc.id    AS user_category_id,
-                uc.name  AS user_category_name,
-                uc.color AS user_category_color
-         FROM transactions t
-         INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
-         INNER JOIN user_categories       uc ON uc.id = tc.user_category_id
-         LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-         LEFT JOIN transaction_splits     sp ON sp.transaction_id = t.id
-         WHERE ${windowClause}
-           AND sp.transaction_id IS NULL
-         ORDER BY t.date ASC, t.id ASC`,
-      )
-      .all(...windowParams) as Array<Omit<SplitSummaryRow, 'split_type'>>;
+    const mineStmt = db.prepare(
+      `SELECT t.id, t.date, t.description,
+              COALESCE(t.amount_in_account_currency, t.amount) AS amount,
+              t.installment_number, t.total_installments,
+              uc.id    AS user_category_id,
+              uc.name  AS user_category_name,
+              uc.color AS user_category_color
+       FROM transactions t
+       INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
+       INNER JOIN user_categories       uc ON uc.id = tc.user_category_id
+       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+       LEFT JOIN transaction_splits     sp ON sp.transaction_id = t.id
+       WHERE ${windowClause}
+         AND sp.transaction_id IS NULL
+       ORDER BY t.date ASC, t.id ASC`,
+    );
+
+    const rows = splitStmt.all(...windowParams) as SplitSummaryRow[];
+    const mineRows = mineStmt.all(...windowParams) as Array<Omit<SplitSummaryRow, 'split_type'>>;
+    const prevRows = splitStmt.all(...prevWindowParams) as SplitSummaryRow[];
+    const prevMineRows = mineStmt.all(...prevWindowParams) as Array<Omit<SplitSummaryRow, 'split_type'>>;
 
     let halfTotal = 0;
     let theirsTotal = 0;
@@ -233,17 +242,19 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
     }
 
     // Category breakdown: group by category, full amounts (not halved).
-    const categoryMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number; mineTotal: number }>();
+    // Built for the current cycle and the previous one; the previous totals
+    // ride along per category so the UI can show the month-over-month delta.
+    type CatEntry = { id: number; name: string; color: string; halfTotal: number; theirsTotal: number; mineTotal: number };
 
-    function addToCatMap(catId: number | null, catName: string | null, catColor: string | null, amount: number, type: 'half' | 'theirs' | 'mine') {
+    function addToCatMap(map: Map<number, CatEntry>, catId: number | null, catName: string | null, catColor: string | null, amount: number, type: 'half' | 'theirs' | 'mine') {
       if (catId == null) return;
-      const existing = categoryMap.get(catId);
+      const existing = map.get(catId);
       if (existing) {
         if (type === 'half') existing.halfTotal += amount;
         else if (type === 'theirs') existing.theirsTotal += amount;
         else existing.mineTotal += amount;
       } else {
-        categoryMap.set(catId, {
+        map.set(catId, {
           id: catId,
           name: catName!,
           color: catColor!,
@@ -254,19 +265,30 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
       }
     }
 
-    for (const r of rows) addToCatMap(r.user_category_id, r.user_category_name, r.user_category_color, r.amount, r.split_type as 'half' | 'theirs');
-    for (const r of mineRows) addToCatMap(r.user_category_id, r.user_category_name, r.user_category_color, r.amount, 'mine');
+    const categoryMap = new Map<number, CatEntry>();
+    for (const r of rows) addToCatMap(categoryMap, r.user_category_id, r.user_category_name, r.user_category_color, r.amount, r.split_type as 'half' | 'theirs');
+    for (const r of mineRows) addToCatMap(categoryMap, r.user_category_id, r.user_category_name, r.user_category_color, r.amount, 'mine');
+
+    const prevCategoryMap = new Map<number, CatEntry>();
+    for (const r of prevRows) addToCatMap(prevCategoryMap, r.user_category_id, r.user_category_name, r.user_category_color, r.amount, r.split_type as 'half' | 'theirs');
+    for (const r of prevMineRows) addToCatMap(prevCategoryMap, r.user_category_id, r.user_category_name, r.user_category_color, r.amount, 'mine');
 
     const categories = Array.from(categoryMap.values())
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        color: c.color,
-        halfTotal: round2(c.halfTotal),
-        theirsTotal: round2(c.theirsTotal),
-        mineTotal: round2(c.mineTotal),
-        total: round2(c.halfTotal + c.theirsTotal + c.mineTotal),
-      }))
+      .map((c) => {
+        const prev = prevCategoryMap.get(c.id);
+        return {
+          id: c.id,
+          name: c.name,
+          color: c.color,
+          halfTotal: round2(c.halfTotal),
+          theirsTotal: round2(c.theirsTotal),
+          mineTotal: round2(c.mineTotal),
+          total: round2(c.halfTotal + c.theirsTotal + c.mineTotal),
+          prevHalfTotal: round2(prev?.halfTotal ?? 0),
+          prevTheirsTotal: round2(prev?.theirsTotal ?? 0),
+          prevMineTotal: round2(prev?.mineTotal ?? 0),
+        };
+      })
       .sort((a, b) => b.total - a.total);
 
     // Installments: from split rows + mine rows

@@ -12,7 +12,7 @@ import {
   type PartnerCard,
   type PartnerCardBreakdown,
 } from '../lib/api';
-import { formatBRL, formatDateLong, formatDelta } from '../lib/format';
+import { formatBRL, formatDateLong, formatDelta, variationLabel } from '../lib/format';
 import { findOffsetForDueMonth, currentDueMonth } from '../lib/billWindow';
 import { SplitSection } from '../components/SplitSection';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -431,7 +431,7 @@ export function Overview({
     let theirsOwes = 0;
     let mineCount = 0;
     let mineTotal = 0;
-    const catMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number; mineTotal: number }>();
+    const catMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number; mineTotal: number; prevHalfTotal: number; prevTheirsTotal: number; prevMineTotal: number }>();
     const installments: SplitSummary['installments'] = [];
 
     for (const q of splitQueries) {
@@ -453,6 +453,9 @@ export function Overview({
           existing.halfTotal += cat.halfTotal;
           existing.theirsTotal += cat.theirsTotal;
           existing.mineTotal += cat.mineTotal;
+          existing.prevHalfTotal += cat.prevHalfTotal;
+          existing.prevTheirsTotal += cat.prevTheirsTotal;
+          existing.prevMineTotal += cat.prevMineTotal;
         } else {
           catMap.set(cat.id, {
             id: cat.id,
@@ -461,6 +464,9 @@ export function Overview({
             halfTotal: cat.halfTotal,
             theirsTotal: cat.theirsTotal,
             mineTotal: cat.mineTotal,
+            prevHalfTotal: cat.prevHalfTotal,
+            prevTheirsTotal: cat.prevTheirsTotal,
+            prevMineTotal: cat.prevMineTotal,
           });
         }
       }
@@ -485,6 +491,9 @@ export function Overview({
           theirsTotal: round2(c.theirsTotal),
           mineTotal: round2(c.mineTotal),
           total: round2(c.halfTotal + c.theirsTotal + c.mineTotal),
+          prevHalfTotal: round2(c.prevHalfTotal),
+          prevTheirsTotal: round2(c.prevTheirsTotal),
+          prevMineTotal: round2(c.prevMineTotal),
         }))
         .sort((a, b) => b.total - a.total),
       installments,
@@ -507,13 +516,14 @@ export function Overview({
   // ── Aggregated category breakdown across all accounts ──
 
   const aggregatedCategories = useMemo(() => {
-    const map = new Map<number, { id: number; name: string; color: string; total: number }>();
+    const map = new Map<number, { id: number; name: string; color: string; total: number; previousTotal: number }>();
     breakdownQueries.forEach((q) => {
       if (!q.data) return;
       for (const cat of q.data.categories) {
         const existing = map.get(cat.id);
         if (existing) {
           existing.total += cat.total;
+          existing.previousTotal += cat.previousTotal;
         } else {
           map.set(cat.id, { ...cat });
         }
@@ -852,7 +862,7 @@ const CATEGORY_COLLAPSE_LIMIT = 6;
 function CategoryBreakdown({
   categories,
 }: {
-  categories: Array<{ id: number; name: string; color: string; total: number }>;
+  categories: Array<{ id: number; name: string; color: string; total: number; previousTotal: number }>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? categories : categories.slice(0, CATEGORY_COLLAPSE_LIMIT);
@@ -866,8 +876,15 @@ function CategoryBreakdown({
           <li key={cat.id}>
             <div className="flex items-baseline justify-between gap-4 font-body text-[12px]">
               <span className="truncate text-[color:var(--color-ink-soft)]">{cat.name}</span>
-              <span className="shrink-0 font-mono tabular-nums text-[color:var(--color-ink-muted)]">
-                {formatBRL(cat.total)}
+              <span className="flex shrink-0 items-baseline gap-1.5">
+                <span className="font-mono tabular-nums text-[color:var(--color-ink-muted)]">
+                  {formatBRL(cat.total)}
+                </span>
+                {variationLabel(cat.total, cat.previousTotal) && (
+                  <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
+                    ({variationLabel(cat.total, cat.previousTotal)})
+                  </span>
+                )}
               </span>
             </div>
             <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">

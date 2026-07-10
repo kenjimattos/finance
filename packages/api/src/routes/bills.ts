@@ -155,7 +155,13 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
     const previousTotal = round2(
       sumBillTotalWithShifts(db, scope, previous, prevPrev, current),
     );
-    const categories = categoryBreakdownWithShifts(db, scope, current, previous, next);
+    // Previous cycle's per-category totals ride along as previousTotal so
+    // the UI can show a month-over-month variation next to each category.
+    const prevCategories = categoryBreakdownWithShifts(db, scope, previous, prevPrev, current);
+    const prevByCategory = new Map(prevCategories.map((c) => [c.id, c.total]));
+    const categories = categoryBreakdownWithShifts(db, scope, current, previous, next).map(
+      (c) => ({ ...c, previousTotal: prevByCategory.get(c.id) ?? 0 }),
+    );
     const installments = installmentBreakdownWithShifts(
       db,
       scope,

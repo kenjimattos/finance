@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { formatBRL } from '../lib/format';
+import { formatBRL, variationLabel } from '../lib/format';
 
 /**
  * The "Divisão" section: partner-owes headline + three columns (½, dela,
@@ -28,6 +28,9 @@ export interface SplitSectionData {
     halfTotal: number;
     theirsTotal: number;
     mineTotal: number;
+    prevHalfTotal: number;
+    prevTheirsTotal: number;
+    prevMineTotal: number;
   }>;
   installments: Array<{
     id: string;
@@ -77,7 +80,7 @@ const VARIANTS: Record<
 
 const INST_LIMIT = 4;
 
-type CategoryItem = { id: number; name: string; color: string; total: number };
+type CategoryItem = { id: number; name: string; color: string; total: number; prev: number };
 type InstallmentItem = SplitSectionData['installments'][number];
 
 export function SplitSection({
@@ -96,14 +99,17 @@ export function SplitSection({
   const myShare =
     split.breakdown.mine.total + (split.breakdown.half.total - split.breakdown.half.owes);
   // per-category and per-installment figures.
-  const makeCatList = (key: 'halfTotal' | 'theirsTotal' | 'mineTotal'): CategoryItem[] =>
+  const makeCatList = (
+    key: 'halfTotal' | 'theirsTotal' | 'mineTotal',
+    prevKey: 'prevHalfTotal' | 'prevTheirsTotal' | 'prevMineTotal',
+  ): CategoryItem[] =>
     split.categories
       .filter((c) => c[key] > 0)
-      .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c[key] }))
+      .map((c) => ({ id: c.id, name: c.name, color: c.color, total: c[key], prev: c[prevKey] }))
       .sort((a, b) => b.total - a.total);
-  const halfCategories = makeCatList('halfTotal');
-  const theirsCategories = makeCatList('theirsTotal');
-  const mineCategories = makeCatList('mineTotal');
+  const halfCategories = makeCatList('halfTotal', 'prevHalfTotal');
+  const theirsCategories = makeCatList('theirsTotal', 'prevTheirsTotal');
+  const mineCategories = makeCatList('mineTotal', 'prevMineTotal');
 
   const halfInstallments = split.installments.filter((i) => i.splitType === 'half');
   const theirsInstallments = split.installments.filter((i) => i.splitType === 'theirs');
@@ -275,11 +281,18 @@ function CategoryList({
           <li key={cat.id}>
             <div className="flex items-baseline justify-between gap-4 font-body text-[12px]">
               <span className="truncate text-[color:var(--color-ink-soft)]">{cat.name}</span>
-              <span
-                className="shrink-0 font-mono tabular-nums"
-                style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
-              >
-                {formatBRL(cat.total)}
+              <span className="flex shrink-0 items-baseline gap-1.5">
+                <span
+                  className="font-mono tabular-nums"
+                  style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
+                >
+                  {formatBRL(cat.total)}
+                </span>
+                {variationLabel(cat.total, cat.prev) && (
+                  <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
+                    ({variationLabel(cat.total, cat.prev)})
+                  </span>
+                )}
               </span>
             </div>
             <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">

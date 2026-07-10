@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Alterado
 
+- **Categorias mostram a variação mês a mês.** Cada categoria nas colunas da divisão (½ / dela / meu) e no breakdown da seção **cartões** do Overview passa a exibir, entre parênteses depois do valor, a diferença em relação à fatura anterior — ex.: `R$ 320,00 (+R$ 45)`. Categorias sem gasto no ciclo anterior aparecem como `(novo)`; sem mudança, nada é exibido. O split-summary devolve os totais por categoria do ciclo anterior (`prevHalfTotal`/`prevTheirsTotal`/`prevMineTotal`) e o breakdown de fatura devolve `previousTotal` por categoria; o Overview agrega esses valores entre contas antes de calcular a variação.
 - **Divisão agora mostra os dois totais.** O headline da seção de divisão (Dashboard e Overview) deixa de exibir apenas quanto a parceira deve e passa a mostrar as duas partes lado a lado: **meu** (minhas transações + metade do valor dividido) e **dela** (transações dela + a outra metade). O valor "dela" continua sendo o mesmo `partnerOwes` de antes, agora com rótulo e em destaque na cor de acento.
 
 ## [1.8.1] - 2026-07-09
