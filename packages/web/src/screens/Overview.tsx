@@ -433,6 +433,11 @@ export function Overview({
     let theirsOwes = 0;
     let mineCount = 0;
     let mineTotal = 0;
+    let prevHalfTotal = 0;
+    let prevHalfOwes = 0;
+    let prevTheirsTotal = 0;
+    let prevTheirsOwes = 0;
+    let prevMineTotal = 0;
     const catMap = new Map<number, { id: number; name: string; color: string; halfTotal: number; theirsTotal: number; mineTotal: number; prevHalfTotal: number; prevTheirsTotal: number; prevMineTotal: number }>();
     const installments: SplitSummary['installments'] = [];
 
@@ -451,6 +456,11 @@ export function Overview({
       theirsOwes += s.breakdown.theirs.owes;
       mineCount += s.breakdown.mine.count;
       mineTotal += s.breakdown.mine.total;
+      prevHalfTotal += s.previousBreakdown.half.total;
+      prevHalfOwes += s.previousBreakdown.half.owes;
+      prevTheirsTotal += s.previousBreakdown.theirs.total;
+      prevTheirsOwes += s.previousBreakdown.theirs.owes;
+      prevMineTotal += s.previousBreakdown.mine.total;
       for (const cat of s.categories) {
         const existing = catMap.get(cat.id);
         if (existing) {
@@ -489,6 +499,11 @@ export function Overview({
         half: { count: halfCount, total: round2(halfTotal), owes: round2(halfOwes) },
         theirs: { count: theirsCount, total: round2(theirsTotal), owes: round2(theirsOwes) },
         mine: { count: mineCount, total: round2(mineTotal) },
+      },
+      previousBreakdown: {
+        half: { total: round2(prevHalfTotal), owes: round2(prevHalfOwes) },
+        theirs: { total: round2(prevTheirsTotal), owes: round2(prevTheirsOwes) },
+        mine: { total: round2(prevMineTotal) },
       },
       categories: Array.from(catMap.values())
         .map((c) => ({

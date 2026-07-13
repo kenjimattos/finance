@@ -342,6 +342,11 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
         theirs: { count: rows.filter((r) => r.split_type === 'theirs').length, total: round2(theirsTotal), owes: round2(theirsTotal) },
         mine: { count: mineRows.length, total: round2(mineTotal) },
       },
+      previousBreakdown: {
+        half: { total: round2(prevHalfTotal), owes: round2(prevHalfTotal / 2) },
+        theirs: { total: round2(prevTheirsTotal), owes: round2(prevTheirsTotal) },
+        mine: { total: round2(prevMineTotal) },
+      },
       categories,
       installments,
       transactions,

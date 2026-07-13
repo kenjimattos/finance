@@ -236,6 +236,7 @@ function AccountDashboard({
             previousMyShare: splitSummaryQ.data.previousMyShare,
             totalCount: splitSummaryQ.data.totalSplitTransactions,
             breakdown: splitSummaryQ.data.breakdown,
+            previousBreakdown: splitSummaryQ.data.previousBreakdown,
             categories: splitSummaryQ.data.categories,
             installments: splitSummaryQ.data.installments,
           }}

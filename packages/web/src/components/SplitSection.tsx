@@ -24,6 +24,11 @@ export interface SplitSectionData {
     theirs: { count: number; total: number; owes: number };
     mine: { count: number; total: number };
   };
+  previousBreakdown: {
+    half: { total: number; owes: number };
+    theirs: { total: number; owes: number };
+    mine: { total: number };
+  };
   categories: Array<{
     id: number;
     name: string;
@@ -126,6 +131,7 @@ export function SplitSection({
         variant={variant}
         label="½"
         total={formatBRL(split.breakdown.half.owes)}
+        delta={split.breakdown.half.owes - split.previousBreakdown.half.owes}
         subtitle={`${split.breakdown.half.count}x — total ${formatBRL(split.breakdown.half.total)}`}
         categories={halfCategories}
         installments={halfInstallments}
@@ -139,6 +145,7 @@ export function SplitSection({
         variant={variant}
         label="dela"
         total={formatBRL(split.breakdown.theirs.owes)}
+        delta={split.breakdown.theirs.owes - split.previousBreakdown.theirs.owes}
         subtitle={`${split.breakdown.theirs.count}x`}
         categories={theirsCategories}
         installments={theirsInstallments}
@@ -153,6 +160,7 @@ export function SplitSection({
         variant={variant}
         label="meu"
         total={formatBRL(split.breakdown.mine.total)}
+        delta={split.breakdown.mine.total - split.previousBreakdown.mine.total}
         subtitle={`${split.breakdown.mine.count}x`}
         categories={mineCategories}
         installments={mineInstallments}
@@ -245,6 +253,7 @@ function SplitColumn({
   variant,
   label,
   total,
+  delta,
   subtitle,
   categories,
   installments,
@@ -253,6 +262,7 @@ function SplitColumn({
   variant: Variant;
   label: string;
   total: string;
+  delta: number;
   subtitle: string;
   categories: CategoryItem[];
   installments: InstallmentItem[];
@@ -270,6 +280,7 @@ function SplitColumn({
       >
         {total}
       </div>
+      <ShareDelta value={delta} />
       <div className="mt-1 font-body text-[10px] text-[color:var(--color-ink-faint)]">
         {subtitle}
       </div>

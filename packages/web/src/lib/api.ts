@@ -292,6 +292,12 @@ export interface SplitSummary {
     theirs: { count: number; total: number; owes: number };
     mine: { count: number; total: number };
   };
+  /** Previous-cycle equivalents — drive the "vs anterior" delta per column. */
+  previousBreakdown: {
+    half: { total: number; owes: number };
+    theirs: { total: number; owes: number };
+    mine: { total: number };
+  };
   categories: SplitCategoryBreakdown[];
   installments: SplitInstallmentBreakdown[];
   transactions: SplitSummaryTransaction[];
