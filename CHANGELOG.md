@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Corrigido
+
+- **Entradas manuais "sumiam" do fluxo de caixa no dia alcançado pelo sync.** O dia da fronteira realizado/projetado (a última data com transação bancária) mostrava apenas os lançamentos reais do banco — as entradas manuais agendadas para esse dia eram ocultadas da visualização e do somatório, mesmo quando o lançamento correspondente ainda não tinha postado no extrato. Agora o dia da fronteira exibe ambos: as transações reais **e** as entradas manuais do dia, que voltam a contar no saldo. Dias estritamente anteriores à fronteira seguem escondendo as manuais (os dados reais já os cobrem), e a poda no sync continua preservando o mês corrente.
+
 ### Alterado
 
 - **Coluna "dela" sem total redundante.** O subtítulo da coluna **dela** na divisão mostrava `Nx — total R$ x`, mas para essa coluna o total é sempre igual ao valor devido exibido logo acima; agora mostra apenas a contagem (`Nx`), como a coluna **meu**.

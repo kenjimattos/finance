@@ -220,7 +220,9 @@ const BANK_TX_NOT_HIDDEN_SQL =
  * Days covered by real data (up to last bank transaction date): actual
  * BANK transactions from Pluggy. Days beyond that: manual entries +
  * credit card bill outflows. The boundary is data-driven, not tied to
- * today's date.
+ * today's date. The boundary day itself gets BOTH: its bank rows and its
+ * manual entries — the sync reached that day, but scheduled entries may
+ * not have posted to the bank feed yet.
  */
 cashflowRouter.get('/cashflow', (req, res, next) => {
   try {
@@ -453,6 +455,21 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
     // ── Assemble day-by-day timeline ──
     const days: CashFlowDay[] = [];
 
+    const pushManualEntries = (d: number, entries: CashFlowEntry[]) => {
+      // Manual entries whose day_of_month matches (clamped).
+      for (const me of manualEntries) {
+        const clampedDay = Math.min(me.day_of_month, monthDays);
+        if (clampedDay === d) {
+          entries.push({
+            id: `manual-${me.id}`,
+            description: me.description,
+            amount: round2(me.amount),
+            type: 'manual_entry',
+          });
+        }
+      }
+    };
+
     for (let d = 1; d <= monthDays; d++) {
       const date = `${monthStr}-${pad(d)}`;
       const isPast = date <= lastRealizedDate;
@@ -473,19 +490,17 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
             });
           }
         }
-      } else {
-        // Manual entries whose day_of_month matches (clamped).
-        for (const me of manualEntries) {
-          const clampedDay = Math.min(me.day_of_month, monthDays);
-          if (clampedDay === d) {
-            entries.push({
-              id: `manual-${me.id}`,
-              description: me.description,
-              amount: round2(me.amount),
-              type: 'manual_entry',
-            });
-          }
+
+        // The boundary day is realized but not necessarily COMPLETE: the
+        // sync reached it, yet scheduled manual entries for this day may not
+        // have hit the bank feed. Keep them visible (and summed) instead of
+        // assuming the bank data fully covers the day. Strictly-earlier days
+        // still hide manual entries — real data has moved past them.
+        if (date === lastRealizedDate) {
+          pushManualEntries(d, entries);
         }
+      } else {
+        pushManualEntries(d, entries);
 
         // Credit card bill outflows on their due day.
         for (const bill of billEntries) {
