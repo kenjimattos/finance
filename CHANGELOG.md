@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.8.2] - 2026-07-14
 
 ### Corrigido
 
@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Alterado
 
+- **Conteúdo principal mais largo.** A largura máxima do `<main>` subiu de 1120px para 1200px, dando mais respiro às três colunas da divisão e aos cards de conta em telas grandes.
 - **Coluna "dela" sem total redundante.** O subtítulo da coluna **dela** na divisão mostrava `Nx — total R$ x`, mas para essa coluna o total é sempre igual ao valor devido exibido logo acima; agora mostra apenas a contagem (`Nx`), como a coluna **meu**.
 - **Totais da divisão mostram o delta vs mês anterior.** Abaixo de cada um dos dois totais da divisão (**meu** e **dela**) — e também abaixo do total de cada coluna (½ / dela / meu) — aparece a variação frente à fatura anterior, no mesmo estilo do total da seção cartões — `▲ R$ 120,00 vs anterior` (accent quando subiu, verde quando caiu, oculto sem variação). O split-summary devolve `previousPartnerOwes`, `previousMyShare` e um `previousBreakdown` por tipo; o Overview soma esses valores entre contas antes de calcular o delta.
 - **Categorias mostram a variação mês a mês.** Cada categoria nas colunas da divisão (½ / dela / meu) e no breakdown da seção **cartões** do Overview passa a exibir, entre parênteses depois do valor, a diferença em relação à fatura anterior — ex.: `R$ 320,00 (+R$ 45)`. Categorias sem gasto no ciclo anterior aparecem como `(novo)`; sem mudança, nada é exibido. O split-summary devolve os totais por categoria do ciclo anterior (`prevHalfTotal`/`prevTheirsTotal`/`prevMineTotal`) e o breakdown de fatura devolve `previousTotal` por categoria; o Overview agrega esses valores entre contas antes de calcular a variação.
