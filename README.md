@@ -2,6 +2,8 @@
 
 A self-hosted credit-card spending manager for a small group (you and a partner), backed by [Pluggy](https://pluggy.ai), the Brazilian Open Finance aggregator. The UI is in Brazilian Portuguese; it renders in an editorial, financial-press style — warm paper, one burnt-orange accent, Fraunces headlines, JetBrains Mono currency.
 
+> **Live demo:** [finance-demo-production.up.railway.app](https://finance-demo-production.up.railway.app/) — log in with username `demo` and password `demo`. The account is fully interactive over ~5 months of synthetic data; it resets periodically.
+
 The point is not just *viewing* transactions — banks already do that. It's the workflow around them:
 
 - **Categorize with your own categories**, and the system learns: categorizing "IFOOD *RESTAURANTE X" once auto-applies the category to every future iFood charge (merchant-slug rules with manual override).
@@ -14,7 +16,7 @@ Multiple banks, multiple users: one Pluggy account powers everyone; each user is
 
 ## Demo account
 
-The repo ships a sandboxed demo login for showcasing the app without exposing real data:
+A hosted instance is available at [finance-demo-production.up.railway.app](https://finance-demo-production.up.railway.app/) (username `demo`, password `demo`). To run your own, the repo ships a sandboxed demo login for showcasing the app without exposing real data:
 
 ```bash
 npm run -w @finance/api seed:demo
