@@ -4,9 +4,13 @@ Express routes mounted from [packages/api/src/index.ts](../packages/api/src/inde
 
 ## Auth
 
-- `GET /auth/me` — `{ authenticated: boolean }`. Returns `true` unconditionally when `APP_PASSWORD` is unset (local dev).
-- `POST /auth/login { password }` — sets the HTTP-only session cookie.
+- `GET /auth/me` — `{ authenticated, username?, demo?, features? }`. `demo: true` marks a sandboxed demo account; `features.importFaturaEnabled` gates the fatura-import button (always `false` for demo users). Authenticates unconditionally as the `default` user when no `USER_*_PASSWORD` is set (local dev).
+- `POST /auth/login { username, password }` — sets the HTTP-only session cookie.
 - `POST /auth/logout` — clears the cookie.
+
+### Demo accounts
+
+Usernames listed in `DEMO_USERS` (default: `demo`) get a 403 `DemoRestricted` from every route whose effect escapes their own SQLite file: `POST /connect-token`, `POST /items`, `DELETE /items/:id`, `POST /transactions/sync`, `POST /cashflow/sync`, `POST /transactions/import-fatura/*`, and `/admin/*`. `GET /items` stays allowed. Everything else (categorization, splits, manual entries, cash-flow edits) works normally; `npm run -w @finance/api seed:demo` resets the dataset.
 
 ## Connect / items
 

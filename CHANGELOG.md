@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Adicionado
+
+- **Conta demo para portfólio.** O usuário `demo` (lista configurável via `DEMO_USERS`; senha declarada como qualquer usuário, via `USER_DEMO_PASSWORD`) é um sandbox de demonstração: interage com tudo que só toca o próprio arquivo SQLite — categorizar, dividir, entradas manuais, grupos de cartão, shifts —, mas a API responde 403 para tudo que escapa dele: conectar/remover bancos, sincronizar com a Pluggy, importar fatura por screenshot (gasta créditos Anthropic) e rotas de admin. O `/auth/me` devolve `demo: true` e a interface esconde os botões bloqueados (sincronizar, gerenciar bancos, importar fatura). `npm run -w @finance/api seed:demo` apaga e regenera o banco do demo com ~5 meses de dados sintéticos sempre relativos à data de execução: dois bancos (Nubank + Itaú), histórico de cartão com categorias e regras aprendidas, compras parceladas, divisões com a parceira, grupos de cartão (titular/adicional/virtual), inbox com lançamentos recentes sem categoria, conta corrente com salário/aluguel/pagamentos de fatura ancorada em `balance_anchors` e entradas manuais projetando os próximos meses.
+
 ## [1.8.2] - 2026-07-14
 
 ### Corrigido
