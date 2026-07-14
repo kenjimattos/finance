@@ -7,6 +7,7 @@ import {
   formatDelta,
   formatMonthYear,
 } from '../lib/format';
+import { useIsDemo } from '../lib/useIsDemo';
 
 /**
  * Editorial bill headline: offset navigation, giant total, delta vs previous
@@ -28,6 +29,7 @@ export function BillHeader({
   onManageRules: () => void;
 }) {
   const queryClient = useQueryClient();
+  const isDemo = useIsDemo();
   const sync = useMutation({
     mutationFn: () => api.syncTransactions(itemId),
     onSuccess: () => {
@@ -95,14 +97,16 @@ export function BillHeader({
               >
                 regras
               </button>
-              <button
-                type="button"
-                onClick={() => sync.mutate()}
-                disabled={sync.isPending}
-                className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
-              >
-                {sync.isPending ? 'sincronizando…' : 'sincronizar ↻'}
-              </button>
+              {!isDemo && (
+                <button
+                  type="button"
+                  onClick={() => sync.mutate()}
+                  disabled={sync.isPending}
+                  className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
+                >
+                  {sync.isPending ? 'sincronizando…' : 'sincronizar ↻'}
+                </button>
+              )}
             </div>
           </div>
           <div className="mt-3 font-display text-[72px] leading-none tracking-[-0.025em] text-[color:var(--color-ink)] md:text-[96px]">

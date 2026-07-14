@@ -19,6 +19,7 @@ import { api } from '../lib/api';
 import type { CashFlowEntry, CashFlowDay, CashFlowResponse } from '../lib/api';
 import { formatBRL, formatDateShort } from '../lib/format';
 import { RowActionsMenu } from '../components/RowActionsMenu';
+import { useIsDemo } from '../lib/useIsDemo';
 
 const isDraggable = (e: CashFlowEntry) =>
   e.type === 'bank_transaction' || e.type === 'manual_entry';
@@ -368,6 +369,7 @@ export function CashFlow({
   );
 
   // ── Sync ──
+  const isDemo = useIsDemo();
   const [syncing, setSyncing] = useState(false);
   const handleSync = useCallback(async () => {
     setSyncing(true);
@@ -405,14 +407,16 @@ export function CashFlow({
         )}
         <div className="flex items-center gap-4">
           <span className="eyebrow uppercase">fluxo de caixa</span>
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={syncing}
-            className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
-          >
-            {syncing ? 'sincronizando…' : 'sincronizar ↻'}
-          </button>
+          {!isDemo && (
+            <button
+              type="button"
+              onClick={handleSync}
+              disabled={syncing}
+              className="font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)] disabled:opacity-50"
+            >
+              {syncing ? 'sincronizando…' : 'sincronizar ↻'}
+            </button>
+          )}
         </div>
 
         <h1 className="mt-3 font-display text-[72px] leading-[0.9] tracking-[-0.03em] text-[color:var(--color-ink)] md:text-[96px]">

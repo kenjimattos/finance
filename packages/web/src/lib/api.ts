@@ -713,6 +713,7 @@ export const api = {
     request<{
       authenticated: boolean;
       username?: string;
+      demo?: boolean;
       features?: { importFaturaEnabled: boolean };
     }>('/auth/me'),
 

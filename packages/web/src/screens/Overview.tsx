@@ -16,6 +16,7 @@ import { formatBRL, formatDateLong, formatDelta, variationLabel } from '../lib/f
 import { findOffsetForDueMonth, currentDueMonth } from '../lib/billWindow';
 import { SplitSection } from '../components/SplitSection';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { useIsDemo } from '../lib/useIsDemo';
 
 // ─── Month label ────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ export function Overview({
   onOpenCashFlow: () => void;
 }) {
   const today = useMemo(() => new Date(), []);
+  const isDemo = useIsDemo();
 
   // ── Gather all accounts + settings across all items ──
 
@@ -613,8 +615,8 @@ export function Overview({
             </button>
           </div>
           <div className="flex items-center gap-4">
-            <SyncAllButton items={items} />
-            <ManageBankButton items={items} accounts={allAccountsAnyType} />
+            {!isDemo && <SyncAllButton items={items} />}
+            {!isDemo && <ManageBankButton items={items} accounts={allAccountsAnyType} />}
             <ThemeToggle />
           </div>
         </div>
