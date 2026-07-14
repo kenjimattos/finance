@@ -60,6 +60,24 @@ function parsePartners(env: NodeJS.ProcessEnv): Map<string, string> {
 
 export const partners = parsePartners(process.env);
 
+// Demo users: sandboxed accounts meant for portfolio/showcase access. They
+// authenticate like any other user (USER_DEMO_PASSWORD) and can interact with
+// everything that only touches their own SQLite file (categorize, split,
+// manual entries...), but are blocked from anything that reaches outside it:
+// Pluggy connect/sync, fatura import (Anthropic credits), and admin routes.
+// By default the username `demo` is treated as a demo account; DEMO_USERS
+// (comma-separated) overrides/extends the list.
+const demoUsers = new Set(
+  (process.env.DEMO_USERS ?? 'demo')
+    .split(',')
+    .map((u) => u.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+export function isDemoUser(username: string): boolean {
+  return demoUsers.has(username.toLowerCase());
+}
+
 // When no users are configured the app falls back to an open mode for local
 // development (single anonymous user, DB file `default.sqlite`). The session
 // secret is still required in production for cookie signing.

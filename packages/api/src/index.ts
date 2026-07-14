@@ -12,6 +12,7 @@ import { ZodError } from 'zod';
 import { config, users, AUTH_ENABLED } from './config.js';
 import { authRouter } from './routes/auth.js';
 import { authMiddleware } from './middleware/auth.js';
+import { demoGuard } from './middleware/demo.js';
 import { connectRouter } from './routes/connect.js';
 import { itemsRouter } from './routes/items.js';
 import { transactionsRouter } from './routes/transactions.js';
@@ -84,6 +85,7 @@ if (serveWeb) {
 
 app.use(authRouter);
 app.use(authMiddleware);
+app.use(demoGuard);
 
 app.use(connectRouter);
 app.use(itemsRouter);

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { users, AUTH_ENABLED } from '../config.js';
+import { users, AUTH_ENABLED, isDemoUser } from '../config.js';
 import { isImportEnabled } from '../services/extractFatura.js';
 import {
   makeSessionCookie,
@@ -12,13 +12,16 @@ import {
 export const authRouter = Router();
 
 authRouter.get('/auth/me', (req, res) => {
-  const features = { importFaturaEnabled: isImportEnabled() };
   const username = readSessionUser(req);
   if (username) {
-    res.json({ authenticated: true, username, features });
+    const demo = isDemoUser(username);
+    // Demo accounts never get the fatura-import button: the endpoint is
+    // blocked by demoGuard anyway (it spends Anthropic credits).
+    const features = { importFaturaEnabled: isImportEnabled() && !demo };
+    res.json({ authenticated: true, username, demo, features });
     return;
   }
-  res.json({ authenticated: false, features });
+  res.json({ authenticated: false, features: { importFaturaEnabled: isImportEnabled() } });
 });
 
 authRouter.post('/auth/login', (req, res) => {
