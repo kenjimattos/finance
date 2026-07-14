@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './lib/api';
+import { GuidedTour, overviewTourSteps } from './components/GuidedTour';
 import { Login } from './screens/Login';
 import { Onboarding } from './screens/Onboarding';
 import { Overview } from './screens/Overview';
@@ -47,6 +48,14 @@ export function App() {
   } | null>(null);
 
   const [cashflowOpen, setCashflowOpen] = useState(false);
+
+  // First visit = arrived without a valid auth cookie. When that visitor
+  // logs in, walk them through the Overview once; skipping or finishing
+  // dismisses it for the rest of the session.
+  const [tourPending, setTourPending] = useState(false);
+  useEffect(() => {
+    if (authQ.data && !authQ.data.authenticated) setTourPending(true);
+  }, [authQ.data]);
 
   if (authQ.isLoading) {
     return (
@@ -106,18 +115,26 @@ export function App() {
               onBack={() => setCashflowOpen(false)}
             />
           ) : (
-            <Overview
-              items={itemsQ.data}
-              targetMonth={overviewMonth}
-              onMonthChange={setOverviewMonth}
-              onSelectAccount={(itemId, accountId, offset) =>
-                setDrillDown({ itemId, accountId, offset })
-              }
-              onSelectPartnerCard={(owner, accountId, offset) =>
-                setPartnerDrill({ owner, accountId, offset })
-              }
-              onOpenCashFlow={() => setCashflowOpen(true)}
-            />
+            <>
+              <Overview
+                items={itemsQ.data}
+                targetMonth={overviewMonth}
+                onMonthChange={setOverviewMonth}
+                onSelectAccount={(itemId, accountId, offset) =>
+                  setDrillDown({ itemId, accountId, offset })
+                }
+                onSelectPartnerCard={(owner, accountId, offset) =>
+                  setPartnerDrill({ owner, accountId, offset })
+                }
+                onOpenCashFlow={() => setCashflowOpen(true)}
+              />
+              {tourPending && (
+                <GuidedTour
+                  steps={overviewTourSteps}
+                  onClose={() => setTourPending(false)}
+                />
+              )}
+            </>
           ))}
       </main>
     </>

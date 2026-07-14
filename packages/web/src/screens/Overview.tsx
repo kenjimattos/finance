@@ -594,7 +594,7 @@ export function Overview({
       {/* Month navigation header */}
       <div className="mb-12">
         <div className="flex items-baseline justify-between gap-4">
-          <div className="eyebrow flex items-center gap-3">
+          <div className="eyebrow flex items-center gap-3" data-tour="month-nav">
             <button
               type="button"
               onClick={() => navigateMonth(-1)}
@@ -623,7 +623,7 @@ export function Overview({
       </div>
 
       {/* ═══ CAIXA ═══ */}
-      <div className="mb-14">
+      <div className="mb-14" data-tour="caixa">
         <div className="eyebrow mb-6 uppercase">caixa</div>
 
         {cashflowQ.isLoading ? (
@@ -747,7 +747,7 @@ export function Overview({
         </div>
 
         {/* Account cards */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-tour="cartoes">
           {configured.map(({ item, account, settings }, i) => {
             const offset = accountOffsets[i];
             const bq = breakdownQueries[i];
@@ -838,7 +838,9 @@ export function Overview({
 
       {/* ═══ DIVISÃO ═══ */}
       {aggregatedSplit && (
-        <SplitSection split={aggregatedSplit} variant="section" />
+        <div data-tour="split">
+          <SplitSection split={aggregatedSplit} variant="section" />
+        </div>
       )}
     </motion.section>
   );
