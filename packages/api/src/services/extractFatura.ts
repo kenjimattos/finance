@@ -186,19 +186,11 @@ export function normalizeExtraction(raw: unknown): ExtractedRow[] {
   });
 }
 
-/**
- * Send the screenshots to Claude and return normalized rows.
- * Throws if the import feature is disabled (no API key) or the model declines
- * to call the tool.
- */
-export async function extractFaturaFromImages(
-  images: FaturaImage[],
-  ctx: ExtractContext,
-): Promise<ExtractedRow[]> {
+function makeClient(): Anthropic {
   if (!config.ANTHROPIC_API_KEY) {
     throw new Error('IMPORT_DISABLED');
   }
-  const client = new Anthropic({
+  return new Anthropic({
     apiKey: config.ANTHROPIC_API_KEY,
     // Free gateway tiers (e.g. OpenRouter's :free models) 429 under load. The
     // SDK backs off and retries on 429/5xx; bump the count so transient upstream
@@ -209,27 +201,18 @@ export async function extractFaturaFromImages(
       ? { baseURL: normalizeBaseUrl(config.ANTHROPIC_BASE_URL) }
       : {}),
   });
+}
 
-  const imageBlocks: Anthropic.ImageBlockParam[] = images.map((img) => ({
-    type: 'image',
-    source: {
-      type: 'base64',
-      media_type: img.mediaType as Anthropic.Base64ImageSource['media_type'],
-      data: img.data,
-    },
-  }));
-
+async function callRecordTool(
+  content: Anthropic.ContentBlockParam[],
+): Promise<ExtractedRow[]> {
+  const client = makeClient();
   const message = await client.messages.create({
     model: config.ANTHROPIC_MODEL,
     max_tokens: 8000,
     tools: [RECORD_TOOL],
     tool_choice: { type: 'tool', name: 'record_transactions' },
-    messages: [
-      {
-        role: 'user',
-        content: [...imageBlocks, { type: 'text', text: buildPrompt(ctx) }],
-      },
-    ],
+    messages: [{ role: 'user', content }],
   });
 
   const toolUse = message.content.find(
@@ -239,4 +222,56 @@ export async function extractFaturaFromImages(
     throw new Error('Model did not return structured transactions');
   }
   return normalizeExtraction(toolUse.input);
+}
+
+/**
+ * Send the screenshots to Claude and return normalized rows.
+ * Throws if the import feature is disabled (no API key) or the model declines
+ * to call the tool.
+ */
+export async function extractFaturaFromImages(
+  images: FaturaImage[],
+  ctx: ExtractContext,
+): Promise<ExtractedRow[]> {
+  const imageBlocks: Anthropic.ImageBlockParam[] = images.map((img) => ({
+    type: 'image',
+    source: {
+      type: 'base64',
+      media_type: img.mediaType as Anthropic.Base64ImageSource['media_type'],
+      data: img.data,
+    },
+  }));
+  return callRecordTool([...imageBlocks, { type: 'text', text: buildPrompt(ctx) }]);
+}
+
+function buildPdfPrompt(ctx: ExtractContext): string {
+  return [
+    'You are reading the TEXT extracted from a Brazilian credit-card statement PDF (fatura fechada, e.g. PicPay/Nubank/Itaú).',
+    'Extract EVERY transaction line into the record_transactions tool. Rules:',
+    '',
+    `- The bill covers ${ctx.periodStart} to ${ctx.periodEnd} (today is ${ctx.referenceDate}).`,
+    '- Transaction lines look like "24/08 ZP *CPARC11/12 169,70" — date dd/mm, merchant, value in Brazilian format ("1.234,56" → 1234.56).',
+    '- Year inference: pick the most recent year that puts the date ON OR BEFORE the closing date ' +
+      `${ctx.periodEnd}. Installment purchases (parceladas) keep their ORIGINAL purchase date, which can be many months before the window — that is expected; do not move them.`,
+    '- Negative values ("-399,99") are estornos/credits: set isRefund=true and put the positive magnitude in `amount`.',
+    '- Installments: a "PARC05/12" fragment in the merchant text means installment 5 of 12 → installmentNumber=5, totalInstallments=12. Keep the merchant text as printed (including the PARC fragment). Lines without a PARC fragment get null/null.',
+    '- Cards: statements group transactions under headers like "Picpay Card final 3021" or "KENJI M KINOSHITA … final 3054". Lines under such a header get cardLast4 from it ("3021"). Lines before any card header get null.',
+    '- SKIP payment lines: "PAGAMENTO DE FATURA", "PAGAMENTO RECEBIDO" and similar bill-payment rows.',
+    '- SKIP everything that is not a transaction line: summary boxes (Resumo, Limites, Encargos, rotativo, IOF, CET), subtotals ("Subtotal dos lançamentos"), totals ("Total geral dos lançamentos"), addresses, footers, and page headers.',
+    '- The same PDF page text can interleave two columns; rely on the dd/mm + value pattern to identify real transaction lines.',
+    '',
+    'Call the tool exactly once with all transactions in statement order.',
+  ].join('\n');
+}
+
+/**
+ * Extract transactions from the raw TEXT of a statement PDF. Text-only — the
+ * caller extracts text from the PDF (see routes/faturaImport.ts); sending text
+ * instead of the PDF bytes keeps tokens low and works through any gateway.
+ */
+export async function extractFaturaFromPdfText(
+  pdfText: string,
+  ctx: ExtractContext,
+): Promise<ExtractedRow[]> {
+  return callRecordTool([{ type: 'text', text: `${buildPdfPrompt(ctx)}\n\n--- STATEMENT TEXT ---\n${pdfText}` }]);
 }
