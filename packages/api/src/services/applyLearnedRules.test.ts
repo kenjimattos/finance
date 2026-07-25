@@ -73,6 +73,12 @@ function createSchema(d: DB): void {
       UNIQUE (merchant_slug, user_category_id),
       FOREIGN KEY (user_category_id) REFERENCES user_categories(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE transaction_hidden (
+      transaction_id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+    );
   `);
 }
 
@@ -179,6 +185,36 @@ describe('applyLearnedRules', () => {
 
     assert.ok(getAssignment(db, 'tx-mine'));
     assert.equal(getAssignment(db, 'tx-other'), undefined);
+  });
+
+  // ─── Hidden transactions ─────────────────────────────────────────────
+  //
+  // A hidden transaction is the user saying "this row is not real" (phantom
+  // from a corrupted Pluggy payload, connector duplicate). If a learned rule
+  // could categorize it, the row would silently re-enter the bill totals on
+  // the next sync — the exact failure hiding exists to prevent. It must also
+  // not bump hit_count: phantoms are not training signal.
+
+  it('skips hidden transactions and does not bump hit_count for them', () => {
+    const food = insertCategory(db, 'Alimentação');
+    insertRule(db, 'IFOOD', food, 5);
+    insertTx(db, 'tx-hidden', 'IFOOD *FANTASMA');
+    insertTx(db, 'tx-visible', 'IFOOD *REAL');
+    db.prepare(
+      `INSERT INTO transaction_hidden (transaction_id) VALUES ('tx-hidden')`,
+    ).run();
+
+    applyLearnedRules(db, ITEM_ID);
+
+    assert.equal(getAssignment(db, 'tx-hidden'), undefined);
+    assert.deepEqual(getAssignment(db, 'tx-visible'), {
+      user_category_id: food,
+      assigned_by: 'learned',
+    });
+    const rule = db
+      .prepare(`SELECT hit_count FROM category_rules WHERE merchant_slug = 'IFOOD'`)
+      .get() as { hit_count: number };
+    assert.equal(rule.hit_count, 6); // only the visible row counted
   });
 
   // ─── The non-overwrite invariant ─────────────────────────────────────

@@ -231,7 +231,9 @@ function sumBillTotalWithShifts(
        FROM transactions t
        INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
        WHERE ${column} = ?
+         AND h.transaction_id IS NULL
          AND (
               (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
            OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
@@ -282,7 +284,9 @@ function installmentBreakdownWithShifts(
               t.total_installments  AS totalInstallments
        FROM transactions t
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
        WHERE ${column} = ?
+         AND h.transaction_id IS NULL
          AND t.installment_number IS NOT NULL
          AND t.total_installments IS NOT NULL
          AND (
@@ -330,7 +334,9 @@ function categoryBreakdownWithShifts(
        INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
        INNER JOIN user_categories uc        ON uc.id = tc.user_category_id
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
        WHERE ${column} = ?
+         AND h.transaction_id IS NULL
          AND (
               (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
            OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
@@ -368,7 +374,9 @@ function countTransactionsWithShifts(
       `SELECT COUNT(*) AS total
        FROM transactions t
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
        WHERE ${column} = ?
+         AND h.transaction_id IS NULL
          AND (
               (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
            OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)

@@ -164,6 +164,7 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
 
     const windowClause = `
       t.account_id = ?
+      AND h.transaction_id IS NULL
       AND (
            (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
         OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
@@ -184,6 +185,7 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
        INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
        INNER JOIN user_categories       uc ON uc.id = tc.user_category_id
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
        WHERE ${windowClause}
        ORDER BY t.date ASC, t.id ASC`,
     );
@@ -201,6 +203,7 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
        INNER JOIN user_categories       uc ON uc.id = tc.user_category_id
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
        LEFT JOIN transaction_splits     sp ON sp.transaction_id = t.id
+       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
        WHERE ${windowClause}
          AND sp.transaction_id IS NULL
        ORDER BY t.date ASC, t.id ASC`,

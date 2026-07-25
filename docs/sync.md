@@ -39,9 +39,11 @@ A shifted row disappears from the current-bill list and appears in the neighbori
 
 ## The categorized-only rule
 
-**Only categorized transactions contribute to bill totals.** Uncategorized rows stay visible in the inbox but do not sum. This means fresh cards start at R$ 0 and grow as the user categorizes — the absence of a category is the exclusion mechanism, replacing any need for an "ignore" flag. It also means the user can leave noise like "pagamento de fatura" or "Pagamento recebido" uncategorized and it naturally stays out.
+**Only categorized transactions contribute to bill totals.** Uncategorized rows stay visible in the inbox but do not sum. This means fresh cards start at R$ 0 and grow as the user categorizes — the absence of a category is the exclusion mechanism for *not-yet-processed* rows. It also means the user can leave noise like "pagamento de fatura" or "Pagamento recebido" uncategorized and it naturally stays out.
 
 The previous-period delta is also categorized-vs-categorized for consistency.
+
+**Hidden transactions are excluded outright.** `transaction_hidden` (toggled via `PUT /transactions/:id/hidden`, "ocultar da fatura" in the row menu) marks a row as *not real* — phantom rows minted from corrupted Pluggy payloads, connector duplicates. Hidden rows are excluded from every bill computation (totals, category/installment breakdowns, split summaries, partner view, PDF reconciliation) but stay flagged in `GET /transactions` so the inbox lists them in a collapsed "Ocultadas" section, reversibly. Hiding differs from un-categorizing in one crucial way: `applyLearnedRules` skips hidden rows, so a learned rule can never re-categorize a phantom back into the totals on the next sync (and phantoms never bump `hit_count`). Un-categorizing alone is NOT a stable exclusion for any merchant that has a learned rule.
 
 ## The learning loop
 

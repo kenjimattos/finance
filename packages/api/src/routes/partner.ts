@@ -283,7 +283,9 @@ function readSplitRows(
        LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
        LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
        LEFT JOIN user_categories       uc ON uc.id = tc.user_category_id
+       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
        WHERE t.account_id = ?
+         AND h.transaction_id IS NULL
          AND (
               (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
            OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)

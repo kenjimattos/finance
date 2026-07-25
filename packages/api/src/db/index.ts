@@ -308,6 +308,19 @@ function runSchema(db: Db): void {
     FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
   );
 
+  -- Hide-from-bill: the user marks a transaction as "not real" (phantom rows
+  -- minted from corrupted Pluggy payloads, connector duplicates). Hidden rows
+  -- are excluded from every bill total / breakdown / split / reconcile query
+  -- but still returned (flagged) by GET /transactions so the action is
+  -- visible and reversible in the inbox. Unlike removing the category, hiding
+  -- is stable across re-syncs: applyLearnedRules skips hidden rows, so a
+  -- learned rule can never pull a hidden transaction back into the totals.
+  CREATE TABLE IF NOT EXISTS transaction_hidden (
+    transaction_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
+
   -- Audit log for Pluggy ID recycling. Written when sync detects that a
   -- provider_transaction_id was reused for a materially different purchase.
   -- The old row is kept intact; the new payload is inserted as a separate row.

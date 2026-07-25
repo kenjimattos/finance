@@ -58,6 +58,7 @@ interface TransactionRow {
   bill_shift: number | null;
   source: string | null;
   split_type: string | null;
+  hidden: number;
 }
 
 /**
@@ -133,13 +134,15 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
                 uc.color AS user_category_color,
                 tc.assigned_by,
                 o.shift  AS bill_shift,
-                sp.split_type
+                sp.split_type,
+                (h.transaction_id IS NOT NULL) AS hidden
          FROM transactions t
          LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
          LEFT JOIN user_categories       uc ON uc.id = tc.user_category_id
          LEFT JOIN card_group_members    m  ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
          LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
          LEFT JOIN transaction_splits    sp ON sp.transaction_id = t.id
+         LEFT JOIN transaction_hidden    h  ON h.transaction_id = t.id
          WHERE t.item_id = ?
            AND (? = 0 OR t.account_id = ?)
            ${dateClause}
@@ -204,6 +207,45 @@ transactionsRouter.put('/transactions/:id/bill-shift', (req, res, next) => {
     }
 
     res.json({ ok: true, transactionId, shift });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /transactions/:id/hidden { hidden: boolean }
+// Hidden transactions are excluded from bill totals, breakdowns, split
+// summaries, and PDF reconciliation, but stay flagged in GET /transactions
+// so the inbox can list them in a collapsed section for un-hiding.
+const hiddenSchema = z.object({
+  hidden: z.boolean(),
+});
+
+transactionsRouter.put('/transactions/:id/hidden', (req, res, next) => {
+  try {
+    const { db } = req;
+    const { hidden } = hiddenSchema.parse(req.body);
+    const transactionId = req.params.id;
+
+    const tx = db
+      .prepare('SELECT id FROM transactions WHERE id = ?')
+      .get(transactionId);
+    if (!tx) {
+      res.status(404).json({ error: 'TransactionNotFound' });
+      return;
+    }
+
+    if (hidden) {
+      db.prepare(
+        `INSERT INTO transaction_hidden (transaction_id) VALUES (?)
+         ON CONFLICT(transaction_id) DO NOTHING`,
+      ).run(transactionId);
+    } else {
+      db.prepare(
+        'DELETE FROM transaction_hidden WHERE transaction_id = ?',
+      ).run(transactionId);
+    }
+
+    res.json({ ok: true, transactionId, hidden });
   } catch (err) {
     next(err);
   }
@@ -847,6 +889,7 @@ function shapeRow(r: TransactionRow) {
     billShift: r.bill_shift,
     source: r.source ?? 'pluggy',
     split: r.split_type as 'half' | 'theirs' | null,
+    hidden: r.hidden === 1,
     userCategory:
       r.user_category_id == null
         ? null

@@ -33,12 +33,17 @@ import { extractMerchantSlug, extractLegacySlug } from './merchantSlug.js';
  * re-categorizes or deletes the assignment.
  */
 export function applyLearnedRules(db: Database, itemId: string): void {
+  // Hidden transactions are skipped: the user marked them as not-real, and
+  // auto-categorizing one would also bump hit_count on the matched rule,
+  // training the engine on phantom data.
   const candidates = db
     .prepare(
       `SELECT t.id, t.description
        FROM transactions t
        LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
-       WHERE t.item_id = ? AND tc.transaction_id IS NULL`,
+       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
+       WHERE t.item_id = ? AND tc.transaction_id IS NULL
+         AND h.transaction_id IS NULL`,
     )
     .all(itemId) as Array<{ id: string; description: string | null }>;
 

@@ -140,6 +140,8 @@ export interface Transaction {
   source: 'pluggy' | 'manual';
   /** 'half' = 50/50 split, 'theirs' = partner owes 100%, null = not split (implicitly mine) */
   split: 'half' | 'theirs' | null;
+  /** Hidden from the bill: excluded from every total/breakdown/split/reconcile computation. */
+  hidden: boolean;
   userCategory: UserCategoryRef | null;
 }
 
@@ -588,6 +590,15 @@ export const api = {
       {
         method: 'PUT',
         body: JSON.stringify({ shift }),
+      },
+    ),
+
+  setTransactionHidden: (transactionId: string, hidden: boolean) =>
+    request<{ ok: true; transactionId: string; hidden: boolean }>(
+      `/transactions/${transactionId}/hidden`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ hidden }),
       },
     ),
 

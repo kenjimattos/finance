@@ -25,6 +25,7 @@ export function TransactionRow({
   onClear,
   onShift,
   onSplit,
+  onToggleHidden,
   onEditManual,
   onDeleteManual,
 }: {
@@ -36,6 +37,7 @@ export function TransactionRow({
   onClear: () => void;
   onShift: (shift: -1 | 0 | 1) => void;
   onSplit: (splitType: 'half' | 'theirs' | null) => void;
+  onToggleHidden: () => void;
   onEditManual?: () => void;
   onDeleteManual?: () => void;
 }) {
@@ -84,6 +86,14 @@ export function TransactionRow({
     });
   }
 
+  // Hide-from-bill: excludes the row from every total/breakdown/split
+  // computation without deleting it (deleting a pluggy row would just
+  // re-insert on the next sync). Restoring brings it back untouched.
+  actions.push({
+    label: tx.hidden ? '👁 Restaurar na fatura' : '⌀ Ocultar da fatura',
+    onClick: onToggleHidden,
+  });
+
   if (isManual && onEditManual) {
     actions.push({
       label: 'Editar lançamento',
@@ -112,6 +122,11 @@ export function TransactionRow({
                 manual
               </span>
             )}
+            {tx.hidden && (
+              <span className="font-body text-[10px] italic text-[color:var(--color-ink-faint)]">
+                oculta
+              </span>
+            )}
             {tx.split && (
               <span className="font-mono text-[10px] font-semibold text-[color:var(--color-accent)]">
                 {tx.split === 'half' ? '½' : '→dela'}
@@ -128,6 +143,7 @@ export function TransactionRow({
       className="row-reveal group grid grid-cols-[24px_24px_1fr_auto_24px] md:grid-cols-[24px_56px_1fr_auto_24px] items-center gap-4 py-3 transition-colors"
       style={{
         background: selected ? 'var(--color-paper-tint)' : 'transparent',
+        opacity: tx.hidden ? 0.45 : 1,
       }}
     >
       <label className="flex cursor-pointer items-center justify-center">

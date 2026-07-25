@@ -45,6 +45,7 @@ export function TransactionInbox({
   const toast = useToast();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showCategorized, setShowCategorized] = useState(true);
+  const [showHidden, setShowHidden] = useState(false);
 
   const txsQ = useQuery({
     queryKey: [
@@ -126,6 +127,36 @@ export function TransactionInbox({
             message,
             undo: () => {
               shiftMut.mutate({ txId, shift: previousShift });
+            },
+          });
+        },
+      },
+    );
+  }
+
+  // ── Hide-from-bill ──
+  // Hiding excludes the row from every bill computation server-side, so the
+  // breakdown and split summaries must refetch along with the list.
+  const hiddenMut = useMutation({
+    mutationFn: ({ txId, hidden }: { txId: string; hidden: boolean }) =>
+      api.setTransactionHidden(txId, hidden),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['splitSummary'] });
+    },
+  });
+
+  function runToggleHidden(tx: Transaction) {
+    const hidden = !tx.hidden;
+    hiddenMut.mutate(
+      { txId: tx.id, hidden },
+      {
+        onSuccess: () => {
+          toast.show({
+            message: hidden ? 'Oculta da fatura' : 'Restaurada na fatura',
+            undo: () => {
+              hiddenMut.mutate({ txId: tx.id, hidden: !hidden });
             },
           });
         },
@@ -240,19 +271,25 @@ export function TransactionInbox({
   // transactions make sense — uncategorized rows are hidden entirely,
   // because there's no way to compare "uncategorized" against "Alimentação".
   // Clearing the tab (selecting "Todas") brings them back.
-  const { uncategorized, categorized } = useMemo(() => {
+  // Hidden rows never mix with the work sections regardless of the category
+  // tab — they live in their own collapsed section at the bottom.
+  const { uncategorized, categorized, hiddenRows } = useMemo(() => {
     const all: Transaction[] = txsQ.data ?? [];
+    const hiddenRows = all.filter((t) => t.hidden);
+    const visible = all.filter((t) => !t.hidden);
     if (categoryFilter === 'all') {
       return {
-        uncategorized: all.filter((t) => t.userCategory == null),
-        categorized: all.filter((t) => t.userCategory != null),
+        uncategorized: visible.filter((t) => t.userCategory == null),
+        categorized: visible.filter((t) => t.userCategory != null),
+        hiddenRows,
       };
     }
     return {
       uncategorized: [] as Transaction[],
-      categorized: all.filter(
+      categorized: visible.filter(
         (t) => t.userCategory != null && t.userCategory.id === categoryFilter,
       ),
+      hiddenRows,
     };
   }, [txsQ.data, categoryFilter]);
 
@@ -368,6 +405,7 @@ export function TransactionInbox({
               onClear={() => clearMut.mutate(tx.id)}
               onShift={(shift) => runShift(tx.id, shift)}
               onSplit={(splitType) => runSplit(tx.id, splitType)}
+              onToggleHidden={() => runToggleHidden(tx)}
               onEditManual={
                 tx.source === 'manual'
                   ? () => {
@@ -427,6 +465,7 @@ export function TransactionInbox({
                 onClear={() => clearMut.mutate(tx.id)}
                 onShift={(shift) => runShift(tx.id, shift)}
                 onSplit={(splitType) => runSplit(tx.id, splitType)}
+                onToggleHidden={() => runToggleHidden(tx)}
                 onEditManual={
                   tx.source === 'manual'
                     ? () => {
@@ -448,6 +487,43 @@ export function TransactionInbox({
           </div>
         )}
       </Section>
+
+      {hiddenRows.length > 0 && (
+        <Section
+          title="Ocultadas"
+          count={hiddenRows.length}
+          right={
+            <button
+              type="button"
+              onClick={() => setShowHidden((v) => !v)}
+              className="font-body text-xs uppercase tracking-[0.12em] text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-accent)]"
+            >
+              {showHidden ? 'ocultar' : 'mostrar'}
+            </button>
+          }
+        >
+          {showHidden && (
+            <div className="divide-y divide-[color:var(--color-paper-rule)]">
+              {hiddenRows.map((tx) => (
+                <TransactionRow
+                  key={tx.id}
+                  tx={tx}
+                  categories={categories}
+                  selected={selected.has(tx.id)}
+                  onToggleSelected={() => toggle(tx.id)}
+                  onAssign={(categoryId) =>
+                    assignMut.mutate({ txId: tx.id, categoryId })
+                  }
+                  onClear={() => clearMut.mutate(tx.id)}
+                  onShift={(shift) => runShift(tx.id, shift)}
+                  onSplit={(splitType) => runSplit(tx.id, splitType)}
+                  onToggleHidden={() => runToggleHidden(tx)}
+                />
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
 
       <AnimatePresence>
         {selected.size > 0 && (
