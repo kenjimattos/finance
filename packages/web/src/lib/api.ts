@@ -376,6 +376,50 @@ export interface ExtractedFaturaRow {
   billShift: number;
 }
 
+/** A statement line from the closed-bill PDF, as used in reconciliation. */
+export interface StatementLine {
+  date: string;
+  description: string;
+  /** Signed: estornos negative. */
+  amount: number;
+  cardLast4: string | null;
+  installmentNumber: number | null;
+  totalInstallments: number | null;
+}
+
+/** An app transaction inside the reconciled bill window. */
+export interface ReconcileAppLine extends StatementLine {
+  id: string;
+  source: string;
+  category: string | null;
+}
+
+/** Statement line missing from the app, annotated ready for insertion. */
+export interface ReconcileMissingRow extends StatementLine {
+  /** Original statement date (`date` may have been re-dated to the closing date). */
+  statementDate: string;
+  billShift: number;
+}
+
+export interface ReconcileReport {
+  window: { periodStart: string; periodEnd: string; nextDueDate: string };
+  /** Sum of categorized app rows — mirrors the bill headline. */
+  appBillTotal: number;
+  /** Net sum of the statement's lançamentos (payments excluded). */
+  statementTotal: number;
+  /** appBillTotal - statementTotal. */
+  delta: number;
+  matchedCount: number;
+  missingInApp: ReconcileMissingRow[];
+  amountMismatches: Array<{
+    statement: StatementLine;
+    app: ReconcileAppLine;
+    /** statement - app: what the app row must gain to agree. */
+    diff: number;
+  }>;
+  onlyInApp: ReconcileAppLine[];
+}
+
 /** The payload the user confirms for insertion. */
 export interface CommitFaturaRow {
   date: string;
@@ -735,6 +779,11 @@ export const api = {
       '/transactions/import-fatura/commit',
       { method: 'POST', body: JSON.stringify(body) },
     ),
+  reconcileFatura: (body: { accountId: string; billOffset: number; pdf: string }) =>
+    request<ReconcileReport>('/transactions/import-fatura/reconcile', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   login: (username: string, password: string) =>
     request<{ ok: boolean; username?: string }>('/auth/login', {
       method: 'POST',

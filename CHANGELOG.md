@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Adicionado
+
+- **Conciliação da fatura por PDF.** Novo botão "⇄ conciliar fatura (PDF)" no Dashboard (ao lado da importação por screenshots, mesma flag `ANTHROPIC_API_KEY`): o usuário sobe o PDF da fatura fechada do emissor e o app compara linha a linha com a fatura em exibição. O texto do PDF é extraído localmente (`unpdf`) e enviado como texto puro ao LLM — barato e independente de suporte a PDF no gateway; PDFs escaneados (sem camada de texto) recebem 422 com orientação para usar screenshots. O relatório separa: **faltando no app** (inseríveis como transações manuais, com seleção; parceladas com data original fora do ciclo são re-datadas para o fechamento), **centavos divergentes** (parcelas manuais cujo arredondamento difere do emissor — corrigíveis em um clique; linhas do Pluggy são só informativas), **só no app** (candidatas a duplicata) e o total de linhas que conferem, além do confronto de totais fatura × app. O pareamento vive no serviço puro `reconcileFatura` (testado): passes gulosos ancorados no valor — mesma data → mesma parcela X/Y (parceladas mantêm a data original da compra no extrato) → ±3 dias → mesmo estabelecimento — e um passe final de tolerância de centavos; pagamentos de fatura são ignorados dos dois lados. Nasceu da conciliação manual da fatura PicPay de julho/2026, que revelou exatamente essas classes de divergência.
+
 ## [1.8.3] - 2026-07-14
 
 ### Adicionado

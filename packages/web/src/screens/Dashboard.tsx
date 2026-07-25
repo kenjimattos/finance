@@ -16,6 +16,7 @@ import { CardGroupsManager } from '../components/CardGroupsManager';
 import { RulesManager } from '../components/RulesManager';
 import { SplitSection } from '../components/SplitSection';
 import { FaturaImport } from '../components/FaturaImport';
+import { FaturaReconcile } from '../components/FaturaReconcile';
 
 /**
  * The main screen, once a card is linked.
@@ -156,6 +157,7 @@ function AccountDashboard({
   }, [accountId, initialOffset]);
 
   const [importOpen, setImportOpen] = useState(false);
+  const [reconcileOpen, setReconcileOpen] = useState(false);
   const meQ = useQuery({ queryKey: ['authMe'], queryFn: () => api.getAuthMe(), staleTime: Infinity });
   const importEnabled = meQ.data?.features?.importFaturaEnabled ?? false;
 
@@ -215,7 +217,14 @@ function AccountDashboard({
         onManageRules={() => setRulesOpen(true)}
       />
       {importEnabled && (
-        <div className="mb-4 flex justify-end">
+        <div className="mb-4 flex justify-end gap-4">
+          <button
+            type="button"
+            onClick={() => setReconcileOpen(true)}
+            className="font-mono text-xs text-[color:var(--color-ink-muted)] underline-offset-4 hover:text-[color:var(--color-accent)] hover:underline"
+          >
+            ⇄ conciliar fatura (PDF)
+          </button>
           <button
             type="button"
             onClick={() => setImportOpen(true)}
@@ -285,6 +294,14 @@ function AccountDashboard({
           accountId={accountId}
           billOffset={billOffset}
           onClose={() => setImportOpen(false)}
+        />
+      )}
+      {reconcileOpen && (
+        <FaturaReconcile
+          itemId={itemId}
+          accountId={accountId}
+          billOffset={billOffset}
+          onClose={() => setReconcileOpen(false)}
         />
       )}
     </>
