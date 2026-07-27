@@ -58,7 +58,18 @@ export interface UpsertCounts {
   updated: number;
   reposts: number;
   recycled: number;
+  /** Corrupted in-place mutations absorbed without minting a row. */
+  suppressed: number;
 }
+
+/**
+ * A repost (same provider ID + amount + merchant slug, new date) is only
+ * plausible within this many days — real PENDING→POSTED transitions settle
+ * in days, not months. Beyond it, the "new date" is Pluggy re-dating a stale
+ * record (observed on PicPay: April ghosts re-dated to July), and moving the
+ * row would drag old categorized spend into the open bill.
+ */
+export const REPOST_MAX_DAYS = 45;
 
 interface ExistingRow {
   id: string;
@@ -104,15 +115,26 @@ export function upsertCreditTransactions(
     WHERE id = ?
   `);
 
-  // Look up the most-recently-inserted row for a given Pluggy ID.
-  // ORDER BY first_seen_at DESC means that after a recycle (two rows with the
-  // same provider_transaction_id), subsequent syncs match the newer row.
+  // All rows sharing a Pluggy ID, newest first (recycles leave siblings).
+  // The full list lets the engine match an incoming payload against ANY
+  // generation — if Pluggy flip-flops a record back to a previous content,
+  // we update that sibling instead of minting an endless chain of copies.
   const findByProviderId = db.prepare(`
     SELECT id, identity_hash, raw_json, date, amount, description
     FROM transactions
     WHERE provider_transaction_id = ?
-    ORDER BY first_seen_at DESC
-    LIMIT 1
+    ORDER BY first_seen_at DESC, rowid DESC
+  `);
+
+  // Minimal touch for suppressed mutations: record that Pluggy still serves
+  // this provider ID (and what it claims now) WITHOUT absorbing the mutated
+  // content into the row's identity or display fields.
+  const touchTx = db.prepare(`
+    UPDATE transactions SET
+      last_seen_at = datetime('now'),
+      raw_json     = ?,
+      synced_at    = datetime('now')
+    WHERE id = ?
   `);
 
   // Used when a transaction transitions PENDING → POSTED and Pluggy adjusts
@@ -178,8 +200,8 @@ export function upsertCreditTransactions(
   const insertConflict = db.prepare(`
     INSERT INTO transaction_sync_conflicts
       (provider_transaction_id, kept_transaction_id, new_transaction_id,
-       old_payload_json, new_payload_json)
-    VALUES (?, ?, ?, ?, ?)
+       kind, old_payload_json, new_payload_json)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
 
   const counts: UpsertCounts = {
@@ -188,6 +210,7 @@ export function upsertCreditTransactions(
     updated: 0,
     reposts: 0,
     recycled: 0,
+    suppressed: 0,
   };
 
   const runBatch = db.transaction(() => {
@@ -197,15 +220,37 @@ export function upsertCreditTransactions(
       const newPayload = JSON.stringify(t);
       const newHash = computeIdentityHash(newDate, t.amount, t.description ?? null);
 
-      const existing = findByProviderId.get(t.id) as ExistingRow | undefined;
+      const siblings = findByProviderId.all(t.id) as ExistingRow[];
+      const existing: ExistingRow | undefined = siblings[0];
+
+      // Absorb a corrupted or implausible in-place mutation: keep the row's
+      // identity and display fields untouched, refresh raw_json/last_seen so
+      // the anomaly is visible but doesn't repeat, and log it once (repeat
+      // deliveries of the same payload produce no new conflict rows).
+      const suppressMutation = (row: ExistingRow, why: string) => {
+        if (row.raw_json !== newPayload) {
+          console.warn(`[sync] Suppressed in-place mutation of ${t.id} (${why}).`);
+          insertConflict.run(t.id, row.id, null, 'mutation-suppressed', row.raw_json, newPayload);
+        }
+        touchTx.run(newPayload, row.id);
+        counts.suppressed++;
+      };
 
       if (!existing) {
-        // Provider ID not found — check by content hash (reconnect case).
+        // Provider ID not found — check by content hash (reconnect /
+        // generation-rotation case).
         const existingByHash = findByIdentityHash.get(newHash) as
           | { id: string; identity_hash: string | null; raw_json: string }
           | undefined;
-        if (existingByHash) {
-          // Same purchase, new Pluggy connection — update with new provider ID.
+        // The hash covers date+amount+slug only — enough to dedupe the same
+        // purchase re-served under a fresh ID (reconnects; PicPay re-mints
+        // IDs on every daily scrape), but it would ALSO swallow a genuinely
+        // distinct second purchase at the same merchant for the same amount
+        // on the same day. The full payload timestamp separates the two:
+        // re-served records carry the identical instant down to the
+        // millisecond, while two real purchases differ.
+        if (existingByHash && sameInstant(existingByHash.raw_json, t.date)) {
+          // Same purchase, new Pluggy ID — update with the new provider ID.
           console.log(`[sync] Hash match for new provider ID ${t.id} — updating existing row ${existingByHash.id}`);
           updateTxWithProvider.run(t.id, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existingByHash.id);
           counts.updated++;
@@ -222,11 +267,44 @@ export function upsertCreditTransactions(
           );
           counts.inserted++;
         }
-      } else if (existing.identity_hash === null || existing.identity_hash === newHash) {
-        // Same transaction (or first sync after migration — hash was NULL).
-        // Only update fields that Pluggy legitimately changes over time.
-        updateTx.run(t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existing.id);
+        counts.processed++;
+        continue;
+      }
+
+      // Match the payload against ANY sibling generation, not just the
+      // newest: if Pluggy reverts a mutated record to a previous content,
+      // the row for that content already exists and just gets refreshed —
+      // without this, every flip-flop would mint another copy.
+      const hashMatch =
+        existing.identity_hash === null
+          ? existing // pre-migration row: first sync backfills the hash
+          : siblings.find((s) => s.identity_hash === newHash);
+
+      if (hashMatch) {
+        // Same transaction — only update fields that Pluggy legitimately
+        // changes over time.
+        updateTx.run(t.status ?? null, metadata?.billId ?? null, newHash, newPayload, hashMatch.id);
         counts.updated++;
+      } else if (isChimeraMutation(t, existing)) {
+        // Corrupted half-mutation (2026-07 PicPay incident): Pluggy rewrote
+        // description/date/MCC of an existing record but descriptionRaw and
+        // amount still belong to the OLD content. The payload is a chimera —
+        // a real merchant name grafted onto a stale record's amount — and
+        // minting it would put a phantom on the bill.
+        suppressMutation(existing, 'chimera: descriptionRaw/amount still match the old record');
+      } else if (
+        existing.amount === t.amount &&
+        extractMerchantSlug(existing.description) === extractMerchantSlug(t.description ?? null) &&
+        daysBetween(existing.date, newDate) > REPOST_MAX_DAYS
+      ) {
+        // Same content but the date jumped implausibly far: this is not a
+        // PENDING→POSTED repost, it's Pluggy re-dating a stale record. Moving
+        // the row would drag old (often categorized) spend into the current
+        // bill, so absorb the mutation instead.
+        suppressMutation(
+          existing,
+          `date jump ${existing.date} → ${newDate} exceeds ${REPOST_MAX_DAYS} days`,
+        );
       } else if (
         existing.amount === t.amount &&
         extractMerchantSlug(existing.description) === extractMerchantSlug(t.description ?? null)
@@ -293,7 +371,7 @@ export function upsertCreditTransactions(
           metadata?.billId ?? null, lastFourDigits(metadata?.cardNumber),
           newHash, newPayload,
         );
-        insertConflict.run(t.id, existing.id, newLocalId, existing.raw_json, newPayload);
+        insertConflict.run(t.id, existing.id, newLocalId, 'recycled', existing.raw_json, newPayload);
         counts.recycled++;
       }
       counts.processed++;
@@ -302,6 +380,61 @@ export function upsertCreditTransactions(
   runBatch();
 
   return counts;
+}
+
+/**
+ * Detect the corrupted half-mutation pattern observed on the PicPay
+ * connector (2026-07): Pluggy rewrites `description`, `date` and MCC of an
+ * existing record, but `descriptionRaw` and `amount` still carry the OLD
+ * content. A payload whose raw description matches the stored row while its
+ * display description points at a different merchant — with the amount
+ * unchanged — is internally inconsistent and must not become a transaction.
+ *
+ * Conservative on purpose: if descriptionRaw is absent, or raw and display
+ * descriptions agree, this never fires (a real recycled ID carries a
+ * consistent payload where descriptionRaw matches the new description).
+ */
+function isChimeraMutation(
+  t: IncomingCreditTransaction,
+  existing: { amount: number; description: string | null },
+): boolean {
+  if (t.descriptionRaw == null) return false;
+  const rawSlug = extractMerchantSlug(t.descriptionRaw);
+  if (rawSlug === null) return false;
+  return (
+    t.amount === existing.amount &&
+    rawSlug === extractMerchantSlug(existing.description) &&
+    rawSlug !== extractMerchantSlug(t.description ?? null)
+  );
+}
+
+/**
+ * Compare the full timestamp stored in a row's raw payload against an
+ * incoming payload date. Pluggy re-serves the same purchase under fresh IDs
+ * with the instant preserved down to the millisecond, while two genuinely
+ * distinct same-day purchases at the same merchant differ in time-of-day.
+ *
+ * Falls back to `true` (treat as the same purchase — the historical
+ * behavior) when either side lacks a parseable timestamp, so date-only
+ * connectors keep the old dedup semantics.
+ */
+function sameInstant(rawJson: string, incoming: Date | string): boolean {
+  let storedDate: unknown;
+  try {
+    storedDate = (JSON.parse(rawJson) as { date?: unknown }).date;
+  } catch {
+    return true;
+  }
+  if (typeof storedDate !== 'string') return true;
+  const a = Date.parse(storedDate);
+  const b = typeof incoming === 'string' ? Date.parse(incoming) : incoming.getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return true;
+  return a === b;
+}
+
+/** Whole days between two yyyy-mm-dd strings (absolute, UTC). */
+function daysBetween(a: string, b: string): number {
+  return Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000;
 }
 
 /**

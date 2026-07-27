@@ -36,6 +36,14 @@ export function applyLearnedRules(db: Database, itemId: string): void {
   // Hidden transactions are skipped: the user marked them as not-real, and
   // auto-categorizing one would also bump hit_count on the matched rule,
   // training the engine on phantom data.
+  //
+  // Conflict-minted rows (transaction_sync_conflicts.new_transaction_id) are
+  // skipped too: they were born from an anomalous Pluggy payload — a recycled
+  // ID or a mutated record — and must land in the inbox for HUMAN review
+  // instead of silently entering the bill totals. This is permanent by
+  // design: the 2026-07 PicPay incident put R$ 209,58 of phantoms straight
+  // into the open bill precisely because learned rules categorized
+  // conflict-minted rows on arrival.
   const candidates = db
     .prepare(
       `SELECT t.id, t.description
@@ -43,7 +51,11 @@ export function applyLearnedRules(db: Database, itemId: string): void {
        LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
        LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
        WHERE t.item_id = ? AND tc.transaction_id IS NULL
-         AND h.transaction_id IS NULL`,
+         AND h.transaction_id IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM transaction_sync_conflicts c
+           WHERE c.new_transaction_id = t.id
+         )`,
     )
     .all(itemId) as Array<{ id: string; description: string | null }>;
 

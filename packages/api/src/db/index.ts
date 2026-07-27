@@ -321,14 +321,22 @@ function runSchema(db: Db): void {
     FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
   );
 
-  -- Audit log for Pluggy ID recycling. Written when sync detects that a
-  -- provider_transaction_id was reused for a materially different purchase.
-  -- The old row is kept intact; the new payload is inserted as a separate row.
+  -- Audit log for anomalous Pluggy payloads detected during sync.
+  --   kind = 'recycled':            provider_transaction_id was reused for a
+  --                                 materially different purchase. Old row kept
+  --                                 intact; new payload minted as a separate row
+  --                                 (new_transaction_id).
+  --   kind = 'mutation-suppressed': Pluggy rewrote an existing record in place
+  --                                 (corrupted half-mutation or an implausible
+  --                                 date jump). Nothing was minted —
+  --                                 new_transaction_id is NULL; the payload was
+  --                                 absorbed into the kept row's raw_json only.
   CREATE TABLE IF NOT EXISTS transaction_sync_conflicts (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_transaction_id TEXT NOT NULL,
     kept_transaction_id     TEXT NOT NULL,
-    new_transaction_id      TEXT NOT NULL,
+    new_transaction_id      TEXT,
+    kind                    TEXT NOT NULL DEFAULT 'recycled',
     old_payload_json        TEXT NOT NULL,
     new_payload_json        TEXT NOT NULL,
     detected_at             TEXT NOT NULL DEFAULT (datetime('now'))
@@ -546,6 +554,38 @@ db.exec(`
   )
   WHERE account_id IS NULL
 `);
+
+// Migration: transaction_sync_conflicts gains a `kind` column and a nullable
+// new_transaction_id (mutation-suppressed conflicts don't mint a row). The
+// kind column doubles as the migration marker; existing rows are all
+// recycled-ID conflicts, which DEFAULT 'recycled' labels correctly.
+{
+  const cols = db
+    .prepare(`PRAGMA table_info(transaction_sync_conflicts)`)
+    .all() as Array<{ name: string }>;
+  if (cols.length > 0 && !cols.some((c) => c.name === 'kind')) {
+    db.exec(`
+      ALTER TABLE transaction_sync_conflicts RENAME TO _tsc_old;
+      CREATE TABLE transaction_sync_conflicts (
+        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider_transaction_id TEXT NOT NULL,
+        kept_transaction_id     TEXT NOT NULL,
+        new_transaction_id      TEXT,
+        kind                    TEXT NOT NULL DEFAULT 'recycled',
+        old_payload_json        TEXT NOT NULL,
+        new_payload_json        TEXT NOT NULL,
+        detected_at             TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO transaction_sync_conflicts
+        (id, provider_transaction_id, kept_transaction_id, new_transaction_id,
+         kind, old_payload_json, new_payload_json, detected_at)
+      SELECT id, provider_transaction_id, kept_transaction_id, new_transaction_id,
+             'recycled', old_payload_json, new_payload_json, detected_at
+      FROM _tsc_old;
+      DROP TABLE _tsc_old;
+    `);
+  }
+}
 
 // Migration: if transaction_splits has the old 'mine' CHECK constraint,
 // recreate without it and delete any 'mine' rows (they are now implicit).

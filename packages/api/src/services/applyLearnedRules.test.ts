@@ -79,6 +79,17 @@ function createSchema(d: DB): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE transaction_sync_conflicts (
+      id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider_transaction_id TEXT NOT NULL,
+      kept_transaction_id     TEXT NOT NULL,
+      new_transaction_id      TEXT,
+      kind                    TEXT NOT NULL DEFAULT 'recycled',
+      old_payload_json        TEXT NOT NULL,
+      new_payload_json        TEXT NOT NULL,
+      detected_at             TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 }
 
@@ -215,6 +226,31 @@ describe('applyLearnedRules', () => {
       .prepare(`SELECT hit_count FROM category_rules WHERE merchant_slug = 'IFOOD'`)
       .get() as { hit_count: number };
     assert.equal(rule.hit_count, 6); // only the visible row counted
+  });
+
+  // ─── Conflict-minted transactions ────────────────────────────────────
+  //
+  // Rows minted by the sync's recycled-ID branch were born from an anomalous
+  // Pluggy payload. They must land in the inbox for human review — never be
+  // auto-categorized into the bill totals. (The 2026-07 PicPay incident:
+  // learned rules put R$ 209,58 of phantom rows straight into the open bill.)
+
+  it('never auto-categorizes a conflict-minted transaction', () => {
+    const food = insertCategory(db, 'Alimentação');
+    insertRule(db, 'IFOOD', food);
+    insertTx(db, 'tx-minted', 'IFOOD *LANCHONETE GOLFINH');
+    insertTx(db, 'tx-normal', 'IFOOD *OUTRO');
+    db.prepare(
+      `INSERT INTO transaction_sync_conflicts
+         (provider_transaction_id, kept_transaction_id, new_transaction_id,
+          old_payload_json, new_payload_json)
+       VALUES ('pluggy-id', 'tx-kept', 'tx-minted', '{}', '{}')`,
+    ).run();
+
+    applyLearnedRules(db, ITEM_ID);
+
+    assert.equal(getAssignment(db, 'tx-minted'), undefined, 'minted row stays in the inbox');
+    assert.ok(getAssignment(db, 'tx-normal'), 'ordinary rows still learn');
   });
 
   // ─── The non-overwrite invariant ─────────────────────────────────────

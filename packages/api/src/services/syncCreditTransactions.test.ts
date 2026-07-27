@@ -86,7 +86,8 @@ function createSchema(d: DB): void {
       id                      INTEGER PRIMARY KEY AUTOINCREMENT,
       provider_transaction_id TEXT NOT NULL,
       kept_transaction_id     TEXT NOT NULL,
-      new_transaction_id      TEXT NOT NULL,
+      new_transaction_id      TEXT,
+      kind                    TEXT NOT NULL DEFAULT 'recycled',
       old_payload_json        TEXT NOT NULL,
       new_payload_json        TEXT NOT NULL,
       detected_at             TEXT NOT NULL DEFAULT (datetime('now'))
@@ -154,7 +155,7 @@ describe('upsertCreditTransactions', () => {
   it('inserts a brand-new transaction with a local UUID and identity hash', () => {
     const counts = run([CLARO]);
 
-    assert.deepEqual(counts, { processed: 1, inserted: 1, updated: 0, reposts: 0, recycled: 0 });
+    assert.deepEqual(counts, { processed: 1, inserted: 1, updated: 0, reposts: 0, recycled: 0, suppressed: 0 });
     const rows = allRows();
     assert.equal(rows.length, 1);
     const r = rows[0];
@@ -348,6 +349,144 @@ describe('upsertCreditTransactions', () => {
     const rows = allRows();
     assert.equal(rows.length, 1, 'generations collapse into one row');
     assert.equal(rows[0].provider_transaction_id, gen2.id);
+  });
+});
+
+describe('sync guards', () => {
+  // The real stage-1 chimera payload from prod conflict 53: Pluggy rewrote
+  // description/date/MCC of the stale Claro pending, but descriptionRaw and
+  // amount still carry the Claro content.
+  const CHIMERA_STAGE1 = payload({
+    id: CLARO.id,
+    description: 'IFD*LANCHONETE GOLFINH   .SAO BERNAR BRA',
+    descriptionRaw: 'CLARO P*Fatura Claro     .BELEM      PA',
+    amount: 101.14,
+    date: '2026-07-20T11:59:53.001Z',
+  });
+
+  // The real stage-2 payload from prod conflict 57: one scrape later Pluggy
+  // fixed the amount — now the payload IS the real golfinho purchase.
+  const STAGE2_REAL = payload({
+    id: CLARO.id,
+    description: 'IFD*LANCHONETE GOLFINH   .SAO BERNAR BRA',
+    descriptionRaw: 'IFD*LANCHONETE GOLFINH   .SAO BERNAR BRA',
+    amount: 32.89,
+    date: '2026-07-20T11:59:53.001Z',
+  });
+
+  it('suppresses a chimera mutation: no phantom row, conflict logged without a minted id', () => {
+    run([CLARO]);
+    const [ghost] = allRows();
+
+    const counts = run([CHIMERA_STAGE1]);
+
+    assert.equal(counts.suppressed, 1);
+    assert.equal(counts.recycled, 0);
+    const rows = allRows();
+    assert.equal(rows.length, 1, 'no phantom minted');
+    assert.equal(rows[0].id, ghost.id);
+    assert.equal(rows[0].date, '2026-04-22', 'ghost keeps its original date');
+    assert.equal(rows[0].description, CLARO.description, 'ghost keeps its description');
+
+    const cs = conflicts();
+    assert.equal(cs.length, 1);
+    assert.equal(cs[0].kind, 'mutation-suppressed');
+    assert.equal(cs[0].new_transaction_id, null);
+    assert.equal(cs[0].kept_transaction_id, ghost.id);
+  });
+
+  it('logs a suppressed mutation only once across repeated syncs', () => {
+    run([CLARO]);
+    run([CHIMERA_STAGE1]);
+    const counts = run([CHIMERA_STAGE1]); // Pluggy serves the same chimera again
+
+    assert.equal(counts.suppressed, 1, 'still absorbed');
+    assert.equal(conflicts().length, 1, 'no duplicate conflict rows');
+  });
+
+  it('full 2026-07 incident replay: chimera suppressed, then the corrected payload mints the real purchase', () => {
+    run([CLARO]);           // April: ghost pending arrives
+    run([CHIMERA_STAGE1]);  // 24/07: half-mutation — suppressed
+    const counts = run([STAGE2_REAL]); // 25/07: amount fixed — real purchase
+
+    assert.equal(counts.recycled, 1, 'stage 2 is a true recycle (consistent payload)');
+    const rows = allRows();
+    assert.equal(rows.length, 2, 'ghost + real purchase, NO 101.14 phantom');
+    const amounts = rows.map((r) => Number(r.amount)).sort((a, b) => a - b);
+    assert.deepEqual(amounts, [32.89, 101.14]);
+    const real = rows.find((r) => r.amount === 32.89)!;
+    assert.equal(real.date, '2026-07-20');
+
+    const cs = conflicts();
+    assert.equal(cs.length, 2);
+    assert.deepEqual(cs.map((c) => c.kind), ['mutation-suppressed', 'recycled']);
+  });
+
+  it('suppresses an implausible date jump (same content re-dated across months)', () => {
+    run([CLARO]);
+    const [ghost] = allRows();
+
+    // Same description AND amount, but the date teleports April → July.
+    const counts = run([
+      { ...CLARO, date: '2026-07-20T11:59:53.001Z' },
+    ]);
+
+    assert.equal(counts.suppressed, 1);
+    assert.equal(counts.reposts, 0);
+    assert.equal(allRows()[0].date, '2026-04-22', 'ghost is not dragged into the open bill');
+    assert.equal(conflicts()[0].kind, 'mutation-suppressed');
+    assert.equal(conflicts()[0].kept_transaction_id, ghost.id);
+  });
+
+  it('still reposts within the plausible window (regression: PENDING→POSTED keeps working)', () => {
+    run([CLARO]);
+    const counts = run([
+      { ...CLARO, date: '2026-05-02T03:00:00.001Z', status: 'POSTED' }, // 10 days
+    ]);
+
+    assert.equal(counts.reposts, 1);
+    assert.equal(allRows()[0].date, '2026-05-02');
+  });
+
+  it('keeps two genuinely distinct same-day purchases (same merchant/amount, different times)', () => {
+    // Two real coffees: identical merchant, amount, and day — but bought at
+    // different times. The old hash-only dedup would swallow the second one.
+    const first = payload({
+      id: 'coffee-1',
+      description: 'PADARIA BRASILEIRA SBC   .SAO BERNAR BRA',
+      descriptionRaw: 'PADARIA BRASILEIRA SBC   .SAO BERNAR BRA',
+      amount: 8.5,
+      date: '2026-07-10T09:12:00.001Z',
+    });
+    const second = { ...first, id: 'coffee-2', date: '2026-07-10T15:47:33.001Z' };
+
+    run([first]);
+    const counts = run([second]);
+
+    assert.equal(counts.inserted, 1, 'second purchase inserted, not swallowed');
+    assert.equal(allRows().length, 2);
+  });
+
+  it('does not mint a third row when Pluggy flip-flops a mutated record back to its old content', () => {
+    run([CLARO]);
+    // Full recycle to a different purchase…
+    const other = payload({
+      id: CLARO.id,
+      description: 'OBA HORTIFRUTI SAO BER   .SAO BERNAR BRA',
+      descriptionRaw: 'OBA HORTIFRUTI SAO BER   .SAO BERNAR BRA',
+      amount: 59.1,
+      date: '2026-07-20T18:50:29.001Z',
+    });
+    run([other]);
+    assert.equal(allRows().length, 2);
+
+    // …then Pluggy reverts the record to the ORIGINAL Claro content.
+    const counts = run([CLARO]);
+
+    assert.equal(counts.updated, 1, 'matched the original sibling');
+    assert.equal(counts.recycled, 0);
+    assert.equal(allRows().length, 2, 'no third copy minted');
+    assert.equal(conflicts().length, 1, 'no extra conflict logged');
   });
 });
 
