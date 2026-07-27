@@ -490,7 +490,7 @@ export function TransactionInbox({
 
       {hiddenRows.length > 0 && (
         <Section
-          title="Ocultadas"
+          title="Ocultas"
           count={hiddenRows.length}
           right={
             <button

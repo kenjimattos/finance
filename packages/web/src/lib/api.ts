@@ -220,6 +220,7 @@ export interface CashFlowEntry {
   accountId?: string;
   bankAccountId?: string;
   isBillPayment?: boolean;
+  hidden?: boolean;
 }
 
 export interface CashFlowDay {

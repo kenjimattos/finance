@@ -163,6 +163,7 @@ interface BankTxRow {
   amount: number;
   type: string | null;
   is_bill_tagged: number;
+  is_hidden: number;
   sort_key: number | null;
 }
 
@@ -182,6 +183,7 @@ interface CashFlowEntry {
   accountId?: string;
   bankAccountId?: string;
   isBillPayment?: boolean;
+  hidden?: boolean;
 }
 
 interface CashFlowDay {
@@ -203,8 +205,11 @@ function round2(n: number): number {
 }
 
 /**
- * BANK transactions are excluded from listings and sums only when the user
- * has explicitly hidden them via `bank_transaction_hidden`. There is no
+ * BANK transactions are excluded from sums only when the user has
+ * explicitly hidden them via `bank_transaction_hidden`. The day listing
+ * still RETURNS hidden rows (flagged `hidden: true`) so the frontend can
+ * offer a show/hide toggle — but they never contribute to balances.
+ * There is no
  * description-based blocklist: connector noise (e.g. PicPay's
  * "Recarga em carteira" / "Retirada de saldo por lastro" trios) can't be
  * pattern-matched safely — the "real spend" leg of such a trio has a
@@ -357,13 +362,14 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
           `SELECT t.id, t.account_id,  t.date,
                   COALESCE(o.description, t.description) AS description,
                   t.amount, t.type, t.sort_key,
-                  CASE WHEN bp.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_bill_tagged
+                  CASE WHEN bp.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_bill_tagged,
+                  CASE WHEN h.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_hidden
            FROM bank_transactions t
            LEFT JOIN bank_transaction_description_overrides o ON o.transaction_id = t.id
            LEFT JOIN bank_bill_payment_tags bp ON bp.transaction_id = t.id
+           LEFT JOIN bank_transaction_hidden h ON h.transaction_id = t.id
            WHERE t.account_id IN (${placeholders})
              AND t.date >= ? AND t.date <= ?
-             AND ${BANK_TX_NOT_HIDDEN_SQL}
            ORDER BY t.date ASC, COALESCE(t.sort_key, 1e18) ASC, t.id ASC`,
         )
         .all(...bankAccountIds, firstDay, lastDay) as BankTxRow[];
@@ -487,6 +493,7 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
               type: 'bank_transaction',
               bankAccountId: tx.account_id,
               isBillPayment: billTagged || undefined,
+              hidden: tx.is_hidden === 1 || undefined,
             });
           }
         }

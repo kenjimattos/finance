@@ -56,10 +56,10 @@ Usernames listed in `DEMO_USERS` (default: `demo`) get a 403 `DemoRestricted` fr
 
 ## Cash flow
 
-- `GET /cashflow?month=YYYY-MM` — day-by-day timeline for a single month. Past days: actual BANK transactions. Future days: manual entries + credit card bill outflows on due dates. The frontend stitches several months together client-side.
+- `GET /cashflow?month=YYYY-MM` — day-by-day timeline for a single month. Past days: actual BANK transactions, including user-hidden rows flagged `hidden: true` (they never contribute to opening/running balances; the frontend filters them behind a show/hide toggle). Future days: manual entries + credit card bill outflows on due dates. The frontend stitches several months together client-side.
 - `GET /cashflow/range` — first and last `YYYY-MM` that have BANK transactions, used by the frontend to pick which months to render.
 - `PUT /cashflow/bill-tag/:transactionId` / `DELETE /cashflow/bill-tag/:transactionId` — tag/untag a bank outflow as a credit-card bill payment (clickable source column in the ledger).
-- `PUT /cashflow/hide/:transactionId` / `DELETE /cashflow/hide/:transactionId` — hide/unhide a bank row from the CashFlow view (for bank-side duplicates Pluggy passed through as distinct IDs). Row stays in `bank_transactions` so subsequent syncs still touch it.
+- `PUT /cashflow/hide/:transactionId` / `DELETE /cashflow/hide/:transactionId` — hide/unhide a bank row from CashFlow balances (for bank-side duplicates Pluggy passed through as distinct IDs). Row stays in `bank_transactions` so subsequent syncs still touch it, and stays in the `GET /cashflow` listing flagged `hidden` so the UI can display and restore it.
 - `PUT /bank-transactions/:id/description` / `DELETE …/description` — override or restore a bank-row display description.
 - `PUT /bank-transactions/:id/sort-key` / `PUT /manual-entries/:id/sort-key` — set the per-day ordering for drag-and-drop.
 - `GET /manual-entries?month=YYYY-MM` / `POST /manual-entries` / `PUT /manual-entries/:id` / `DELETE /manual-entries/:id` / `POST /manual-entries/:id/duplicate` — CRUD for per-month recurring cash-flow entries, plus duplicate-into-next-month.

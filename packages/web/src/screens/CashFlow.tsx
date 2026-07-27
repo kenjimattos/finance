@@ -22,7 +22,7 @@ import { RowActionsMenu } from '../components/RowActionsMenu';
 import { useIsDemo } from '../lib/useIsDemo';
 
 const isDraggable = (e: CashFlowEntry) =>
-  e.type === 'bank_transaction' || e.type === 'manual_entry';
+  !e.hidden && (e.type === 'bank_transaction' || e.type === 'manual_entry');
 
 function manualIdFromEntry(id: string): number {
   return Number(id.replace('manual-', ''));
@@ -161,6 +161,10 @@ export function CashFlow({
   // Current month is always visible; up to 5 previous months are behind a toggle.
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  // Hidden bank rows are always excluded from balances; this only controls
+  // whether they are *displayed* (dimmed) so the user can review/restore them.
+  const [showHidden, setShowHidden] = useState(false);
+
   const PROJECTION_STORAGE_KEY = 'cashflow:projectionCount';
   const PROJECTION_MAX = 12;
   const [projectionCount, setProjectionCount] = useState<number>(() => {
@@ -254,13 +258,25 @@ export function CashFlow({
       const data = queries[mi].data;
       if (!data) continue;
       for (const day of data.days) {
-        for (const e of day.entries) running += e.amount;
+        // Hidden rows are display-only — they never move the balance.
+        for (const e of day.entries) if (!e.hidden) running += e.amount;
         balances.set(day.date, Math.round(running * 100) / 100);
       }
       monthEnds.set(data.month, Math.round(running * 100) / 100);
     }
 
     return { dayBalances: balances, monthEndBalances: monthEnds };
+  }, [queries]);
+
+  // How many hidden rows exist across the visible months — drives the toggle.
+  const hiddenCount = useMemo(() => {
+    let n = 0;
+    for (const q of queries) {
+      for (const day of q.data?.days ?? []) {
+        for (const e of day.entries) if (e.hidden) n++;
+      }
+    }
+    return n;
   }, [queries]);
 
   // ── Mutations ──
@@ -278,7 +294,8 @@ export function CashFlow({
     onSuccess: invalidateAll,
   });
   const hideMut = useMutation({
-    mutationFn: (id: string) => api.hideBankTransaction(id),
+    mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) =>
+      hidden ? api.unhideBankTransaction(id) : api.hideBankTransaction(id),
     onSuccess: invalidateAll,
   });
   const descTxMut = useMutation({
@@ -449,17 +466,35 @@ export function CashFlow({
         )}
       </div>
 
-      {/* History toggle */}
-      {historyMonths.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setHistoryOpen((o) => !o)}
-          className="mb-8 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)] transition-colors hover:text-[color:var(--color-accent)]"
-        >
-          {historyOpen
-            ? '− ocultar histórico'
-            : `+ mostrar ${historyMonths.length} ${historyMonths.length === 1 ? 'mês anterior' : 'meses anteriores'}`}
-        </button>
+      {/* History + hidden-rows toggles */}
+      {(historyMonths.length > 0 || hiddenCount > 0) && (
+        <div className="mb-8 flex flex-wrap items-center gap-4 font-body text-xs uppercase tracking-[0.14em] text-[color:var(--color-ink-muted)]">
+          {historyMonths.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setHistoryOpen((o) => !o)}
+              className="transition-colors hover:text-[color:var(--color-accent)]"
+            >
+              {historyOpen
+                ? '− ocultar histórico'
+                : `+ mostrar ${historyMonths.length} ${historyMonths.length === 1 ? 'mês anterior' : 'meses anteriores'}`}
+            </button>
+          )}
+          {historyMonths.length > 0 && hiddenCount > 0 && (
+            <span className="text-[color:var(--color-ink-faint)]">·</span>
+          )}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowHidden((s) => !s)}
+              className="transition-colors hover:text-[color:var(--color-accent)]"
+            >
+              {showHidden
+                ? '− esconder ocultas'
+                : `+ mostrar ${hiddenCount} ${hiddenCount === 1 ? 'oculta' : 'ocultas'}`}
+            </button>
+          )}
+        </div>
       )}
 
       {/* ── Month sections ── */}
@@ -477,6 +512,7 @@ export function CashFlow({
             monthStr={ms}
             data={data ?? null}
             loading={q?.isLoading ?? false}
+            showHidden={showHidden}
             today={today}
             dayBalances={dayBalances}
             endBalance={endBal}
@@ -507,7 +543,7 @@ export function CashFlow({
                 dayManualMut.mutate({ id: Number(entry.id.replace('manual-', '')), dayOfMonth });
               }
             }}
-            onHide={(entry) => hideMut.mutate(entry.id)}
+            onHide={(entry) => hideMut.mutate({ id: entry.id, hidden: !!entry.hidden })}
             onReorder={(activeId, overId) => handleReorder(ms, activeId, overId)}
           />
         );
@@ -551,6 +587,7 @@ function MonthSection({
   monthStr: ms,
   data,
   loading,
+  showHidden,
   today,
   dayBalances,
   endBalance,
@@ -573,6 +610,7 @@ function MonthSection({
   monthStr: string;
   data: CashFlowResponse | null;
   loading: boolean;
+  showHidden: boolean;
   today: string;
   dayBalances: Map<string, number>;
   endBalance: number | null;
@@ -596,18 +634,29 @@ function MonthSection({
     return `${n.year}-${pad(n.month)}`;
   })();
 
+  // The API always returns hidden rows (flagged) — filter them out here
+  // unless the user toggled them visible. Days left with no visible entries
+  // disappear entirely.
+  const visibleData = useMemo(() => {
+    if (!data || showHidden) return data;
+    const days = data.days
+      .map((d) => ({ ...d, entries: d.entries.filter((e) => !e.hidden) }))
+      .filter((d) => d.entries.length > 0);
+    return { ...data, days };
+  }, [data, showHidden]);
+
   // Sortable item IDs in display order — used by SortableContext so dnd-kit
   // can compute insertion points based on hover position.
   const sortableIds = useMemo(() => {
-    if (!data) return [];
+    if (!visibleData) return [];
     const ids: string[] = [];
-    for (const d of data.days) {
+    for (const d of visibleData.days) {
       for (const e of d.entries) {
         if (isDraggable(e)) ids.push(e.id);
       }
     }
     return ids;
-  }, [data]);
+  }, [visibleData]);
 
   const sensors = useSensors(
     // 6px activation distance keeps text selection / clicks working.
@@ -664,10 +713,10 @@ function MonthSection({
 
       {loading ? (
         <LedgerSkeleton />
-      ) : data && data.days.length > 0 ? (
+      ) : visibleData && visibleData.days.length > 0 ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-            {data.days.map((day, di) => (
+            {visibleData.days.map((day, di) => (
               <DayGroup
                 key={day.date}
                 day={day}
@@ -849,7 +898,7 @@ function EntryRow({
         gridTemplateColumns: 'var(--cashflow-table)',
         transform: CSS.Transform.toString(transform),
         transition,
-        opacity: isDragging ? 0.4 : 1,
+        opacity: isDragging ? 0.4 : entry.hidden ? 0.45 : 1,
         position: 'relative',
       }}
       className={`group grid items-center gap-x-2 md:gap-x-6 py-[7px] ${day.isPast ? 'bg-[color:var(--color-paper-tint)]' : ''}`}
@@ -1116,6 +1165,12 @@ function DescriptionCell({
         </span>
       )}
 
+      {entry.hidden && (
+        <span className="shrink-0 font-body text-[9px] uppercase tracking-[0.1em] text-[color:var(--color-ink-faint)]">
+          oculta
+        </span>
+      )}
+
       {manualId !== null && (
         <div className="ml-auto shrink-0">
           <RowActionsMenu
@@ -1138,7 +1193,12 @@ function DescriptionCell({
           <RowActionsMenu
             ariaLabel="Ações da linha"
             actions={[
-              { label: 'Esconder do fluxo de caixa', onClick: onHide },
+              {
+                label: entry.hidden
+                  ? '👁 Restaurar no fluxo de caixa'
+                  : '⌀ Esconder do fluxo de caixa',
+                onClick: onHide,
+              },
             ]}
           />
         </div>
