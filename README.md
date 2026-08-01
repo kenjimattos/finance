@@ -80,7 +80,9 @@ All env is read and validated in [`config.ts`](packages/api/src/config.ts); the 
 
 ### Deployment
 
-Railway config ([`railway.toml`](railway.toml) + [`nixpacks.toml`](nixpacks.toml)) is checked in. In production the API serves the built SPA from the same origin and strips the `/api/` prefix; point `DATABASE_DIR` at a persistent volume.
+Railway config ([`railway.toml`](railway.toml)) is checked in; the build uses Railway's default builder. In production the API serves the built SPA from the same origin and strips the `/api/` prefix; point `DATABASE_DIR` at a persistent volume.
+
+The live demo runs in its own Railway environment (`demo`), separate from production. That environment is also the base for CI: opening a PR clones its config into an ephemeral preview environment, which seeds a fresh demo database on start (`[environments.pr.deploy]` in [`railway.toml`](railway.toml)) so every PR boots with ~5 months of synthetic data.
 
 ## License
 

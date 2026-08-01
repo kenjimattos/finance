@@ -10,6 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - **Ambientes de preview já nascem com os dados demo.** Abrir uma PR cria no Railway um ambiente efêmero clonado do `demo`, mas com volume vazio — ou seja, o app subia sem dado nenhum e não dava para testar nada. O `startCommand` do ambiente `pr` passa a rodar o seed antes de subir a API (`[environments.pr.deploy]` no `railway.toml`), então cada PR ganha ~5 meses de dados sintéticos relativos à data do deploy. Precisa ser no start e não num `preDeployCommand` porque o pre-deploy do Railway roda em container separado, sem o volume montado. O seed ganhou a flag `--if-empty`, que o torna no-op quando o banco já tem lançamentos: sem isso, cada push novo na branch da PR apagaria o que o revisor estivesse testando. `npm run seed:demo` também passa a existir na raiz, junto dos outros atalhos de workspace.
 
+### Alterado
+
+- **Demo em ambiente próprio, e ele virou a base do CI.** A demo pública saiu de `finance-demo-production.up.railway.app` para [finance-demo.up.railway.app](https://finance-demo.up.railway.app/) (README atualizado): ela agora roda num ambiente Railway separado da produção, com volume e banco próprios. Além de isolar o sandbox público, esse ambiente passa a ser o molde do fluxo de CI — cada PR clona a config dele para um ambiente efêmero de preview, que sobe já semeado com os dados sintéticos.
+
+- **Build no Railway sem Nixpacks.** O `nixpacks.toml` foi removido e o `railway.toml` deixou de fixar `builder = "NIXPACKS"`, passando a usar o builder padrão do Railway (hoje o Railpack). O arquivo existia só para contornar uma limitação do Nixpacks — com `NODE_ENV=production`, o `npm` pulava as devDeps (`tsc`, `vite`) na fase de build, exigindo `NPM_CONFIG_PRODUCTION=false` e `npm ci --include=dev`. Com o `buildCommand` do `railway.toml` (`npm install && npm run build`) o contorno deixou de ser necessário. O pin de Node 20 continua em `engines.node` e `.nvmrc` — ele é que garante os binários pré-compilados de `better-sqlite3` e `@tailwindcss/oxide`, evitando node-gyp no container.
+
 ## [1.9.0] - 2026-07-27
 
 ### Corrigido
