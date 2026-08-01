@@ -22,9 +22,14 @@ import { isDemoUser } from '../config.js';
 import { extractMerchantSlug } from '../services/merchantSlug.js';
 import { CATEGORY_PALETTE } from '../services/categoryColors.js';
 
-const args = process.argv.slice(2).filter((a) => a !== '--force');
-const force = process.argv.includes('--force');
-const USERNAME = (args[0] ?? 'demo').toLowerCase();
+const argv = process.argv.slice(2);
+const force = argv.includes('--force');
+// Railway preview environments boot with an empty volume, so the demo database
+// has to be seeded on first start. Those environments also redeploy on every
+// push to the PR branch — --if-empty keeps the seed a one-shot so a redeploy
+// mid-review doesn't wipe whatever the reviewer had been clicking through.
+const ifEmpty = argv.includes('--if-empty');
+const USERNAME = (argv.find((a) => !a.startsWith('--')) ?? 'demo').toLowerCase();
 
 if (!isDemoUser(USERNAME) && !force) {
   console.error(
@@ -186,7 +191,17 @@ const INBOX_MERCHANTS: Array<{ desc: string; daysAgo: number; amount: number; ac
 ];
 
 // ── Seed ────────────────────────────────────────────────────────────────────
+// getDb creates the file and runs migrations, so an untouched database is not
+// "missing tables" but "tables with nothing in them" — count rows, don't stat.
 const db = getDb(USERNAME);
+
+if (ifEmpty) {
+  const existing = (db.prepare('SELECT COUNT(*) n FROM transactions').get() as { n: number }).n;
+  if (existing > 0) {
+    console.log(`Skipping seed of '${USERNAME}': already has ${existing} transactions.`);
+    process.exit(0);
+  }
+}
 
 function wipe(db: Db): void {
   // Order matters only for tables without cascades; everything hanging off

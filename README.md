@@ -2,7 +2,7 @@
 
 A self-hosted credit-card spending manager for a small group (you and a partner), backed by [Pluggy](https://pluggy.ai), the Brazilian Open Finance aggregator. The UI is in Brazilian Portuguese; it renders in an editorial, financial-press style — warm paper, one burnt-orange accent, Fraunces headlines, JetBrains Mono currency.
 
-> **Live demo:** [finance-demo-production.up.railway.app](https://finance-demo-production.up.railway.app/) — log in with username `demo` and password `demo`. The account is fully interactive over ~5 months of synthetic data; it resets periodically.
+> **Live demo:** [finance-demo.up.railway.app](https://finance-demo.up.railway.app/) — log in with username `demo` and password `demo`. The account is fully interactive over ~5 months of synthetic data; it resets periodically.
 
 The point is not just *viewing* transactions — banks already do that. It's the workflow around them:
 
@@ -80,7 +80,9 @@ All env is read and validated in [`config.ts`](packages/api/src/config.ts); the 
 
 ### Deployment
 
-Railway config ([`railway.toml`](railway.toml) + [`nixpacks.toml`](nixpacks.toml)) is checked in. In production the API serves the built SPA from the same origin and strips the `/api/` prefix; point `DATABASE_DIR` at a persistent volume.
+Railway config ([`railway.toml`](railway.toml)) is checked in; the build uses Railway's default builder. In production the API serves the built SPA from the same origin and strips the `/api/` prefix; point `DATABASE_DIR` at a persistent volume.
+
+The live demo runs in its own Railway environment (`demo`), separate from production. That environment is also the base for CI: opening a PR clones its config into an ephemeral preview environment, which seeds a fresh demo database on start (`[environments.pr.deploy]` in [`railway.toml`](railway.toml)) so every PR boots with ~5 months of synthetic data.
 
 ## License
 
