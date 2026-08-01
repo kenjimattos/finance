@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Não publicado]
+
+### Adicionado
+
+- **Ambientes de preview já nascem com os dados demo.** Abrir uma PR cria no Railway um ambiente efêmero clonado do `demo`, mas com volume vazio — ou seja, o app subia sem dado nenhum e não dava para testar nada. O `startCommand` do ambiente `pr` passa a rodar o seed antes de subir a API (`[environments.pr.deploy]` no `railway.toml`), então cada PR ganha ~5 meses de dados sintéticos relativos à data do deploy. Precisa ser no start e não num `preDeployCommand` porque o pre-deploy do Railway roda em container separado, sem o volume montado. O seed ganhou a flag `--if-empty`, que o torna no-op quando o banco já tem lançamentos: sem isso, cada push novo na branch da PR apagaria o que o revisor estivesse testando. `npm run seed:demo` também passa a existir na raiz, junto dos outros atalhos de workspace.
+
 ## [1.9.0] - 2026-07-27
 
 ### Corrigido

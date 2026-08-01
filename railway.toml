@@ -6,3 +6,14 @@ startCommand = "npm start"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
+
+# PR preview environments clone production's config but get a brand-new empty
+# volume, so they boot with no data at all. Seed the demo database on start.
+#
+# This has to happen in the start command, not a preDeployCommand: pre-deploy
+# runs in a separate container with no volume mounted, so it would seed a
+# filesystem that is thrown away. --if-empty makes it a no-op once the volume
+# has data, so pushing new commits to the PR doesn't reset the environment.
+# Scoping to [environments.pr] keeps production's start command untouched.
+[environments.pr.deploy]
+startCommand = "node packages/api/dist/scripts/seed-demo.js --if-empty && npm start"
