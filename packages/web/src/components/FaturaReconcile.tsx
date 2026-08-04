@@ -154,6 +154,7 @@ export function FaturaReconcile({
   const selectedRows = missing.filter((_, i) => selected.has(i));
   const manualMismatches = (report?.amountMismatches ?? []).filter((m) => m.app.source === 'manual');
   const deltaOk = report != null && Math.abs(report.delta) < 0.005;
+  const gapOff = report != null && Math.abs(report.extractionGap) >= 0.01;
 
   return createPortal(
     <motion.div
@@ -223,21 +224,50 @@ export function FaturaReconcile({
         {report && (
           <div className="mt-6 space-y-6">
             {/* Totais */}
-            <div className="grid grid-cols-3 gap-2 border border-[color:var(--color-ink)]/30 p-3">
-              <div>
-                <div className="eyebrow">fatura (pdf)</div>
-                <div className="font-mono text-sm text-[color:var(--color-ink)]">{BRL.format(report.statementTotal)}</div>
-              </div>
-              <div>
-                <div className="eyebrow">app</div>
-                <div className="font-mono text-sm text-[color:var(--color-ink)]">{BRL.format(report.appBillTotal)}</div>
-              </div>
-              <div>
-                <div className="eyebrow">diferença</div>
-                <div className={`font-mono text-sm ${deltaOk ? 'text-[color:var(--color-ink-muted)]' : 'text-[color:var(--color-accent)]'}`}>
-                  {deltaOk ? '✓ bate' : BRL.format(report.delta)}
+            <div className="border border-[color:var(--color-ink)]/30 p-3">
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <div className="eyebrow">fatura (pdf)</div>
+                  <div className="font-mono text-sm text-[color:var(--color-ink)]">{BRL.format(report.statementTotal)}</div>
+                </div>
+                <div>
+                  <div className="eyebrow">app</div>
+                  <div className="font-mono text-sm text-[color:var(--color-ink)]">{BRL.format(report.appBillTotal)}</div>
+                </div>
+                <div>
+                  <div className="eyebrow">diferença</div>
+                  <div className={`font-mono text-sm ${deltaOk ? 'text-[color:var(--color-ink-muted)]' : 'text-[color:var(--color-accent)]'}`}>
+                    {deltaOk ? '✓ bate' : BRL.format(report.delta)}
+                  </div>
                 </div>
               </div>
+
+              {/* O total vem do resumo impresso no PDF. Se as linhas lidas não
+                  somam esse valor, a leitura perdeu algo — avisar, porque as
+                  listas abaixo ficam incompletas na mesma medida. */}
+              {gapOff && (
+                <p className="mt-3 border-t border-[color:var(--color-ink)]/15 pt-2 font-body text-xs text-[color:var(--color-accent)]">
+                  As linhas lidas somam {BRL.format(report.statementRowsTotal)} —{' '}
+                  {BRL.format(Math.abs(report.extractionGap))}{' '}
+                  {report.extractionGap > 0 ? 'a menos que' : 'a mais que'} o total impresso na
+                  fatura. Alguma linha do PDF não foi lida corretamente; as listas abaixo podem
+                  estar incompletas.
+                </p>
+              )}
+              {report.statementTotalSource === 'rows' && (
+                <p className="mt-3 border-t border-[color:var(--color-ink)]/15 pt-2 font-body text-xs text-[color:var(--color-ink-muted)]">
+                  O PDF não traz um total de lançamentos — o valor acima é a soma das linhas lidas.
+                </p>
+              )}
+              {report.statementCharges != null && report.statementCharges !== 0 && (
+                <p className="mt-2 font-body text-xs text-[color:var(--color-ink-muted)]">
+                  Fora dos lançamentos, a fatura cobra {BRL.format(report.statementCharges)} de
+                  encargos
+                  {report.statementBillTotal != null &&
+                    ` (total desta fatura: ${BRL.format(report.statementBillTotal)})`}
+                  .
+                </p>
+              )}
             </div>
 
             {/* Faltando no app */}

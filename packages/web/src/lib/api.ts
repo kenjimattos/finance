@@ -408,8 +408,18 @@ export interface ReconcileReport {
   window: { periodStart: string; periodEnd: string; nextDueDate: string };
   /** Sum of categorized app rows — mirrors the bill headline. */
   appBillTotal: number;
-  /** Net sum of the statement's lançamentos (payments excluded). */
+  /** The statement's lançamentos total — printed by the issuer when available. */
   statementTotal: number;
+  /** Net sum of the lines actually read from the PDF (payments excluded). */
+  statementRowsTotal: number;
+  /** Where statementTotal came from: the PDF's summary box, or the read lines. */
+  statementTotalSource: 'printed' | 'rows';
+  /** statementTotal - statementRowsTotal: how much the extraction missed. */
+  extractionGap: number;
+  /** "Total de encargos" (juros/multa/IOF), when the statement charges any. */
+  statementCharges: number | null;
+  /** "Total desta fatura" — lançamentos + encargos + saldo. */
+  statementBillTotal: number | null;
   /** appBillTotal - statementTotal. */
   delta: number;
   matchedCount: number;

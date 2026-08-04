@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeExtraction, normalizeBaseUrl } from './extractFatura.js';
+import { normalizeExtraction, normalizeStatementExtraction, normalizeBaseUrl } from './extractFatura.js';
 
 describe('normalizeBaseUrl', () => {
   it('strips a trailing /v1 (OpenRouter gateway footgun)', () => {
@@ -103,5 +103,43 @@ describe('normalizeExtraction', () => {
 
   it('handles an empty transaction list', () => {
     assert.deepEqual(normalizeExtraction({ transactions: [] }), []);
+  });
+});
+
+describe('normalizeStatementExtraction totals', () => {
+  it('reads the printed totals', () => {
+    const { totals } = normalizeStatementExtraction({
+      transactions: [],
+      totals: { lancamentos: 7974.83, encargos: 257.77, totalFatura: 8232.6 },
+    });
+    assert.deepEqual(totals, { lancamentos: 7974.83, encargos: 257.77, totalFatura: 8232.6 });
+  });
+
+  it('defaults every total to null when the statement prints none', () => {
+    const { totals } = normalizeStatementExtraction({ transactions: [] });
+    assert.deepEqual(totals, { lancamentos: null, encargos: null, totalFatura: null });
+  });
+
+  it('keeps a printed zero (nothing charged is not the same as unknown)', () => {
+    const { totals } = normalizeStatementExtraction({
+      transactions: [],
+      totals: { encargos: 0 },
+    });
+    assert.equal(totals.encargos, 0);
+    assert.equal(totals.lancamentos, null);
+  });
+
+  it('coerces totals to magnitudes — statements print them unsigned', () => {
+    const { totals } = normalizeStatementExtraction({
+      transactions: [],
+      totals: { lancamentos: -7974.83, encargos: null, totalFatura: 8232.6 },
+    });
+    assert.equal(totals.lancamentos, 7974.83);
+  });
+
+  it('rejects a non-numeric total rather than silently dropping it', () => {
+    assert.throws(() =>
+      normalizeStatementExtraction({ transactions: [], totals: { lancamentos: '7.974,83' } }),
+    );
   });
 });

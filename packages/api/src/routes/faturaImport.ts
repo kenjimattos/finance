@@ -268,7 +268,7 @@ faturaImportRouter.post('/transactions/import-fatura/reconcile', async (req, res
       return;
     }
 
-    const statementLines = await extractFaturaFromPdfText(text, {
+    const { rows: statementLines, totals } = await extractFaturaFromPdfText(text, {
       periodStart: win.periodStart,
       periodEnd: win.periodEnd,
       referenceDate: todayYmd(),
@@ -293,17 +293,34 @@ faturaImportRouter.post('/transactions/import-fatura/reconcile', async (req, res
     const appBillTotal = round2(
       appLines.filter((l) => l.category != null).reduce((sum, l) => sum + l.amount, 0),
     );
-    const statementTotal = round2(
+    // What the extracted lines add up to. Useful, but only as good as the
+    // extraction: a line the model misread or dropped silently shrinks it.
+    const statementRowsTotal = round2(
       [...result.matched, ...result.amountMismatches]
         .map((p) => p.statement.amount)
         .concat(result.missingInApp.map((s) => s.amount))
         .reduce((sum, a) => sum + a, 0),
     );
 
+    // The issuer's own "total dos lançamentos" is the authority when the PDF
+    // prints it — the app's bill is a sum of lançamentos, so that (not "total
+    // desta fatura", which also carries encargos/saldo financiado) is the
+    // apples-to-apples figure. Fall back to the row sum for statements that
+    // print no summary box.
+    const statementTotal = totals.lancamentos ?? statementRowsTotal;
+    // Non-zero means the extraction did not read every line: the delta below is
+    // real, but the missing/only-in-app lists are incomplete by this much.
+    const extractionGap = round2(statementTotal - statementRowsTotal);
+
     res.json({
       window: { periodStart: win.periodStart, periodEnd: win.periodEnd, nextDueDate: win.nextDueDate },
       appBillTotal,
       statementTotal,
+      statementRowsTotal,
+      statementTotalSource: totals.lancamentos != null ? 'printed' : 'rows',
+      extractionGap,
+      statementCharges: totals.encargos,
+      statementBillTotal: totals.totalFatura,
       delta: round2(appBillTotal - statementTotal),
       matchedCount: result.matched.length,
       missingInApp,

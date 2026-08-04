@@ -57,15 +57,52 @@ export function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, '').replace(/\/v1$/, '');
 }
 
+/**
+ * Totals as PRINTED in the statement's own summary box.
+ *
+ * The reconciliation total used to be reconstructed by summing the extracted
+ * lines, which silently reports a wrong "fatura (pdf)" whenever the extraction
+ * misses a line. Reading the issuer's own totals gives an independent anchor:
+ * if the lines don't sum to it, the gap is surfaced instead of hidden.
+ */
+export interface StatementTotals {
+  /** "Total dos lançamentos atuais" / "Total dos lançamentos" — the period's charges. */
+  lancamentos: number | null;
+  /** "Total de encargos" (juros, multa, IOF de financiamento), when charged. */
+  encargos: number | null;
+  /** "Total desta fatura" — what is actually due (lançamentos + encargos + saldo). */
+  totalFatura: number | null;
+}
+
 // The tool the model is forced to call. Amounts come back as a POSITIVE
 // magnitude plus an `isRefund` flag; normalizeExtraction applies the sign.
 const RECORD_TOOL: Anthropic.Tool = {
   name: 'record_transactions',
   description:
-    'Record every purchase/charge line read from the credit-card fatura screenshots.',
+    'Record every purchase/charge line read from the credit-card fatura, plus the totals printed in its summary box.',
   input_schema: {
     type: 'object',
     properties: {
+      totals: {
+        type: 'object',
+        description:
+          'Totals copied verbatim from the statement summary. Only for PDFs that print them; omit or null each field otherwise.',
+        properties: {
+          lancamentos: {
+            type: ['number', 'null'],
+            description:
+              '"Total dos lançamentos atuais" / "Total dos lançamentos" as a positive number, or null if the statement does not print it.',
+          },
+          encargos: {
+            type: ['number', 'null'],
+            description: '"Total de encargos em R$" (juros/multa/IOF de financiamento), or null.',
+          },
+          totalFatura: {
+            type: ['number', 'null'],
+            description: '"Total desta fatura" / "O total da sua fatura é", or null.',
+          },
+        },
+      },
       transactions: {
         type: 'array',
         items: {
@@ -148,7 +185,32 @@ const rawRowSchema = z.object({
   totalInstallments: z.number().int().nullable(),
 });
 
-const rawPayloadSchema = z.object({ transactions: z.array(rawRowSchema) });
+const rawTotalsSchema = z
+  .object({
+    lancamentos: z.number().finite().nullable().optional(),
+    encargos: z.number().finite().nullable().optional(),
+    totalFatura: z.number().finite().nullable().optional(),
+  })
+  .nullable()
+  .optional();
+
+const rawPayloadSchema = z.object({
+  transactions: z.array(rawRowSchema),
+  totals: rawTotalsSchema,
+});
+
+/**
+ * Printed totals are magnitudes: the statement shows "7.974,83", never a sign.
+ * Zero means "nothing charged", which is meaningful, so only null is dropped.
+ */
+function normalizeTotals(raw: z.infer<typeof rawTotalsSchema>): StatementTotals {
+  const mag = (n: number | null | undefined) => (n == null ? null : Math.abs(n));
+  return {
+    lancamentos: mag(raw?.lancamentos),
+    encargos: mag(raw?.encargos),
+    totalFatura: mag(raw?.totalFatura),
+  };
+}
 
 /**
  * Validate and normalize the model's tool output into ExtractedRow[].
@@ -159,8 +221,16 @@ const rawPayloadSchema = z.object({ transactions: z.array(rawRowSchema) });
  * - installment pair coerced to both-or-neither; clamps number ≤ total.
  */
 export function normalizeExtraction(raw: unknown): ExtractedRow[] {
-  const { transactions } = rawPayloadSchema.parse(raw);
-  return transactions.map((r) => {
+  return normalizeStatementExtraction(raw).rows;
+}
+
+/** As `normalizeExtraction`, but also returns the statement's printed totals. */
+export function normalizeStatementExtraction(raw: unknown): {
+  rows: ExtractedRow[];
+  totals: StatementTotals;
+} {
+  const { transactions, totals } = rawPayloadSchema.parse(raw);
+  const rows = transactions.map((r) => {
     const mag = Math.abs(r.amount);
     const card = (r.cardLast4 ?? '').trim().toUpperCase();
 
@@ -184,6 +254,7 @@ export function normalizeExtraction(raw: unknown): ExtractedRow[] {
       isRefund: r.isRefund,
     };
   });
+  return { rows, totals: normalizeTotals(totals) };
 }
 
 function makeClient(): Anthropic {
@@ -204,15 +275,19 @@ function makeClient(): Anthropic {
 }
 
 async function callRecordTool(
-  content: Anthropic.ContentBlockParam[],
-): Promise<ExtractedRow[]> {
+  messages: Anthropic.MessageParam[],
+): Promise<{
+  toolUse: Anthropic.ToolUseBlock;
+  rows: ExtractedRow[];
+  totals: StatementTotals;
+}> {
   const client = makeClient();
   const message = await client.messages.create({
     model: config.ANTHROPIC_MODEL,
     max_tokens: 8000,
     tools: [RECORD_TOOL],
     tool_choice: { type: 'tool', name: 'record_transactions' },
-    messages: [{ role: 'user', content }],
+    messages,
   });
 
   const toolUse = message.content.find(
@@ -221,8 +296,14 @@ async function callRecordTool(
   if (!toolUse) {
     throw new Error('Model did not return structured transactions');
   }
-  return normalizeExtraction(toolUse.input);
+  return { toolUse, ...normalizeStatementExtraction(toolUse.input) };
 }
+
+const sumRows = (rows: ExtractedRow[]) =>
+  Math.round(rows.reduce((s, r) => s + r.amount, 0) * 100) / 100;
+
+const brl = (n: number) =>
+  n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /**
  * Send the screenshots to Claude and return normalized rows.
@@ -241,28 +322,62 @@ export async function extractFaturaFromImages(
       data: img.data,
     },
   }));
-  return callRecordTool([...imageBlocks, { type: 'text', text: buildPrompt(ctx) }]);
+  const { rows } = await callRecordTool([
+    { role: 'user', content: [...imageBlocks, { type: 'text', text: buildPrompt(ctx) }] },
+  ]);
+  return rows;
 }
 
 function buildPdfPrompt(ctx: ExtractContext): string {
   return [
     'You are reading the TEXT extracted from a Brazilian credit-card statement PDF (fatura fechada, e.g. PicPay/Nubank/Itaú).',
-    'Extract EVERY transaction line into the record_transactions tool. Rules:',
+    'Extract EVERY transaction line into the record_transactions tool, plus the totals printed in the statement summary. Rules:',
     '',
     `- The bill covers ${ctx.periodStart} to ${ctx.periodEnd} (today is ${ctx.referenceDate}).`,
     '- Transaction lines look like "24/08 ZP *CPARC11/12 169,70" — date dd/mm, merchant, value in Brazilian format ("1.234,56" → 1234.56).',
+    '- Dates are ALWAYS dd/mm, never mm/dd. "07/11" is 7 November — never re-read it as 11 July to make it fit the window.',
     '- Year inference: pick the most recent year that puts the date ON OR BEFORE the closing date ' +
-      `${ctx.periodEnd}. Installment purchases (parceladas) keep their ORIGINAL purchase date, which can be many months before the window — that is expected; do not move them.`,
-    '- Negative values ("-399,99") are estornos/credits: set isRefund=true and put the positive magnitude in `amount`.',
-    '- Installments: a "PARC05/12" fragment in the merchant text means installment 5 of 12 → installmentNumber=5, totalInstallments=12. Keep the merchant text as printed (including the PARC fragment). Lines without a PARC fragment get null/null.',
-    '- Cards: statements group transactions under headers like "Picpay Card final 3021" or "KENJI M KINOSHITA … final 3054". Lines under such a header get cardLast4 from it ("3021"). Lines before any card header get null.',
-    '- SKIP payment lines: "PAGAMENTO DE FATURA", "PAGAMENTO RECEBIDO" and similar bill-payment rows.',
-    '- SKIP everything that is not a transaction line: summary boxes (Resumo, Limites, Encargos, rotativo, IOF, CET), subtotals ("Subtotal dos lançamentos"), totals ("Total geral dos lançamentos"), addresses, footers, and page headers.',
+      `${ctx.periodEnd}. Installment purchases (parceladas) keep their ORIGINAL purchase date, which can be many months (or years) before the window — that is expected; do not move them and do not change the day/month to bring them closer.`,
+    '- Negative values ("-399,99") are estornos/credits: set isRefund=true and put the positive magnitude in `amount`. Check the minus sign on EVERY line individually — a flipped sign costs twice the value in the reconciliation. Descriptions do not decide this: "CANCELAMENTO", "CREDITO", "Redução" are usually negative, but an ordinary merchant line can be an estorno too, and only the printed sign tells you.',
+    '- Installments: a "PARC05/12" fragment (PicPay) or a bare "05/12" at the END of the merchant text (Itaú: "PAYGO*DOCA 66 04/12", "APPLE STORE R6 12/12") means installment 5 of 12 → installmentNumber=5, totalInstallments=12. Keep the merchant text as printed (including the fragment). Lines without such a fragment get null/null.',
+    '- Cards: statements group transactions under headers like "Picpay Card final 3021", "KENJI M KINOSHITA … final 3054", or Itaú\'s "Cartão 5300.XXXX.XXXX.3177". Lines under such a header get cardLast4 from it ("3021"). Lines before any card header get null.',
+    '',
+    'ITAÚ layout specifics (the text is dense and easy to misread):',
+    '- Each transaction is followed by a category/city continuation line ("eletronicos SAO PAULO", "restaurante SAO BERNARDO"). It belongs to the transaction above and is NOT a transaction — never record it.',
+    '- "Lançamentos internacionais" lines carry TWO amounts. Format:',
+    '      10/07 RAILWAYSAN FRANCISCOUSA 27,05',
+    '      5,00 USD 5,00',
+    '      Dólar de Conversão R$ 5,41',
+    '  Record ONLY the R$ value on the dd/mm merchant line (27,05 here). The following lines are the original amount, its currency code and the exchange rate — metadata, never separate transactions and never the amount to use. This holds even when that currency code is BRL: in',
+    '      10/07 ANTHROPIC* CLAUDE SUBSA 579,19',
+    '      550,00 BRL 107,06',
+    '  the amount is 579,19 — NOT 550,00 and NOT 107,06. Getting this wrong understates the bill badly.',
+    '- "Repasse de IOF em R$ 24,99" under the international block IS a real charge: record it as a transaction dated ' +
+      `${ctx.periodEnd} with description "Repasse de IOF", no installments, no card.`,
+    '- "Lançamentos: produtos e serviços" (anuidade, mensalidade, reduções) ARE transactions — record them, with reduções as isRefund=true.',
+    '- SKIP the "Compras parceladas - próximas faturas" block entirely: those are FUTURE installments, not charges on this bill. They repeat merchants already listed above with the NEXT installment number (e.g. "PAYGO*DOCA 66 05/12" when the bill charged 04/12) — recording them double-counts the bill.',
+    '- SKIP the "Encargos cobrados nesta fatura" breakdown (juros do rotativo, juros de mora, multa por atraso, IOF de financiamento). Report their sum in `totals.encargos` instead.',
+    '',
+    '- SKIP payment lines: "PAGAMENTO DE FATURA", "PAGAMENTO RECEBIDO", "Pagamento via conta" and similar bill-payment rows.',
+    '- SKIP everything else that is not a transaction line: summary boxes (Resumo da fatura, Limites de crédito, pagamento mínimo, CET, simulações), section subtotals ("Lançamentos no cartão", "Total transações inter.", "Total lançamentos inter.", "Lançamentos produtos e serviços", "Total dos lançamentos atuais", "Subtotal dos lançamentos"), addresses, footers and page headers.',
     '- The same PDF page text can interleave two columns; rely on the dd/mm + value pattern to identify real transaction lines.',
+    '',
+    'TOTALS: copy the printed summary figures into `totals` — `lancamentos` from "Total dos lançamentos atuais" (or "Total dos lançamentos"), `encargos` from "Total de encargos em R$", `totalFatura` from "Total desta fatura". Use null for any the statement does not print. Copy them verbatim; do NOT compute them from the lines you extracted.',
+    '',
+    'Your transactions, summed with their signs (estornos subtract), must equal the printed `totals.lancamentos` to the centavo. The section subtotals localize any error: the purchases block sums to "Lançamentos no cartão", the international block to "Total lançamentos inter. em R$" (its transactions plus the Repasse de IOF), the services block to "Lançamentos produtos e serviços".',
     '',
     'Call the tool exactly once with all transactions in statement order.',
   ].join('\n');
 }
+
+/**
+ * How many correction rounds to spend closing the gap between the extracted
+ * lines and the statement's own printed total.
+ */
+const REPAIR_ROUNDS = 2;
+
+/** Agree-to-the-centavo threshold. */
+const TOTAL_EPSILON = 0.005;
 
 /**
  * Extract transactions from the raw TEXT of a statement PDF. Text-only — the
@@ -272,6 +387,55 @@ function buildPdfPrompt(ctx: ExtractContext): string {
 export async function extractFaturaFromPdfText(
   pdfText: string,
   ctx: ExtractContext,
-): Promise<ExtractedRow[]> {
-  return callRecordTool([{ type: 'text', text: `${buildPdfPrompt(ctx)}\n\n--- STATEMENT TEXT ---\n${pdfText}` }]);
+): Promise<{ rows: ExtractedRow[]; totals: StatementTotals }> {
+  const messages: Anthropic.MessageParam[] = [
+    {
+      role: 'user',
+      content: [{ type: 'text', text: `${buildPdfPrompt(ctx)}\n\n--- STATEMENT TEXT ---\n${pdfText}` }],
+    },
+  ];
+
+  let best = await callRecordTool(messages);
+
+  // Repair loop. Forced tool use gives the model no scratchpad to check its own
+  // arithmetic in, so the check happens here: the statement prints its own
+  // lançamentos total, and the extracted lines must sum to it. When they don't,
+  // hand the model the gap and let it re-read — a missed minus sign or a
+  // foreign-currency amount is obvious once you know how much is missing.
+  for (let round = 0; round < REPAIR_ROUNDS; round++) {
+    const target = best.totals.lancamentos;
+    if (target == null) break;
+    const gap = Math.round((target - sumRows(best.rows)) * 100) / 100;
+    if (Math.abs(gap) < TOTAL_EPSILON) break;
+
+    messages.push(
+      { role: 'assistant', content: [best.toolUse] },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: best.toolUse.id,
+            content:
+              `The transactions you recorded sum to R$ ${brl(sumRows(best.rows))}, but the statement prints ` +
+              `R$ ${brl(target)} of lançamentos — a difference of R$ ${brl(gap)}. Something was misread.\n\n` +
+              (gap > 0
+                ? 'Too little was recorded: a line is missing, an estorno was marked on a line that is actually a charge, or a foreign-currency/exchange-rate figure was used instead of the R$ value on the dd/mm line.\n'
+                : 'Too much was recorded: a "Compras parceladas - próximas faturas" line was included, a line was recorded twice, a category/city continuation line was read as a transaction, or a negative line was recorded as positive.\n') +
+              '\nRe-read the statement text and call the tool again with the FULL corrected list (all transactions, not just the fix), plus the same totals. ' +
+              'Use the section subtotals to find the error: "Lançamentos no cartão", "Total lançamentos inter. em R$", "Lançamentos produtos e serviços". ' +
+              'Never invent, drop, or adjust a line just to make the sum agree — correct only what you actually misread, and if you cannot find the error, return the lines as you read them.',
+          },
+        ],
+      },
+    );
+
+    const retry = await callRecordTool(messages);
+    const retryGap = Math.abs(target - sumRows(retry.rows));
+    // Keep the retry only if it actually got closer — a worse re-read is noise.
+    if (retryGap >= Math.abs(gap)) break;
+    best = retry;
+  }
+
+  return { rows: best.rows, totals: best.totals };
 }
