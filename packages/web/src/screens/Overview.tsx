@@ -208,6 +208,12 @@ export function Overview({
 
     for (const day of data.days) {
       for (const e of day.entries) {
+        // Hidden bank rows are display-only — the API returns them flagged
+        // `hidden` so CashFlow can offer a restore toggle, but they never
+        // contribute to any balance (the server's openingBalance walk skips
+        // them too). Summing them here double-counts the duplicates the user
+        // hid on purpose.
+        if (e.hidden) continue;
         if (day.isPast) {
           if (e.amount > 0) income += e.amount;
           else expenses += e.amount;
@@ -240,18 +246,18 @@ export function Overview({
       for (const q of carryQueries) {
         if (!q.data) continue;
         for (const day of q.data.days) {
-          for (const e of day.entries) running += e.amount;
+          for (const e of day.entries) if (!e.hidden) running += e.amount;
         }
       }
       for (const day of data.days) {
-        for (const e of day.entries) running += e.amount;
+        for (const e of day.entries) if (!e.hidden) running += e.amount;
       }
       currentBalance = Math.round(running * 100) / 100;
     } else {
       let balanceSum = 0;
       for (const day of data.days) {
         if (!day.isPast) continue;
-        for (const e of day.entries) balanceSum += e.amount;
+        for (const e of day.entries) if (!e.hidden) balanceSum += e.amount;
       }
       currentBalance = Math.round((openingBalance + balanceSum) * 100) / 100;
     }
@@ -274,6 +280,7 @@ export function Overview({
     let cardBills = 0;
     for (const day of data.days) {
       for (const e of day.entries) {
+        if (e.hidden) continue;
         if (e.amount < 0) {
           expenses += e.amount;
           if (
@@ -564,7 +571,9 @@ export function Overview({
   const hasEntriesInNextMonth = useMemo(() => {
     return (nextCashflowQ.data?.days ?? []).some((day) =>
       day.entries.some(
-        (e) => e.type === 'bank_transaction' || e.type === 'manual_entry',
+        (e) =>
+          !e.hidden &&
+          (e.type === 'bank_transaction' || e.type === 'manual_entry'),
       ),
     );
   }, [nextCashflowQ.data]);
