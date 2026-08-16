@@ -98,10 +98,15 @@ type InstallmentItem = SplitSectionData['installments'][number];
  * How the parcelas list renders. `list` is one line per installment (the
  * default — it answers "what am I still paying off"); `category` collapses
  * them into one line per category (it answers "where is the parcelado
- * concentrated"). The mode is shared across the three columns so the whole
- * section reads the same way.
+ * concentrated"); `ending` keeps only the rows on their last charge — 2/2,
+ * 4/4 — (it answers "what drops off the next bill"). The mode is shared
+ * across the three columns so the whole section reads the same way.
  */
-type InstallmentView = 'list' | 'category';
+type InstallmentView = 'list' | 'category' | 'ending';
+
+/** Last charge of its series — this amount is gone from the next cycle. */
+const isEnding = (inst: InstallmentItem) =>
+  inst.installmentNumber >= inst.totalInstallments;
 
 type InstallmentCategoryItem = {
   key: string;
@@ -433,11 +438,16 @@ function InstallmentList({
   accent?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const total = installments.reduce((acc, i) => acc + i.amount, 0);
   const amountColor = accent ? 'var(--color-accent)' : 'var(--color-ink-muted)';
 
+  const endingInstallments = installments.filter(isEnding);
+  // The header counts and sums what the active view actually shows —
+  // "acabando" is about the slice, not about the whole parcelado.
+  const listed = view === 'ending' ? endingInstallments : installments;
+  const total = listed.reduce((acc, i) => acc + i.amount, 0);
+
   const grouped = view === 'category' ? groupInstallmentsByCategory(installments) : [];
-  const rowCount = view === 'category' ? grouped.length : installments.length;
+  const rowCount = view === 'category' ? grouped.length : listed.length;
   const hiddenCount = rowCount - INST_LIMIT;
   const visibleCount = expanded ? rowCount : INST_LIMIT;
   // Bars are relative to the biggest category, not to the column total —
@@ -448,14 +458,14 @@ function InstallmentList({
     <div>
       <div className="mb-2.5 flex items-baseline justify-between gap-2">
         <span className="font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
-          parcelas · {installments.length}
+          {view === 'ending' ? 'acabando' : 'parcelas'} · {listed.length}
         </span>
         <span className="font-mono text-[12px] tabular-nums" style={{ color: amountColor }}>
           {formatBRL(total)}
         </span>
       </div>
 
-      <ViewSwitch view={view} onChange={onViewChange} />
+      <ViewSwitch view={view} onChange={onViewChange} endingCount={endingInstallments.length} />
 
       {view === 'category' ? (
         <ul className="space-y-2.5">
@@ -484,9 +494,13 @@ function InstallmentList({
             </li>
           ))}
         </ul>
+      ) : listed.length === 0 ? (
+        <p className="font-body text-[11px] text-[color:var(--color-ink-faint)]">
+          nenhuma parcela acaba nesta fatura
+        </p>
       ) : (
         <ul className="space-y-2">
-          {installments.slice(0, visibleCount).map((inst) => (
+          {listed.slice(0, visibleCount).map((inst) => (
             <li
               key={inst.id}
               className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]"
@@ -516,13 +530,19 @@ function InstallmentList({
   );
 }
 
-/** "lista · categorias" — flips every column's parcelas view at once. */
+/**
+ * "lista · categorias · acabando (N)" — flips every column's parcelas view
+ * at once. The count rides on "acabando" so the useful information (how many
+ * series end here) is readable without entering the view.
+ */
 function ViewSwitch({
   view,
   onChange,
+  endingCount,
 }: {
   view: InstallmentView;
   onChange: (view: InstallmentView) => void;
+  endingCount: number;
 }) {
   const option = (value: InstallmentView, label: string) => {
     const active = view === value;
@@ -538,11 +558,14 @@ function ViewSwitch({
       </button>
     );
   };
+  const dot = <span className="text-[10px] text-[color:var(--color-ink-faint)]">·</span>;
   return (
-    <div className="mb-2.5 flex items-center gap-2">
+    <div className="mb-2.5 flex flex-wrap items-center gap-2">
       {option('list', 'lista')}
-      <span className="text-[10px] text-[color:var(--color-ink-faint)]">·</span>
+      {dot}
       {option('category', 'categorias')}
+      {dot}
+      {option('ending', endingCount > 0 ? `acabando (${endingCount})` : 'acabando')}
     </div>
   );
 }
