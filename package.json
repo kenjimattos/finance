@@ -1,7 +1,7 @@
 {
   "name": "finance",
   "private": true,
-  "version": "1.9.1",
+  "version": "1.9.2",
   "description": "Personal finance management application using fetched data from Open Finance API",
   "workspaces": [
     "packages/*"
