@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Não lançado]
 
+### Adicionado
+
+- **Parcelas por categoria na divisão.** A lista de parcelas de cada coluna da divisão (½, dela, meu) ganhou um toggle "lista · categorias". Em "lista" continua uma linha por parcela (o que ainda estou pagando); em "categorias" as parcelas são agrupadas por categoria, com quantidade, total e barra proporcional à maior categoria — respondendo onde o parcelado está concentrado, algo que a lista longa escondia. O toggle é um só para as três colunas, então elas continuam comparáveis lado a lado, e vale tanto no Dashboard quanto no Overview. O `GET /bills/current/split-summary` passa a devolver a categoria em cada parcela.
+
 ### Corrigido
 
 - **Overview: linhas ocultas voltaram a contaminar o saldo.** Desde que o `GET /cashflow` passou a devolver as linhas de banco ocultas (marcadas `hidden`) para o CashFlow poder mostrá-las e restaurá-las, o Overview — que soma os lançamentos do mês por conta própria — voltou a contá-las. Resultado: o "saldo final/atual/projetado" de qualquer mês com duplicata oculta aparecia errado (e o mesmo valia para receitas, despesas e para o saldo projetado, que carrega mês a mês). Agora o Overview ignora `hidden` em todos os somatórios, igual ao CashFlow e ao cálculo de saldo de abertura do servidor. A seta "→" também deixa de habilitar o mês seguinte quando ele só tem linhas ocultas.

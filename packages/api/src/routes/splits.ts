@@ -308,25 +308,38 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
       })
       .sort((a, b) => b.total - a.total);
 
-    // Installments: from split rows + mine rows
+    // Installments: from split rows + mine rows. Each carries its category so
+    // the UI can offer a per-category view of the parcelas without a second
+    // request (every row here is categorized — both queries INNER JOIN
+    // user_categories — but the fields stay nullable to match the row type).
+    const isInstallment = (r: { installment_number: number | null; total_installments: number | null }) =>
+      r.installment_number != null && r.total_installments != null;
+    const installmentCategory = (r: SplitSummaryRow | Omit<SplitSummaryRow, 'split_type'>) => ({
+      categoryId: r.user_category_id,
+      categoryName: r.user_category_name,
+      categoryColor: r.user_category_color,
+    });
+
     const installments = [
       ...rows
-        .filter((r) => r.installment_number != null && r.total_installments != null)
+        .filter(isInstallment)
         .map((r) => ({
           id: r.id, date: r.date, description: r.description,
           amount: round2(r.amount),
           splitType: r.split_type as 'half' | 'theirs',
           installmentNumber: r.installment_number!,
           totalInstallments: r.total_installments!,
+          ...installmentCategory(r),
         })),
       ...mineRows
-        .filter((r) => r.installment_number != null && r.total_installments != null)
+        .filter(isInstallment)
         .map((r) => ({
           id: r.id, date: r.date, description: r.description,
           amount: round2(r.amount),
           splitType: 'mine' as const,
           installmentNumber: r.installment_number!,
           totalInstallments: r.total_installments!,
+          ...installmentCategory(r),
         })),
     ];
 

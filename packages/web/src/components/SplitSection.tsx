@@ -47,6 +47,9 @@ export interface SplitSectionData {
     splitType: 'half' | 'theirs' | 'mine';
     installmentNumber: number;
     totalInstallments: number;
+    categoryId: number | null;
+    categoryName: string | null;
+    categoryColor: string | null;
   }>;
 }
 
@@ -91,6 +94,47 @@ const INST_LIMIT = 4;
 type CategoryItem = { id: number; name: string; color: string; total: number; prev: number };
 type InstallmentItem = SplitSectionData['installments'][number];
 
+/**
+ * How the parcelas list renders. `list` is one line per installment (the
+ * default — it answers "what am I still paying off"); `category` collapses
+ * them into one line per category (it answers "where is the parcelado
+ * concentrated"). The mode is shared across the three columns so the whole
+ * section reads the same way.
+ */
+type InstallmentView = 'list' | 'category';
+
+type InstallmentCategoryItem = {
+  key: string;
+  name: string;
+  color: string;
+  total: number;
+  count: number;
+};
+
+/** Group a column's installments by category, biggest total first. */
+function groupInstallmentsByCategory(installments: InstallmentItem[]): InstallmentCategoryItem[] {
+  const map = new Map<string, InstallmentCategoryItem>();
+  for (const inst of installments) {
+    const key = inst.categoryId == null ? 'none' : String(inst.categoryId);
+    const existing = map.get(key);
+    if (existing) {
+      existing.total += inst.amount;
+      existing.count += 1;
+    } else {
+      map.set(key, {
+        key,
+        name: inst.categoryName ?? 'sem categoria',
+        color: inst.categoryColor ?? 'var(--color-paper-rule)',
+        total: inst.amount,
+        count: 1,
+      });
+    }
+  }
+  return Array.from(map.values())
+    .map((c) => ({ ...c, total: Math.round(c.total * 100) / 100 }))
+    .sort((a, b) => b.total - a.total);
+}
+
 export function SplitSection({
   split,
   variant,
@@ -99,6 +143,10 @@ export function SplitSection({
   variant: Variant;
 }) {
   const v = VARIANTS[variant];
+
+  // One view mode for every column's parcelas list — flipping it in any
+  // column flips all three, so the columns stay comparable side by side.
+  const [installmentView, setInstallmentView] = useState<InstallmentView>('list');
 
   // Headline figures: each person's share of the divided spend. "dela" is
   // partnerOwes (theirs + half of the ½ pot); "meu" mirrors it with my own
@@ -135,6 +183,8 @@ export function SplitSection({
         subtitle={`${split.breakdown.half.count}x — total ${formatBRL(split.breakdown.half.total)}`}
         categories={halfCategories}
         installments={halfInstallments}
+        installmentView={installmentView}
+        onInstallmentViewChange={setInstallmentView}
       />,
     );
   }
@@ -149,6 +199,8 @@ export function SplitSection({
         subtitle={`${split.breakdown.theirs.count}x`}
         categories={theirsCategories}
         installments={theirsInstallments}
+        installmentView={installmentView}
+        onInstallmentViewChange={setInstallmentView}
         accent
       />,
     );
@@ -164,6 +216,8 @@ export function SplitSection({
         subtitle={`${split.breakdown.mine.count}x`}
         categories={mineCategories}
         installments={mineInstallments}
+        installmentView={installmentView}
+        onInstallmentViewChange={setInstallmentView}
       />,
     );
   }
@@ -257,6 +311,8 @@ function SplitColumn({
   subtitle,
   categories,
   installments,
+  installmentView,
+  onInstallmentViewChange,
   accent,
 }: {
   variant: Variant;
@@ -266,6 +322,8 @@ function SplitColumn({
   subtitle: string;
   categories: CategoryItem[];
   installments: InstallmentItem[];
+  installmentView: InstallmentView;
+  onInstallmentViewChange: (view: InstallmentView) => void;
   accent?: boolean;
 }) {
   const v = VARIANTS[variant];
@@ -293,7 +351,12 @@ function SplitColumn({
         <div
           className={`${v.columnChildGap} border-t border-[color:var(--color-paper-rule)] pt-3`}
         >
-          <InstallmentList installments={installments} accent={accent} />
+          <InstallmentList
+            installments={installments}
+            view={installmentView}
+            onViewChange={onInstallmentViewChange}
+            accent={accent}
+          />
         </div>
       )}
     </div>
@@ -360,15 +423,26 @@ function CategoryList({
 
 function InstallmentList({
   installments,
+  view,
+  onViewChange,
   accent,
 }: {
   installments: InstallmentItem[];
+  view: InstallmentView;
+  onViewChange: (view: InstallmentView) => void;
   accent?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const visible = expanded ? installments : installments.slice(0, INST_LIMIT);
-  const hiddenCount = installments.length - INST_LIMIT;
   const total = installments.reduce((acc, i) => acc + i.amount, 0);
+  const amountColor = accent ? 'var(--color-accent)' : 'var(--color-ink-muted)';
+
+  const grouped = view === 'category' ? groupInstallmentsByCategory(installments) : [];
+  const rowCount = view === 'category' ? grouped.length : installments.length;
+  const hiddenCount = rowCount - INST_LIMIT;
+  const visibleCount = expanded ? rowCount : INST_LIMIT;
+  // Bars are relative to the biggest category, not to the column total —
+  // with few categories a share-of-total bar reads as almost-empty.
+  const widest = grouped.reduce((max, c) => Math.max(max, c.total), 0) || 1;
 
   return (
     <div>
@@ -376,34 +450,61 @@ function InstallmentList({
         <span className="font-body text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-ink-faint)]">
           parcelas · {installments.length}
         </span>
-        <span
-          className="font-mono text-[12px] tabular-nums"
-          style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
-        >
+        <span className="font-mono text-[12px] tabular-nums" style={{ color: amountColor }}>
           {formatBRL(total)}
         </span>
       </div>
-      <ul className="space-y-2">
-        {visible.map((inst) => (
-          <li
-            key={inst.id}
-            className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]"
-          >
-            <span className="truncate text-[color:var(--color-ink-soft)]">
-              {stripInstallmentSuffix(inst.description)}
-            </span>
-            <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
-              {inst.installmentNumber}/{inst.totalInstallments}
-            </span>
-            <span
-              className="font-mono tabular-nums"
-              style={{ color: accent ? 'var(--color-accent)' : 'var(--color-ink-muted)' }}
+
+      <ViewSwitch view={view} onChange={onViewChange} />
+
+      {view === 'category' ? (
+        <ul className="space-y-2.5">
+          {grouped.slice(0, visibleCount).map((cat) => (
+            <li key={cat.key}>
+              <div className="flex items-baseline justify-between gap-4 font-body text-[12px]">
+                <span className="truncate text-[color:var(--color-ink-soft)]">{cat.name}</span>
+                <span className="flex shrink-0 items-baseline gap-1.5">
+                  <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
+                    {cat.count}x
+                  </span>
+                  <span className="font-mono tabular-nums" style={{ color: amountColor }}>
+                    {formatBRL(cat.total)}
+                  </span>
+                </span>
+              </div>
+              <div className="mt-1 h-[2px] w-full bg-[color:var(--color-paper-rule)]">
+                <div
+                  className="h-full"
+                  style={{
+                    background: cat.color,
+                    width: `${Math.round((Math.max(0, cat.total) / widest) * 100)}%`,
+                  }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <ul className="space-y-2">
+          {installments.slice(0, visibleCount).map((inst) => (
+            <li
+              key={inst.id}
+              className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 font-body text-[12px]"
             >
-              {formatBRL(inst.amount)}
-            </span>
-          </li>
-        ))}
-      </ul>
+              <span className="truncate text-[color:var(--color-ink-soft)]">
+                {stripInstallmentSuffix(inst.description)}
+              </span>
+              <span className="font-mono text-[10px] tabular-nums text-[color:var(--color-ink-faint)]">
+                {inst.installmentNumber}/{inst.totalInstallments}
+              </span>
+              <span className="font-mono tabular-nums" style={{ color: amountColor }}>
+                {formatBRL(inst.amount)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
       {hiddenCount > 0 && (
         <ExpandToggle
           expanded={expanded}
@@ -411,6 +512,37 @@ function InstallmentList({
           onToggle={() => setExpanded((e) => !e)}
         />
       )}
+    </div>
+  );
+}
+
+/** "lista · categorias" — flips every column's parcelas view at once. */
+function ViewSwitch({
+  view,
+  onChange,
+}: {
+  view: InstallmentView;
+  onChange: (view: InstallmentView) => void;
+}) {
+  const option = (value: InstallmentView, label: string) => {
+    const active = view === value;
+    return (
+      <button
+        type="button"
+        onClick={() => onChange(value)}
+        aria-pressed={active}
+        className="font-body text-[10px] uppercase tracking-[0.1em] transition-colors hover:text-[color:var(--color-accent)]"
+        style={{ color: active ? 'var(--color-ink)' : 'var(--color-ink-faint)' }}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div className="mb-2.5 flex items-center gap-2">
+      {option('list', 'lista')}
+      <span className="text-[10px] text-[color:var(--color-ink-faint)]">·</span>
+      {option('category', 'categorias')}
     </div>
   );
 }

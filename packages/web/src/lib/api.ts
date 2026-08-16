@@ -277,6 +277,10 @@ export interface SplitInstallmentBreakdown {
   splitType: 'half' | 'theirs' | 'mine';
   installmentNumber: number;
   totalInstallments: number;
+  /** Category of the underlying transaction — drives the "por categoria" view. */
+  categoryId: number | null;
+  categoryName: string | null;
+  categoryColor: string | null;
 }
 
 export interface SplitSummary {
