@@ -23,7 +23,6 @@
     "helmet": "^8.0.0",
     "morgan": "^1.10.0",
     "pluggy-sdk": "^0.85.1",
-    "unpdf": "^1.6.2",
     "zod": "^3.23.8"
   },
   "devDependencies": {

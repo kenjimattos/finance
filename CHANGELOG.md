@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Não lançado]
+
+### Adicionado
+
+- **Conciliação de fatura: PDFs protegidos por senha.** Faturas de emissor que vêm criptografadas (a senha costuma ser o CPF ou a data de nascimento do titular) simplesmente falhavam ao ser abertas. Agora, quando o PDF.js informa que o arquivo é protegido, o modal revela um campo "senha do pdf" e refaz a leitura com ela — errando a senha, a mensagem distingue "senha incorreta" de "este PDF é protegido", porque o PDF.js devolve os dois casos separadamente.
+
+### Alterado
+
+- **A leitura do PDF da conciliação saiu do servidor e foi para o navegador.** Como a senha de uma fatura é um dado sensível do titular, ela não deveria trafegar: o `unpdf` agora roda no `packages/web` (`lib/pdfText.ts`), e o `POST /transactions/import-fatura/reconcile` passa a receber `pdfText` no lugar do PDF em base64. O arquivo — e a senha — nunca saem da máquina; o servidor e o gateway de IA continuam vendo exatamente o mesmo texto puro de antes, então o custo por conciliação não muda. O bundle do PDF.js (~516KB gzip) é carregado sob demanda, só quando alguém abre a conciliação. Como efeito colateral, PDFs escaneados e arquivos corrompidos são detectados antes de qualquer upload, em vez de depois de uma ida ao servidor.
+
 ## [1.9.2] - 2026-08-15
 
 ### Adicionado

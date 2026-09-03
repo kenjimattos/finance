@@ -1,6 +1,5 @@
 import { Router, json } from 'express';
 import { z } from 'zod';
-import { extractText } from 'unpdf';
 import {
   extractFaturaFromImages,
   extractFaturaFromPdfText,
@@ -14,9 +13,10 @@ import type { Db } from '../db/index.js';
 
 export const faturaImportRouter = Router();
 
-// Screenshots/PDFs are base64 in the JSON body, so this router needs a larger
-// limit than the global express.json(). Scoped here (prefix match, so it also
-// covers /reconcile) so other routes keep the default.
+// Screenshots are base64 in the JSON body and statement text runs to hundreds
+// of KB, so this router needs a larger limit than the global express.json().
+// Scoped here (prefix match, so it also covers /reconcile) so other routes keep
+// the default.
 faturaImportRouter.use('/transactions/import-fatura', json({ limit: '25mb' }));
 
 const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
@@ -183,8 +183,13 @@ faturaImportRouter.post('/transactions/import-fatura/commit', (req, res, next) =
 const reconcileSchema = z.object({
   accountId: z.string().min(1),
   billOffset: z.number().int(),
-  /** base64-encoded PDF bytes (no data: prefix). */
-  pdf: z.string().min(1),
+  /**
+   * Plain text of the statement PDF. Extraction happens in the browser
+   * (packages/web/src/lib/pdfText.ts) so that password-protected statements
+   * can be unlocked without the password — often the holder's CPF or birth
+   * date — ever leaving the user's machine.
+   */
+  pdfText: z.string().min(1),
 });
 
 /**
@@ -257,12 +262,10 @@ faturaImportRouter.post('/transactions/import-fatura/reconcile', async (req, res
     const prev = computeBillWindowAtOffset(settings, body.billOffset - 1);
     const nxt = computeBillWindowAtOffset(settings, body.billOffset + 1);
 
-    // Text-based statement PDFs (PicPay, Nubank…) extract locally; the LLM only
-    // sees text, which is cheap and gateway-agnostic. Scanned PDFs have no text
-    // layer — tell the user to use the screenshot import instead.
-    const { text } = await extractText(new Uint8Array(Buffer.from(body.pdf, 'base64')), {
-      mergePages: true,
-    });
+    // The client sends already-extracted text, never the PDF: cheap, and
+    // gateway-agnostic (no PDF support needed upstream). The browser rejects
+    // text-less PDFs before getting here; this guard covers any other caller.
+    const text = body.pdfText;
     if (text.trim().length < 100) {
       res.status(422).json({ error: 'O PDF não tem texto extraível (escaneado?). Use a importação por screenshots.' });
       return;

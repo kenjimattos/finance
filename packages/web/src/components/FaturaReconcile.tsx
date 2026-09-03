@@ -8,28 +8,20 @@ import {
   type ReconcileReport,
   type ReconcileMissingRow,
 } from '../lib/api';
+import { extractPdfText, PdfError } from '../lib/pdfText';
 import { useToast } from './Toast';
 
 /**
- * Upload the issuer's closed-bill PDF → the API extracts its lines and diffs
- * them against the bill being viewed → the user applies the fixes:
+ * Pick the issuer's closed-bill PDF → its text is extracted here in the browser
+ * (lib/pdfText.ts), so only text is uploaded and a protected statement's
+ * password never leaves the machine → the API diffs those lines against the
+ * bill being viewed → the user applies the fixes:
  *   - insert statement lines missing from the app (as manual transactions)
  *   - fix cent drift on manual installment rows
  * "Só no app" rows are informational (duplicates / cycle differences).
  */
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
-
-async function fileToBase64(file: File): Promise<string> {
-  const buf = await file.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let bin = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(bin);
-}
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -54,6 +46,9 @@ export function FaturaReconcile({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
+  // Set once the PDF turns out to be encrypted; reveals the password field.
+  const [needsPassword, setNeedsPassword] = useState(false);
+  const [password, setPassword] = useState('');
   const [report, setReport] = useState<ReconcileReport | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
@@ -75,17 +70,33 @@ export function FaturaReconcile({
     mutationFn: async () => {
       if (!file) throw new Error('no file');
       if (file.size > MAX_PDF_BYTES) throw new Error('PDF_TOO_LARGE');
-      const pdf = await fileToBase64(file);
-      return api.reconcileFatura({ accountId, billOffset, pdf });
+      const pdfText = await extractPdfText(file, password || undefined);
+      return api.reconcileFatura({ accountId, billOffset, pdfText });
     },
     onSuccess: (res) => {
       setReport(res);
       setSelected(new Set(res.missingInApp.map((_, i) => i)));
     },
     onError: (err) => {
+      // Encrypted statement: keep the file, reveal the password field and let
+      // the user retry. Nothing has been uploaded at this point.
+      if (err instanceof PdfError && (err.kind === 'NEEDS_PASSWORD' || err.kind === 'WRONG_PASSWORD')) {
+        setNeedsPassword(true);
+        toast.show({
+          message:
+            err.kind === 'WRONG_PASSWORD'
+              ? 'Senha incorreta.'
+              : 'Este PDF é protegido. Digite a senha para abrir.',
+        });
+        return;
+      }
       let msg = 'Falha ao ler o PDF. Tente novamente.';
       if (err instanceof Error && err.message === 'PDF_TOO_LARGE') {
         msg = 'PDF acima de 20MB.';
+      } else if (err instanceof PdfError && err.kind === 'NO_TEXT') {
+        msg = 'PDF sem texto extraível (escaneado?). Use a importação por screenshots.';
+      } else if (err instanceof PdfError) {
+        msg = 'Não foi possível abrir o PDF. O arquivo está corrompido?';
       } else if (err instanceof ApiError && err.status === 503) {
         msg = 'Conciliação não configurada no servidor.';
       } else if (err instanceof ApiError && err.status === 422) {
@@ -198,7 +209,11 @@ export function FaturaReconcile({
               type="file"
               accept="application/pdf"
               className="hidden"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                setFile(e.target.files?.[0] ?? null);
+                setNeedsPassword(false);
+                setPassword('');
+              }}
             />
             <button
               type="button"
@@ -208,10 +223,41 @@ export function FaturaReconcile({
               {file ? `${file.name} — trocar` : 'Escolher PDF da fatura'}
             </button>
 
+            {/* Shown only once PDF.js reports the file is encrypted. The
+                password decrypts it here in the browser; it is never sent to
+                the server nor persisted. */}
+            {needsPassword && (
+              <div className="mt-5 space-y-2">
+                <label
+                  htmlFor="pdf-password"
+                  className="block font-mono text-xs uppercase tracking-widest text-[color:var(--color-ink-muted)]"
+                >
+                  senha do pdf
+                </label>
+                <input
+                  id="pdf-password"
+                  type="password"
+                  autoFocus
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && password && !reconcileM.isPending) reconcileM.mutate();
+                  }}
+                  disabled={reconcileM.isPending}
+                  className="w-full max-w-[24ch] border-b border-[color:var(--color-rule)] bg-transparent pb-2 font-mono text-lg text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
+                  autoComplete="off"
+                />
+                <p className="font-body text-xs text-[color:var(--color-ink-muted)]">
+                  O PDF é aberto aqui no navegador — a senha não é enviada ao
+                  servidor.
+                </p>
+              </div>
+            )}
+
             <div className="mt-6 flex justify-end">
               <button
                 type="button"
-                disabled={!file || reconcileM.isPending}
+                disabled={!file || reconcileM.isPending || (needsPassword && !password)}
                 onClick={() => reconcileM.mutate()}
                 className="bg-[color:var(--color-accent)] px-5 py-2 font-mono text-sm text-[color:var(--color-paper)] disabled:opacity-40"
               >
