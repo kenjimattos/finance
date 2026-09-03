@@ -271,14 +271,24 @@ faturaImportRouter.post('/transactions/import-fatura/reconcile', async (req, res
       return;
     }
 
+    // Timing split. The perceived slowness is almost entirely the model call
+    // (see the [extract] lines for its per-round breakdown); this says how much
+    // of the wait is anything else, so the two never get confused.
+    const startedAt = Date.now();
     const { rows: statementLines, totals } = await extractFaturaFromPdfText(text, {
       periodStart: win.periodStart,
       periodEnd: win.periodEnd,
       referenceDate: todayYmd(),
     });
+    const extractedAt = Date.now();
 
     const appLines = loadWindowLines(db, body.accountId, win, prev, nxt);
     const result = reconcileFatura(statementLines, appLines);
+    console.log(
+      `[reconcile] extraction ${((extractedAt - startedAt) / 1000).toFixed(1)}s, ` +
+        `matching ${Date.now() - extractedAt}ms — ` +
+        `${statementLines.length} statement line(s) vs ${appLines.length} app row(s)`,
+    );
 
     // Insert candidates: bill queries only honor shift ±1, so a statement line
     // whose natural cycle is further away (parceladas keep the original

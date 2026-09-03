@@ -274,14 +274,24 @@ function makeClient(): Anthropic {
   });
 }
 
+/**
+ * Wall time of one model call, in seconds with one decimal. The import feels
+ * slow and the reason is invisible from outside: a reconcile is 1-3 of these
+ * back to back, and the SDK's own 429 backoff (maxRetries above) hides inside
+ * a single call. Logging each one is what makes the wait explainable.
+ */
+const secs = (startedAt: number) => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
+
 async function callRecordTool(
   messages: Anthropic.MessageParam[],
+  label = 'read',
 ): Promise<{
   toolUse: Anthropic.ToolUseBlock;
   rows: ExtractedRow[];
   totals: StatementTotals;
 }> {
   const client = makeClient();
+  const startedAt = Date.now();
   const message = await client.messages.create({
     model: config.ANTHROPIC_MODEL,
     max_tokens: 8000,
@@ -289,6 +299,13 @@ async function callRecordTool(
     tool_choice: { type: 'tool', name: 'record_transactions' },
     messages,
   });
+  const u = message.usage;
+  console.log(
+    `[extract] ${label} took ${secs(startedAt)} — model=${config.ANTHROPIC_MODEL} ` +
+      `in=${u.input_tokens} out=${u.output_tokens} ` +
+      `cache_read=${u.cache_read_input_tokens ?? 0} cache_write=${u.cache_creation_input_tokens ?? 0} ` +
+      `stop=${message.stop_reason}`,
+  );
 
   const toolUse = message.content.find(
     (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
@@ -395,6 +412,12 @@ export async function extractFaturaFromPdfText(
     },
   ];
 
+  const startedAt = Date.now();
+  console.log(
+    `[extract] pdf reconcile start — ${pdfText.length} chars of statement text, ` +
+      `window ${ctx.periodStart}..${ctx.periodEnd}`,
+  );
+
   let best = await callRecordTool(messages);
 
   // Repair loop. Forced tool use gives the model no scratchpad to check its own
@@ -430,12 +453,23 @@ export async function extractFaturaFromPdfText(
       },
     );
 
-    const retry = await callRecordTool(messages);
+    console.log(
+      `[extract] repair round ${round + 1}/${REPAIR_ROUNDS} — rows sum to ` +
+        `R$ ${brl(sumRows(best.rows))} vs printed R$ ${brl(target)} (gap R$ ${brl(gap)})`,
+    );
+
+    const retry = await callRecordTool(messages, `repair ${round + 1}`);
     const retryGap = Math.abs(target - sumRows(retry.rows));
     // Keep the retry only if it actually got closer — a worse re-read is noise.
-    if (retryGap >= Math.abs(gap)) break;
+    if (retryGap >= Math.abs(gap)) {
+      console.log(`[extract] repair ${round + 1} discarded — gap did not improve`);
+      break;
+    }
     best = retry;
   }
 
+  console.log(
+    `[extract] pdf reconcile done in ${secs(startedAt)} — ${best.rows.length} row(s) extracted`,
+  );
   return { rows: best.rows, totals: best.totals };
 }

@@ -71,7 +71,12 @@ export function FaturaReconcile({
       if (!file) throw new Error('no file');
       if (file.size > MAX_PDF_BYTES) throw new Error('PDF_TOO_LARGE');
       const pdfText = await extractPdfText(file, password || undefined);
-      return api.reconcileFatura({ accountId, billOffset, pdfText });
+      // The round trip the user is actually waiting on; [pdf] above logs the
+      // local half, so the two together account for the whole wait.
+      const startedAt = performance.now();
+      const report = await api.reconcileFatura({ accountId, billOffset, pdfText });
+      console.log(`[reconcile] server round trip ${Math.round(performance.now() - startedAt)}ms`);
+      return report;
     },
     onSuccess: (res) => {
       setReport(res);

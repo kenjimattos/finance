@@ -52,7 +52,12 @@ function passwordErrorKind(err: unknown): PdfErrorKind | null {
  * handed, so the retry after a password prompt needs fresh bytes.
  */
 export async function extractPdfText(file: File, password?: string): Promise<string> {
+  // Timed because the reconcile feels slow and the blame needs to be
+  // attributable: this step is normally 1-3s against a model call an order of
+  // magnitude longer. See the API's [extract] logs for the other half.
+  const startedAt = performance.now();
   const { getDocumentProxy, extractText } = await import('unpdf');
+  const loadedAt = performance.now();
   const bytes = new Uint8Array(await file.arrayBuffer());
 
   let doc;
@@ -65,6 +70,11 @@ export async function extractPdfText(file: File, password?: string): Promise<str
   try {
     const { text } = await extractText(doc, { mergePages: true });
     if (text.trim().length < MIN_TEXT_LENGTH) throw new PdfError('NO_TEXT');
+    const ms = (from: number) => Math.round(performance.now() - from);
+    console.log(
+      `[pdf] extracted ${text.length} chars in ${ms(startedAt)}ms ` +
+        `(pdf.js load ${Math.round(loadedAt - startedAt)}ms)`,
+    );
     return text;
   } finally {
     // `getDocumentProxy` hands back the document, not the loading task, so
