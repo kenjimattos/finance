@@ -9,6 +9,7 @@ import {
   type ReconcileMissingRow,
 } from '../lib/api';
 import { extractPdfText, PdfError } from '../lib/pdfText';
+import { LongWait, type WaitStep } from './LongWait';
 import { useToast } from './Toast';
 
 /**
@@ -22,6 +23,20 @@ import { useToast } from './Toast';
  */
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
+
+// The two halves of the wait, in the order they run. Timings come from the
+// [pdf] / [extract] logs: the parse is milliseconds, the model call is the
+// whole minute, so only the second step gets an expectation.
+const WAIT_STEPS: WaitStep[] = [
+  { key: 'pdf', label: 'abrindo o PDF' },
+  {
+    key: 'llm',
+    label: 'lendo os lançamentos',
+    hint: 'A fatura é lida por IA — costuma levar cerca de 1 minuto.',
+    slowHint:
+      'Ainda lendo. Leituras longas acontecem quando a fatura tem muitos lançamentos ou o provedor de IA está congestionado.',
+  },
+];
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -46,6 +61,8 @@ export function FaturaReconcile({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
+  // Which WAIT_STEPS entry is running, or null when idle.
+  const [waitStep, setWaitStep] = useState<string | null>(null);
   // Set once the PDF turns out to be encrypted; reveals the password field.
   const [needsPassword, setNeedsPassword] = useState(false);
   const [password, setPassword] = useState('');
@@ -70,14 +87,17 @@ export function FaturaReconcile({
     mutationFn: async () => {
       if (!file) throw new Error('no file');
       if (file.size > MAX_PDF_BYTES) throw new Error('PDF_TOO_LARGE');
+      setWaitStep('pdf');
       const pdfText = await extractPdfText(file, password || undefined);
       // The round trip the user is actually waiting on; [pdf] above logs the
       // local half, so the two together account for the whole wait.
+      setWaitStep('llm');
       const startedAt = performance.now();
       const report = await api.reconcileFatura({ accountId, billOffset, pdfText });
       console.log(`[reconcile] server round trip ${Math.round(performance.now() - startedAt)}ms`);
       return report;
     },
+    onSettled: () => setWaitStep(null),
     onSuccess: (res) => {
       setReport(res);
       setSelected(new Set(res.missingInApp.map((_, i) => i)));
@@ -269,6 +289,8 @@ export function FaturaReconcile({
                 {reconcileM.isPending ? 'Comparando…' : 'Comparar'}
               </button>
             </div>
+
+            <LongWait steps={WAIT_STEPS} activeKey={waitStep} />
           </div>
         )}
 
