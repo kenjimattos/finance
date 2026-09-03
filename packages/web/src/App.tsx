@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './lib/api';
 import { GuidedTour, overviewTourSteps } from './components/GuidedTour';
 import { Login } from './screens/Login';
+import { Skeleton } from './components/Skeleton';
+import { ErrorBanner } from './components/ErrorBanner';
 import { Onboarding } from './screens/Onboarding';
 import { Overview } from './screens/Overview';
 import { Dashboard } from './screens/Dashboard';
@@ -138,24 +140,5 @@ export function App() {
           ))}
       </main>
     </>
-  );
-}
-
-function Skeleton() {
-  return (
-    <div className="space-y-6 opacity-50">
-      <div className="eyebrow">carregando</div>
-      <div className="h-16 w-2/3 rounded-sm bg-[color:var(--color-paper-tint)]" />
-      <div className="h-4 w-1/3 rounded-sm bg-[color:var(--color-paper-tint)]" />
-    </div>
-  );
-}
-
-function ErrorBanner({ message }: { message: string }) {
-  return (
-    <div className="rule-top rule-bottom py-6">
-      <div className="eyebrow mb-2 text-[color:var(--color-accent)]">erro</div>
-      <p className="font-display text-xl text-[color:var(--color-ink)]">{message}</p>
-    </div>
   );
 }
