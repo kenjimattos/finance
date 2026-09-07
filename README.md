@@ -30,7 +30,7 @@ npm-workspaces monorepo, TypeScript end to end:
 
 | Package | What | Built with |
 | --- | --- | --- |
-| [`packages/api`](packages/api/) | REST API, Pluggy sync, SQLite cache | Express, `pluggy-sdk`, `better-sqlite3`, Zod, `@anthropic-ai/sdk` |
+| [`packages/api`](docs/api.md) | REST API, Pluggy sync, SQLite cache | Express, `pluggy-sdk`, `better-sqlite3`, Zod, `@anthropic-ai/sdk` |
 | [`packages/web`](packages/web/) | SPA (Login → CashFlow → Overview → Dashboard) | React, Vite, Tailwind v4, TanStack Query, Motion |
 
 ## Engineering notes
