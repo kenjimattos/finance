@@ -17,6 +17,7 @@ import { RulesManager } from '../components/RulesManager';
 import { SplitSection } from '../components/SplitSection';
 import { FaturaImport } from '../components/FaturaImport';
 import { FaturaReconcile } from '../components/FaturaReconcile';
+import { keys } from '../lib/queryKeys';
 
 /**
  * The main screen, once a card is linked.
@@ -52,7 +53,7 @@ export function Dashboard({
 
   // Fetch accounts. The first sync populates these.
   const accountsQ = useQuery({
-    queryKey: ['accounts', itemId],
+    queryKey: keys.accounts.ofItem(itemId),
     queryFn: () => api.listAccounts(itemId),
   });
 
@@ -158,11 +159,11 @@ function AccountDashboard({
 
   const [importOpen, setImportOpen] = useState(false);
   const [reconcileOpen, setReconcileOpen] = useState(false);
-  const meQ = useQuery({ queryKey: ['authMe'], queryFn: () => api.getAuthMe(), staleTime: Infinity });
+  const meQ = useQuery({ queryKey: keys.auth(), queryFn: () => api.getAuthMe(), staleTime: Infinity });
   const importEnabled = meQ.data?.features?.importFaturaEnabled ?? false;
 
   const settingsQ = useQuery({
-    queryKey: ['accountSettings', accountId],
+    queryKey: keys.accountSettings.of(accountId),
     queryFn: () => api.getAccountSettings(accountId),
     retry: false,
   });
@@ -173,13 +174,13 @@ function AccountDashboard({
     settingsQ.error.status === 404;
 
   const breakdownQ = useQuery({
-    queryKey: ['billBreakdown', itemId, accountId, billOffset],
+    queryKey: keys.billBreakdown.at(itemId, accountId, billOffset),
     queryFn: () => api.getBillBreakdown(itemId, accountId, billOffset),
     enabled: !!settingsQ.data,
   });
 
   const splitSummaryQ = useQuery({
-    queryKey: ['splitSummary', accountId, billOffset],
+    queryKey: keys.splitSummary.at(accountId, billOffset),
     queryFn: () => api.getSplitSummary(accountId, billOffset),
     enabled: !!settingsQ.data,
   });
@@ -314,11 +315,11 @@ function AccountDashboard({
 function SyncPrompt({ itemId }: { itemId: string }) {
   const qc = useQueryClient();
   const syncQ = useQuery({
-    queryKey: ['_sync_prompt', itemId],
+    queryKey: keys.syncPrompt(itemId),
     queryFn: async () => {
       await api.syncTransactions(itemId);
       // After sync, accounts are populated — invalidate so Dashboard re-renders.
-      qc.invalidateQueries({ queryKey: ['accounts', itemId] });
+      qc.invalidateQueries({ queryKey: keys.accounts.ofItem(itemId) });
       return true;
     },
   });

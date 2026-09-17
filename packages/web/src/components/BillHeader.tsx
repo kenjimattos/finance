@@ -8,6 +8,7 @@ import {
   formatMonthYear,
 } from '../lib/format';
 import { useIsDemo } from '../lib/useIsDemo';
+import { keys } from '../lib/queryKeys';
 
 /**
  * Editorial bill headline: offset navigation, giant total, delta vs previous
@@ -33,9 +34,9 @@ export function BillHeader({
   const sync = useMutation({
     mutationFn: () => api.syncTransactions(itemId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
-      queryClient.invalidateQueries({ queryKey: ['accounts', itemId] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.all });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.all });
+      queryClient.invalidateQueries({ queryKey: keys.accounts.ofItem(itemId) });
     },
   });
 

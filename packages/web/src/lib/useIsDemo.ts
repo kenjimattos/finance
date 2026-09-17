@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from './api';
+import { keys } from './queryKeys';
 
 /**
  * Whether the logged-in user is a sandboxed demo account. Demo accounts can
@@ -9,6 +10,6 @@ import { api } from './api';
  * query cache, so it never fires an extra request.
  */
 export function useIsDemo(): boolean {
-  const q = useQuery({ queryKey: ['auth'], queryFn: api.getAuthMe, retry: false });
+  const q = useQuery({ queryKey: keys.auth(), queryFn: api.getAuthMe, retry: false });
   return q.data?.demo ?? false;
 }

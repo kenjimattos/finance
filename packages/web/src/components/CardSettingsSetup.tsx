@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
+import { keys } from '../lib/queryKeys';
 
 /**
  * First-time setup for a card: ask the user for the closing day and due day.
@@ -27,8 +28,8 @@ export function CardSettingsSetup({
         displayName: displayName.trim() || undefined,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['accountSettings', accountId] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      queryClient.invalidateQueries({ queryKey: keys.accountSettings.of(accountId) });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
     },
   });
 

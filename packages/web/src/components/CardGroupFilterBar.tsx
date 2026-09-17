@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, type CardGroup, type CardGroupFilter } from '../lib/api';
+import { keys } from '../lib/queryKeys';
 
 /**
  * Horizontal row of chips that filter the transaction list by card group.
@@ -21,7 +22,7 @@ export function CardGroupFilterBar({
   onManageCards: () => void;
 }) {
   const groupsQ = useQuery({
-    queryKey: ['cardGroups', itemId, accountId],
+    queryKey: keys.cardGroups.of(itemId, accountId),
     queryFn: () => api.listCardGroups(itemId, accountId),
   });
 

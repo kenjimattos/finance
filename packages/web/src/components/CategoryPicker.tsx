@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
 import { api, type Category } from '../lib/api';
+import { keys } from '../lib/queryKeys';
 
 /**
  * Keyboard-driven category picker.
@@ -115,7 +116,7 @@ function CategoryPickerPortal({
   const createMut = useMutation({
     mutationFn: (name: string) => api.createCategory(name),
     onSuccess: (cat) => {
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      queryClient.invalidateQueries({ queryKey: keys.categories() });
       onPick(cat.id);
     },
   });

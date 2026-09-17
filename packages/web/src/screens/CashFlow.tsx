@@ -20,6 +20,7 @@ import type { CashFlowEntry, CashFlowDay, CashFlowResponse } from '../lib/api';
 import { formatBRL, formatDateShort } from '../lib/format';
 import { RowActionsMenu } from '../components/RowActionsMenu';
 import { useIsDemo } from '../lib/useIsDemo';
+import { keys } from '../lib/queryKeys';
 
 const isDraggable = (e: CashFlowEntry) =>
   !e.hidden && (e.type === 'bank_transaction' || e.type === 'manual_entry');
@@ -154,7 +155,7 @@ export function CashFlow({
 
   // Fetch the actual date range of BANK transactions from the backend.
   const rangeQ = useQuery({
-    queryKey: ['cashflow-range'],
+    queryKey: keys.cashflow.range,
     queryFn: api.getCashFlowRange,
   });
 
@@ -210,7 +211,7 @@ export function CashFlow({
   // Only fetch months that are visible — avoids 12 parallel requests on load.
   const queries = useQueries({
     queries: allVisibleMonths.map((m) => ({
-      queryKey: ['cashflow', monthStr(m.year, m.month)],
+      queryKey: keys.cashflow.month(monthStr(m.year, m.month)),
       queryFn: () => api.getCashFlow(monthStr(m.year, m.month)),
     })),
   });
@@ -281,7 +282,7 @@ export function CashFlow({
 
   // ── Mutations ──
 
-  const invalidateAll = () => qc.invalidateQueries({ queryKey: ['cashflow'] });
+  const invalidateAll = () => qc.invalidateQueries({ queryKey: keys.cashflow.all });
 
   const createMut = useMutation({
     mutationFn: api.createManualEntry,
@@ -379,7 +380,7 @@ export function CashFlow({
       }
 
       Promise.allSettled(calls).then(() => {
-        qc.invalidateQueries({ queryKey: ['cashflow'] });
+        qc.invalidateQueries({ queryKey: keys.cashflow.all });
       });
     },
     [qc],
@@ -392,8 +393,8 @@ export function CashFlow({
     setSyncing(true);
     try {
       await api.syncCashFlow();
-      qc.invalidateQueries({ queryKey: ['cashflow'] });
-      qc.invalidateQueries({ queryKey: ['cashflow-range'] });
+      qc.invalidateQueries({ queryKey: keys.cashflow.all });
+      qc.invalidateQueries({ queryKey: keys.cashflow.range });
     } catch (err) {
       console.error('[CashFlow sync] failed:', err);
     } finally {

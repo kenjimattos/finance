@@ -3,6 +3,7 @@ import { PluggyConnect } from 'react-pluggy-connect';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { api } from '../lib/api';
+import { keys } from '../lib/queryKeys';
 
 /**
  * First-run screen. The user has no linked card yet.
@@ -26,7 +27,7 @@ export function Onboarding() {
     mutationFn: (itemId: string) => api.saveItem(itemId),
     onSuccess: () => {
       setToken(null);
-      queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: keys.items() });
     },
   });
 

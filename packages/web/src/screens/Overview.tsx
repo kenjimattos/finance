@@ -17,6 +17,7 @@ import { findOffsetForDueMonth, currentDueMonth } from '../lib/billWindow';
 import { SplitSection } from '../components/SplitSection';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useIsDemo } from '../lib/useIsDemo';
+import { keys } from '../lib/queryKeys';
 
 // ─── Month label ────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ export function Overview({
 
   const accountQueries = useQueries({
     queries: items.map((item) => ({
-      queryKey: ['accounts', item.id],
+      queryKey: keys.accounts.ofItem(item.id),
       queryFn: () => api.listAccounts(item.id),
     })),
   });
@@ -98,7 +99,7 @@ export function Overview({
 
   const settingsQueries = useQueries({
     queries: allAccounts.map(({ account }) => ({
-      queryKey: ['accountSettings', account.id],
+      queryKey: keys.accountSettings.of(account.id),
       queryFn: () => api.getAccountSettings(account.id),
       retry: false,
     })),
@@ -152,18 +153,18 @@ export function Overview({
   const nextMs = `${nextM.year}-${nextM.month < 10 ? '0' : ''}${nextM.month}`;
 
   const cashflowQ = useQuery({
-    queryKey: ['cashflow', ms],
+    queryKey: keys.cashflow.month(ms),
     queryFn: () => api.getCashFlow(ms),
   });
   const prevCashflowQ = useQuery({
-    queryKey: ['cashflow', prevMs],
+    queryKey: keys.cashflow.month(prevMs),
     queryFn: () => api.getCashFlow(prevMs),
   });
   // Probe the NEXT month so the "→" arrow can enable only when there's
   // something to navigate to (bank transactions, manual entries, or
   // credit card bill projections).
   const nextCashflowQ = useQuery({
-    queryKey: ['cashflow', nextMs],
+    queryKey: keys.cashflow.month(nextMs),
     queryFn: () => api.getCashFlow(nextMs),
   });
 
@@ -187,7 +188,7 @@ export function Overview({
     queries: carryMonths.map((m) => {
       const key = `${m.year}-${m.month < 10 ? '0' : ''}${m.month}`;
       return {
-        queryKey: ['cashflow', key],
+        queryKey: keys.cashflow.month(key),
         queryFn: () => api.getCashFlow(key),
       };
     }),
@@ -310,7 +311,7 @@ export function Overview({
     queries: configured.map(({ item, account }, i) => {
       const offset = accountOffsets[i];
       return {
-        queryKey: ['billBreakdown', item.id, account.id, offset],
+        queryKey: keys.billBreakdown.at(item.id, account.id, offset),
         queryFn: () => api.getBillBreakdown(item.id, account.id, offset ?? 0),
         enabled: offset !== null,
       };
@@ -320,7 +321,7 @@ export function Overview({
   // ── Partner shared cards (read-only) ──
 
   const partnerCardsQ = useQuery({
-    queryKey: ['partnerCards'],
+    queryKey: keys.partnerCards(),
     queryFn: api.listPartnerCards,
   });
 
@@ -339,7 +340,7 @@ export function Overview({
     queries: partnerCards.map((c, i) => {
       const offset = partnerOffsets[i];
       return {
-        queryKey: ['partnerCardBreakdown', c.ownerUsername, c.accountId, offset],
+        queryKey: keys.partnerCardBreakdown.at(c.ownerUsername, c.accountId, offset),
         queryFn: () => api.getPartnerCardBreakdown(c.ownerUsername, c.accountId, offset ?? 0),
         enabled: offset !== null,
       };
@@ -422,7 +423,7 @@ export function Overview({
     queries: configured.map(({ account }, i) => {
       const offset = accountOffsets[i];
       return {
-        queryKey: ['splitSummary', account.id, offset],
+        queryKey: keys.splitSummary.at(account.id, offset),
         queryFn: () => api.getSplitSummary(account.id, offset ?? 0),
         enabled: offset !== null,
       };
@@ -865,11 +866,11 @@ function SyncAllButton({ items }: { items: Item[] }) {
     setSyncing(true);
     try {
       await Promise.all(items.map((item) => api.syncTransactions(item.id)));
-      queryClient.invalidateQueries({ queryKey: ['items'] });
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      queryClient.invalidateQueries({ queryKey: ['accountSettings'] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: keys.items() });
+      queryClient.invalidateQueries({ queryKey: keys.accounts.all });
+      queryClient.invalidateQueries({ queryKey: keys.accountSettings.all });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.all });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.all });
     } catch (err) {
       console.error('[SyncAll] failed:', err);
     } finally {
@@ -1263,18 +1264,18 @@ function AddBank() {
       await api.syncTransactions(itemId);
 
       // Refresh everything so the new account appears.
-      queryClient.invalidateQueries({ queryKey: ['items'] });
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      queryClient.invalidateQueries({ queryKey: ['accountSettings'] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
+      queryClient.invalidateQueries({ queryKey: keys.items() });
+      queryClient.invalidateQueries({ queryKey: keys.accounts.all });
+      queryClient.invalidateQueries({ queryKey: keys.accountSettings.all });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.all });
       setStatus('idle');
     } catch (err) {
       console.error('[AddBank] failed:', err);
       setStatus('error');
       setErrorMsg(err instanceof Error ? err.message : 'Erro desconhecido');
       // Still refresh — the item may have been saved even if sync failed.
-      queryClient.invalidateQueries({ queryKey: ['items'] });
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: keys.items() });
+      queryClient.invalidateQueries({ queryKey: keys.accounts.all });
     }
   }
 
@@ -1365,9 +1366,9 @@ function RemoveItemGroup({
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.deleteItem(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['items'] });
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown'] });
+      queryClient.invalidateQueries({ queryKey: keys.items() });
+      queryClient.invalidateQueries({ queryKey: keys.accounts.all });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.all });
     },
   });
   const connectorLabel = deriveBankName(accounts, item.connector_name ?? 'Banco');

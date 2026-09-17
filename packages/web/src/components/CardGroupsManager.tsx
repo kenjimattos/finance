@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { api, type Card, type CardGroup } from '../lib/api';
 import { formatCardLabel, formatDateShort } from '../lib/format';
+import { keys } from '../lib/queryKeys';
 
 /**
  * Full-screen overlay for managing card groups.
@@ -33,11 +34,11 @@ export function CardGroupsManager({
   const queryClient = useQueryClient();
 
   const groupsQ = useQuery({
-    queryKey: ['cardGroups', itemId, accountId],
+    queryKey: keys.cardGroups.of(itemId, accountId),
     queryFn: () => api.listCardGroups(itemId, accountId),
   });
   const cardsQ = useQuery({
-    queryKey: ['cards', itemId, accountId],
+    queryKey: keys.cards.of(itemId, accountId),
     queryFn: () => api.listCards(itemId, accountId),
   });
 
@@ -50,10 +51,10 @@ export function CardGroupsManager({
   }, [onClose]);
 
   function invalidateAll() {
-    queryClient.invalidateQueries({ queryKey: ['cardGroups', itemId] });
-    queryClient.invalidateQueries({ queryKey: ['cards', itemId] });
-    queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-    queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+    queryClient.invalidateQueries({ queryKey: keys.cardGroups.ofItem(itemId) });
+    queryClient.invalidateQueries({ queryKey: keys.cards.ofItem(itemId) });
+    queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+    queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
   }
 
   const groups = groupsQ.data ?? [];

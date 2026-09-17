@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, type ExtractedFaturaRow, type CommitFaturaRow } from '../lib/api';
 import { useToast } from './Toast';
+import { keys } from '../lib/queryKeys';
 
 /**
  * Upload fatura screenshots → Claude extracts the lines → editable review →
@@ -134,9 +135,9 @@ export function FaturaImport({
     mutationFn: async (toInsert: CommitFaturaRow[]) =>
       api.commitFaturaImport({ accountId, rows: toInsert }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['splitSummary', accountId] });
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.splitSummary.ofAccount(accountId) });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
       toast.show({ message: `${res.count} ${res.count === 1 ? 'transação inserida' : 'transações inseridas'}.` });
       onClose();
     },

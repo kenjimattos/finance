@@ -11,6 +11,7 @@ import {
 import { extractPdfText, PdfError } from '../lib/pdfText';
 import { LongWait, type WaitStep } from './LongWait';
 import { useToast } from './Toast';
+import { keys } from '../lib/queryKeys';
 
 /**
  * Pick the issuer's closed-bill PDF → its text is extracted here in the browser
@@ -78,9 +79,9 @@ export function FaturaReconcile({
   }, [onClose]);
 
   function invalidateBill() {
-    queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
-    queryClient.invalidateQueries({ queryKey: ['splitSummary', accountId] });
-    queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
+    queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
+    queryClient.invalidateQueries({ queryKey: keys.splitSummary.ofAccount(accountId) });
+    queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
   }
 
   const reconcileM = useMutation({

@@ -10,6 +10,7 @@ import { Overview } from './screens/Overview';
 import { Dashboard } from './screens/Dashboard';
 import { CashFlow } from './screens/CashFlow';
 import { SharedCardDetail } from './screens/SharedCardDetail';
+import { keys } from './lib/queryKeys';
 
 /**
  * App routes between four screens:
@@ -21,13 +22,13 @@ import { SharedCardDetail } from './screens/SharedCardDetail';
 export function App() {
   const queryClient = useQueryClient();
   const authQ = useQuery({
-    queryKey: ['auth'],
+    queryKey: keys.auth(),
     queryFn: api.getAuthMe,
     retry: false,
   });
 
   const itemsQ = useQuery({
-    queryKey: ['items'],
+    queryKey: keys.items(),
     queryFn: api.listItems,
     enabled: authQ.data?.authenticated === true,
   });
@@ -74,7 +75,7 @@ export function App() {
         <div className="page-rule" aria-hidden="true" />
         <Login
           onAuthenticated={() =>
-            queryClient.invalidateQueries({ queryKey: ['auth'] })
+            queryClient.invalidateQueries({ queryKey: keys.auth() })
           }
         />
       </>

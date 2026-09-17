@@ -7,6 +7,7 @@ import type { CategoryTabFilter } from './CategoryTabs';
 import { TransactionRow } from './TransactionRow';
 import { CategoryTrigger } from './CategoryPicker';
 import { useToast } from './Toast';
+import { keys } from '../lib/queryKeys';
 
 /**
  * The categorization inbox — the main work surface of the app.
@@ -48,14 +49,13 @@ export function TransactionInbox({
   const [showHidden, setShowHidden] = useState(false);
 
   const txsQ = useQuery({
-    queryKey: [
-      'transactions',
+    queryKey: keys.transactions.list({
       itemId,
       accountId,
       periodStart,
       periodEnd,
-      cardGroupQuery ?? 'all',
-    ],
+      cardGroupId: cardGroupQuery,
+    }),
     queryFn: () =>
       api.listTransactions({
         itemId,
@@ -71,7 +71,7 @@ export function TransactionInbox({
   });
 
   const categoriesQ = useQuery({
-    queryKey: ['categories'],
+    queryKey: keys.categories(),
     queryFn: api.listCategories,
   });
 
@@ -79,17 +79,17 @@ export function TransactionInbox({
     mutationFn: ({ txId, categoryId }: { txId: string; categoryId: number }) =>
       api.assignCategory(txId, categoryId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.categories() });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
     },
   });
 
   const clearMut = useMutation({
     mutationFn: (txId: string) => api.clearCategory(txId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
     },
   });
 
@@ -97,8 +97,8 @@ export function TransactionInbox({
     mutationFn: ({ txId, shift }: { txId: string; shift: -1 | 0 | 1 }) =>
       api.shiftTransactionBill(txId, shift),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
     },
   });
 
@@ -141,9 +141,9 @@ export function TransactionInbox({
     mutationFn: ({ txId, hidden }: { txId: string; hidden: boolean }) =>
       api.setTransactionHidden(txId, hidden),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['splitSummary'] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.splitSummary.all });
     },
   });
 
@@ -172,8 +172,8 @@ export function TransactionInbox({
     mutationFn: (body: Parameters<typeof api.createManualTransaction>[0]) =>
       api.createManualTransaction(body),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
       setShowAddForm(false);
     },
   });
@@ -187,8 +187,8 @@ export function TransactionInbox({
       body: Parameters<typeof api.updateManualTransaction>[1];
     }) => api.updateManualTransaction(id, body),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
       setEditingTx(null);
     },
   });
@@ -196,8 +196,8 @@ export function TransactionInbox({
   const deleteManualMut = useMutation({
     mutationFn: (id: string) => api.deleteManualTransaction(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
       toast.show({ message: 'Lançamento manual excluído' });
     },
   });
@@ -211,9 +211,9 @@ export function TransactionInbox({
       categoryId: number;
     }) => api.bulkCategorize(txIds, categoryId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
-      queryClient.invalidateQueries({ queryKey: ['billBreakdown', itemId] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.categories() });
+      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
       setSelected(new Set());
     },
   });
@@ -223,16 +223,16 @@ export function TransactionInbox({
     mutationFn: ({ txId, splitType }: { txId: string; splitType: 'half' | 'theirs' }) =>
       api.splitTransaction(txId, splitType),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['splitSummary'] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.splitSummary.all });
     },
   });
 
   const unsplitMut = useMutation({
     mutationFn: (txId: string) => api.unsplitTransaction(txId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['splitSummary'] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.splitSummary.all });
     },
   });
 
@@ -240,8 +240,8 @@ export function TransactionInbox({
     mutationFn: ({ txIds, splitType }: { txIds: string[]; splitType: 'half' | 'theirs' }) =>
       api.bulkSplit(txIds, splitType),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['splitSummary'] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.splitSummary.all });
       setSelected(new Set());
     },
   });
@@ -249,8 +249,8 @@ export function TransactionInbox({
   const bulkUnsplitMut = useMutation({
     mutationFn: (txIds: string[]) => api.bulkUnsplit(txIds),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions', itemId] });
-      queryClient.invalidateQueries({ queryKey: ['splitSummary'] });
+      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
+      queryClient.invalidateQueries({ queryKey: keys.splitSummary.all });
       setSelected(new Set());
     },
   });

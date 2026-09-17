@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { api } from '../lib/api';
 import { formatBRL, formatDateLong, formatDelta } from '../lib/format';
+import { keys } from '../lib/queryKeys';
 
 /**
  * Read-only view of a partner's credit-card bill, scoped to the splits they
@@ -29,7 +30,7 @@ export function SharedCardDetail({
   }, [owner, accountId, initialOffset]);
 
   const q = useQuery({
-    queryKey: ['partnerCardBreakdown', owner, accountId, offset],
+    queryKey: keys.partnerCardBreakdown.at(owner, accountId, offset),
     queryFn: () => api.getPartnerCardBreakdown(owner, accountId, offset),
   });
 

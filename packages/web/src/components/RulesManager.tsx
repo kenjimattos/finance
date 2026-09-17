@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { api, type Category, type Rule } from '../lib/api';
 import { useToast } from './Toast';
+import { keys } from '../lib/queryKeys';
 
 /**
  * Full-screen overlay for viewing, editing, and deleting learned
@@ -35,12 +36,12 @@ export function RulesManager({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   const rulesQ = useQuery({
-    queryKey: ['rules', debouncedSearch],
+    queryKey: keys.rules.search(debouncedSearch),
     queryFn: () => api.listRules(debouncedSearch || undefined),
   });
 
   const categoriesQ = useQuery({
-    queryKey: ['categories'],
+    queryKey: keys.categories(),
     queryFn: () => api.listCategories(),
   });
 
@@ -107,10 +108,10 @@ export function RulesManager({ onClose }: { onClose: () => void }) {
                 rule={rule}
                 categories={categories}
                 onDeleted={() => {
-                  queryClient.invalidateQueries({ queryKey: ['rules'] });
+                  queryClient.invalidateQueries({ queryKey: keys.rules.all });
                 }}
                 onUpdated={() => {
-                  queryClient.invalidateQueries({ queryKey: ['rules'] });
+                  queryClient.invalidateQueries({ queryKey: keys.rules.all });
                 }}
                 toast={toast}
               />
