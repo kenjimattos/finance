@@ -14,7 +14,7 @@ Decoration: fixed CSS-only paper-grain noise overlay, fixed vertical margin rule
 
 ## Screen hierarchy
 
-Login → CashFlow → Overview → Dashboard (plus Onboarding when no bank is linked). App.tsx manages drill-down state: `overviewMonth` (year/month from CashFlow → Overview) and `drillDown` (itemId/accountId/offset from Overview → Dashboard), gated by the `useQuery(['auth'])` result.
+Login → CashFlow → Overview → Dashboard (plus Onboarding when no bank is linked). App.tsx manages drill-down state: `overviewMonth` (year/month from CashFlow → Overview) and `drillDown` (itemId/accountId/offset from Overview → Dashboard), gated by the `useQuery(keys.auth())` result.
 
 **CashFlow** ([CashFlow.tsx](../packages/web/src/screens/CashFlow.tsx)) — top-level landing page. Multi-month financial ledger with columns (origem | dia | descrição | débito | crédito | saldo), bank transactions for past days, manual entries + credit-card bill outflows for future days, running balance with one global realized/projected boundary, inline editing of descriptions/amounts/dates, drag-and-drop reordering within a day, ghost row for adding new entries. Clicking a credit-card bill drills into Overview.
 
@@ -29,6 +29,58 @@ Login → CashFlow → Overview → Dashboard (plus Onboarding when no bank is l
 ## Responsiveness
 
 Mobile-aware throughout. The CashFlow ledger collapses to a compact column set on small screens (debit/credit columns merge, desktop-only headers hide). BillHeader's action buttons sit inline with the bill-cycle nav and "gerenciar regras" / "gerenciar bancos" links hide below `md`. SplitSection collapses to a single column.
+
+## Data fetching
+
+TanStack Query, no extra data layer: queries are declared in the component that consumes them. What is *not* colocated is the two things that are shared knowledge — the keys and the invalidation.
+
+### Query keys
+
+Never write a `queryKey` literal. Every key comes from [lib/queryKeys.ts](../packages/web/src/lib/queryKeys.ts):
+
+```ts
+useQuery({ queryKey: keys.billBreakdown.at(itemId, accountId, offset), ... })
+queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) })
+```
+
+Each domain exposes `all` (the broad prefix, for invalidation) plus narrower builders. **Narrow keys must always extend the broader ones**, so invalidating a parent reaches every descendant — `keys.transactions.all` ⊂ `.ofItem(id)` ⊂ `.list({...})`.
+
+The reason this is a rule and not a preference: TanStack matches keys by prefix, so a literal that drifts from the one a query registered with fails *silently*. No type error, no runtime error, no failed request — just a panel showing the previous value until something else happens to refetch it. The compiler cannot see a string; it can see a missing method.
+
+Some keys carry `null`. `billBreakdown.at` / `splitSummary.at` / `partnerCardBreakdown.at` take `offset: number | null` because Overview resolves one offset per account and leaves the query `enabled: false` when there is none — so `null` is a real key living in the cache. Do not coerce it to `0` in the factory; that would merge those entries with the genuine offset-0 ones.
+
+### Transaction mutations
+
+Mutations that edit a transaction inside a bill go in [lib/useBillMutations.ts](../packages/web/src/lib/useBillMutations.ts), not inline in a component. The hook owns cache invalidation **and nothing else** — UI side effects stay with the screen and are passed per call:
+
+```ts
+const { bulkCategorize } = useBillMutations({ itemId, accountId });
+bulkCategorize.mutate({ txIds, categoryId }, { onSuccess: clearSelection });
+```
+
+Three server-side views derive from the same rows and must refetch together:
+
+| view | what it sums |
+| --- | --- |
+| the transaction list | every row in the window, categorized or not |
+| `GET /bills/current/breakdown` | categorized rows only |
+| `GET /bills/current/split-summary` | categorized rows, grouped by ½ / dela / meu |
+
+The third one is the trap, and it caused a real bug. Its SQL ([routes/splits.ts](../packages/api/src/routes/splits.ts)) does:
+
+```sql
+INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
+LEFT  JOIN transaction_bill_overrides o ON o.transaction_id = t.id
+WHERE  (o.shift IS NULL AND t.date BETWEEN ? AND ?)
+    OR (o.shift = 1     AND t.date BETWEEN ? AND ?)
+    OR (o.shift = -1    AND t.date BETWEEN ? AND ?)
+```
+
+Because it joins on categories and resolves its window through the shift override, **categorizing a row or shifting it into a neighbor cycle changes the split totals** — it is not only the split mutations that dirty this cache. When the twelve mutations each carried their own hand-written invalidation, only split and hide invalidated it, so the ½ / dela / meu columns kept showing stale numbers after a categorize or a shift.
+
+A fourth cache is conditional: `GET /categories` orders by `usage_count`, so anything that assigns or clears a category also reorders the picker. Hence the hook's two shapes — `invalidateBill()` and `invalidateBillAndCategories()`.
+
+When adding a mutation, the question to answer is not "which keys did the neighboring mutation use" but "which of those four views can this change move".
 
 ## Reusable UI patterns
 
