@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'motion/react';
 import { api, type Transaction } from '../lib/api';
 import { formatBRL } from '../lib/format';
@@ -8,6 +8,7 @@ import { TransactionRow } from './TransactionRow';
 import { CategoryTrigger } from './CategoryPicker';
 import { useToast } from './Toast';
 import { keys } from '../lib/queryKeys';
+import { useBillMutations } from '../lib/useBillMutations';
 
 /**
  * The categorization inbox — the main work surface of the app.
@@ -42,7 +43,6 @@ export function TransactionInbox({
   cardGroupQuery: string | undefined;
   categoryFilter: CategoryTabFilter;
 }) {
-  const queryClient = useQueryClient();
   const toast = useToast();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showCategorized, setShowCategorized] = useState(true);
@@ -75,32 +75,23 @@ export function TransactionInbox({
     queryFn: api.listCategories,
   });
 
-  const assignMut = useMutation({
-    mutationFn: ({ txId, categoryId }: { txId: string; categoryId: number }) =>
-      api.assignCategory(txId, categoryId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.categories() });
-      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
-    },
-  });
+  const {
+    assign,
+    clear,
+    bulkCategorize,
+    shift: shiftMut,
+    setHidden,
+    split,
+    unsplit,
+    bulkSplit,
+    bulkUnsplit,
+    createManual,
+    updateManual,
+    deleteManual,
+  } = useBillMutations({ itemId, accountId });
 
-  const clearMut = useMutation({
-    mutationFn: (txId: string) => api.clearCategory(txId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
-    },
-  });
-
-  const shiftMut = useMutation({
-    mutationFn: ({ txId, shift }: { txId: string; shift: -1 | 0 | 1 }) =>
-      api.shiftTransactionBill(txId, shift),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
-    },
-  });
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
   /**
    * Shift a transaction's bill cycle AND surface an undo toast. The shift
@@ -134,29 +125,16 @@ export function TransactionInbox({
     );
   }
 
-  // ── Hide-from-bill ──
-  // Hiding excludes the row from every bill computation server-side, so the
-  // breakdown and split summaries must refetch along with the list.
-  const hiddenMut = useMutation({
-    mutationFn: ({ txId, hidden }: { txId: string; hidden: boolean }) =>
-      api.setTransactionHidden(txId, hidden),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.splitSummary.all });
-    },
-  });
-
   function runToggleHidden(tx: Transaction) {
     const hidden = !tx.hidden;
-    hiddenMut.mutate(
+    setHidden.mutate(
       { txId: tx.id, hidden },
       {
         onSuccess: () => {
           toast.show({
             message: hidden ? 'Oculta da fatura' : 'Restaurada na fatura',
             undo: () => {
-              hiddenMut.mutate({ txId: tx.id, hidden: !hidden });
+              setHidden.mutate({ txId: tx.id, hidden: !hidden });
             },
           });
         },
@@ -164,104 +142,21 @@ export function TransactionInbox({
     );
   }
 
-  // ── Manual transaction mutations ──
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
-
-  const createManualMut = useMutation({
-    mutationFn: (body: Parameters<typeof api.createManualTransaction>[0]) =>
-      api.createManualTransaction(body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
-      setShowAddForm(false);
-    },
-  });
-
-  const updateManualMut = useMutation({
-    mutationFn: ({
-      id,
-      body,
-    }: {
-      id: string;
-      body: Parameters<typeof api.updateManualTransaction>[1];
-    }) => api.updateManualTransaction(id, body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
-      setEditingTx(null);
-    },
-  });
-
-  const deleteManualMut = useMutation({
-    mutationFn: (id: string) => api.deleteManualTransaction(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
-      toast.show({ message: 'Lançamento manual excluído' });
-    },
-  });
-
-  const bulkMut = useMutation({
-    mutationFn: ({
-      txIds,
-      categoryId,
-    }: {
-      txIds: string[];
-      categoryId: number;
-    }) => api.bulkCategorize(txIds, categoryId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.categories() });
-      queryClient.invalidateQueries({ queryKey: keys.billBreakdown.ofItem(itemId) });
-      setSelected(new Set());
-    },
-  });
-
-  // ── Split mutations ──
-  const splitMut = useMutation({
-    mutationFn: ({ txId, splitType }: { txId: string; splitType: 'half' | 'theirs' }) =>
-      api.splitTransaction(txId, splitType),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.splitSummary.all });
-    },
-  });
-
-  const unsplitMut = useMutation({
-    mutationFn: (txId: string) => api.unsplitTransaction(txId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.splitSummary.all });
-    },
-  });
-
-  const bulkSplitMut = useMutation({
-    mutationFn: ({ txIds, splitType }: { txIds: string[]; splitType: 'half' | 'theirs' }) =>
-      api.bulkSplit(txIds, splitType),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.splitSummary.all });
-      setSelected(new Set());
-    },
-  });
-
-  const bulkUnsplitMut = useMutation({
-    mutationFn: (txIds: string[]) => api.bulkUnsplit(txIds),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.transactions.ofItem(itemId) });
-      queryClient.invalidateQueries({ queryKey: keys.splitSummary.all });
-      setSelected(new Set());
-    },
-  });
-
   function runSplit(txId: string, splitType: 'half' | 'theirs' | null) {
     if (splitType === null) {
-      unsplitMut.mutate(txId);
+      unsplit.mutate(txId);
     } else {
-      splitMut.mutate({ txId, splitType });
+      split.mutate({ txId, splitType });
     }
   }
+
+  function runDeleteManual(txId: string) {
+    deleteManual.mutate(txId, {
+      onSuccess: () => toast.show({ message: 'Lançamento manual excluído' }),
+    });
+  }
+
+  const clearSelection = () => setSelected(new Set());
 
   // Apply the category tab filter on top of whatever came back from the
   // backend (which is already card-group-filtered). Filtering client-side
@@ -357,9 +252,13 @@ export function TransactionInbox({
             accountId={accountId}
             periodStart={periodStart}
             periodEnd={periodEnd}
-            onSubmit={(body) => createManualMut.mutate(body)}
+            onSubmit={(body) =>
+              createManual.mutate(body, {
+                onSuccess: () => setShowAddForm(false),
+              })
+            }
             onCancel={() => setShowAddForm(false)}
-            busy={createManualMut.isPending}
+            busy={createManual.isPending}
           />
         )}
         {editingTx && (
@@ -369,20 +268,23 @@ export function TransactionInbox({
             periodEnd={periodEnd}
             initial={editingTx}
             onSubmit={(body) =>
-              updateManualMut.mutate({
-                id: editingTx.id,
-                body: {
-                  date: body.date,
-                  description: body.description,
-                  amount: body.amount,
-                  cardLast4: body.cardLast4 ?? null,
-                  installmentNumber: body.installmentNumber ?? null,
-                  totalInstallments: body.totalInstallments ?? null,
+              updateManual.mutate(
+                {
+                  id: editingTx.id,
+                  body: {
+                    date: body.date,
+                    description: body.description,
+                    amount: body.amount,
+                    cardLast4: body.cardLast4 ?? null,
+                    installmentNumber: body.installmentNumber ?? null,
+                    totalInstallments: body.totalInstallments ?? null,
+                  },
                 },
-              })
+                { onSuccess: () => setEditingTx(null) },
+              )
             }
             onCancel={() => setEditingTx(null)}
-            busy={updateManualMut.isPending}
+            busy={updateManual.isPending}
           />
         )}
         {txsQ.isLoading && <EmptyLine>Carregando lançamentos…</EmptyLine>}
@@ -400,9 +302,9 @@ export function TransactionInbox({
               selected={selected.has(tx.id)}
               onToggleSelected={() => toggle(tx.id)}
               onAssign={(categoryId) =>
-                assignMut.mutate({ txId: tx.id, categoryId })
+                assign.mutate({ txId: tx.id, categoryId })
               }
-              onClear={() => clearMut.mutate(tx.id)}
+              onClear={() => clear.mutate(tx.id)}
               onShift={(shift) => runShift(tx.id, shift)}
               onSplit={(splitType) => runSplit(tx.id, splitType)}
               onToggleHidden={() => runToggleHidden(tx)}
@@ -416,7 +318,7 @@ export function TransactionInbox({
               }
               onDeleteManual={
                 tx.source === 'manual'
-                  ? () => deleteManualMut.mutate(tx.id)
+                  ? () => runDeleteManual(tx.id)
                   : undefined
               }
             />
@@ -460,9 +362,9 @@ export function TransactionInbox({
                 selected={selected.has(tx.id)}
                 onToggleSelected={() => toggle(tx.id)}
                 onAssign={(categoryId) =>
-                  assignMut.mutate({ txId: tx.id, categoryId })
+                  assign.mutate({ txId: tx.id, categoryId })
                 }
-                onClear={() => clearMut.mutate(tx.id)}
+                onClear={() => clear.mutate(tx.id)}
                 onShift={(shift) => runShift(tx.id, shift)}
                 onSplit={(splitType) => runSplit(tx.id, splitType)}
                 onToggleHidden={() => runToggleHidden(tx)}
@@ -476,7 +378,7 @@ export function TransactionInbox({
                 }
                 onDeleteManual={
                   tx.source === 'manual'
-                    ? () => deleteManualMut.mutate(tx.id)
+                    ? () => runDeleteManual(tx.id)
                     : undefined
                 }
               />
@@ -512,9 +414,9 @@ export function TransactionInbox({
                   selected={selected.has(tx.id)}
                   onToggleSelected={() => toggle(tx.id)}
                   onAssign={(categoryId) =>
-                    assignMut.mutate({ txId: tx.id, categoryId })
+                    assign.mutate({ txId: tx.id, categoryId })
                   }
-                  onClear={() => clearMut.mutate(tx.id)}
+                  onClear={() => clear.mutate(tx.id)}
                   onShift={(shift) => runShift(tx.id, shift)}
                   onSplit={(splitType) => runSplit(tx.id, splitType)}
                   onToggleHidden={() => runToggleHidden(tx)}
@@ -548,10 +450,10 @@ export function TransactionInbox({
                 label="escolher…"
                 categories={categories}
                 onPick={(categoryId) =>
-                  bulkMut.mutate({
-                    txIds: Array.from(selected),
-                    categoryId,
-                  })
+                  bulkCategorize.mutate(
+                    { txIds: Array.from(selected), categoryId },
+                    { onSuccess: clearSelection },
+                  )
                 }
               />
               <span className="mx-1 text-[color:var(--color-ink-faint)]">|</span>
@@ -561,10 +463,10 @@ export function TransactionInbox({
               <button
                 type="button"
                 onClick={() =>
-                  bulkSplitMut.mutate({
-                    txIds: Array.from(selected),
-                    splitType: 'half',
-                  })
+                  bulkSplit.mutate(
+                    { txIds: Array.from(selected), splitType: 'half' },
+                    { onSuccess: clearSelection },
+                  )
                 }
                 className="font-mono text-xs font-semibold text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)]"
               >
@@ -573,10 +475,10 @@ export function TransactionInbox({
               <button
                 type="button"
                 onClick={() =>
-                  bulkSplitMut.mutate({
-                    txIds: Array.from(selected),
-                    splitType: 'theirs',
-                  })
+                  bulkSplit.mutate(
+                    { txIds: Array.from(selected), splitType: 'theirs' },
+                    { onSuccess: clearSelection },
+                  )
                 }
                 className="font-body text-xs text-[color:var(--color-accent)] hover:text-[color:var(--color-ink)]"
               >
@@ -585,7 +487,7 @@ export function TransactionInbox({
               <button
                 type="button"
                 onClick={() =>
-                  bulkUnsplitMut.mutate(Array.from(selected))
+                  bulkUnsplit.mutate(Array.from(selected), { onSuccess: clearSelection })
                 }
                 className="font-body text-xs text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-accent)]"
               >
