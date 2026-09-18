@@ -1,6 +1,6 @@
 # Pluggy SDK gotchas
 
-Pluggy's official docs and SDK README have been wrong multiple times for this project. Before writing integration code, read the `.d.ts` files under `node_modules/pluggy-sdk/dist/types/`, and when in doubt about data shape, query the actual SQLite cache: `sqlite3 packages/api/data/finance.sqlite "SELECT ..."`.
+Pluggy's official docs and SDK README have been wrong multiple times for this project. Before writing integration code, read the `.d.ts` files under `node_modules/pluggy-sdk/dist/types/`, and when in doubt about data shape, query the actual SQLite cache. There is one file per user under `DATABASE_DIR` (`./packages/api/data/` in dev), named after the username — so `sqlite3 packages/api/data/kenji.sqlite "SELECT ..."`, not a single shared `finance.sqlite`.
 
 ## API shape surprises
 

@@ -11,7 +11,7 @@
 5. **Provider ID not found, hash matches an existing `pluggy` row with the SAME full timestamp** → **re-served purchase** (reconnect, or PicPay's daily ID rotation): update that row with the new provider ID instead of inserting a duplicate. The full-timestamp comparison is what separates this from a genuinely distinct second purchase at the same merchant for the same amount on the same day — re-served records preserve the instant to the millisecond; real duplicates differ in time-of-day and get their own row. Payloads without a parseable timestamp fall back to hash-only dedup.
 6. **Provider ID not found, no hash match** → genuinely new transaction, insert (new local UUID).
 
-All five FK tables (`transaction_categories`, `transaction_bill_overrides`, `transaction_description_overrides`, `bill_payment_tags`, `transaction_splits`) reference `transactions.id` (local UUID). Manual transactions have `provider_transaction_id = NULL`.
+Five FK tables reference `transactions.id` (local UUID), all `ON DELETE CASCADE`: `transaction_categories`, `transaction_bill_overrides`, `transaction_description_overrides`, `transaction_splits`, `transaction_hidden`. A sixth, `bill_payment_tags`, still has the constraint but was drained by a migration into `bank_bill_payment_tags` and is no longer read. Manual transactions have `provider_transaction_id = NULL`.
 
 The same lookup-based logic runs in `POST /cashflow/sync` for `bank_transactions`.
 

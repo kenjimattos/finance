@@ -22,7 +22,7 @@ Login → CashFlow → Overview → Dashboard (plus Onboarding when no bank is l
 
 **Dashboard** ([Dashboard.tsx](../packages/web/src/screens/Dashboard.tsx)) — "← voltar" to Overview → account tabs (if multiple) → `BillHeader` (bill-cycle arrows, giant total, delta, closing/due dates, inline regras/sincronizar actions) → `SplitSection` (partner debt breakdown) → `CardGroupFilterBar` (chips to filter the list by card group + "gerenciar" link, hidden below `md`) → `CategoryTabs` → `TransactionInbox`.
 
-**Login** ([Login.tsx](../packages/web/src/screens/Login.tsx)) — single password input. Renders only when `APP_PASSWORD` is set and `/auth/me` reports unauthenticated.
+**Login** ([Login.tsx](../packages/web/src/screens/Login.tsx)) — username + password. Renders when `/auth/me` reports unauthenticated, which only happens once at least one `USER_<NAME>_PASSWORD` is set; with none set the API authenticates everyone as `default` and this screen never appears.
 
 **Onboarding** ([Onboarding.tsx](../packages/web/src/screens/Onboarding.tsx)) — shown when the user has zero linked items. Mounts `<PluggyConnect>` directly.
 

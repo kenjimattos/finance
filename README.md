@@ -11,12 +11,13 @@ The point is not just *viewing* transactions — banks already do that. It's the
 - **Split shared spend** — mark rows ½ or "dela"; the bill view totals what each person owes, per category, including installments.
 - **Project cash flow** — a day-by-day checking-account ledger: real bank transactions for the past, recurring manual entries plus upcoming credit-card bills for the future, grounded on a user-confirmed balance anchor instead of Pluggy's (unreliable) live balance field.
 - **Import faturas from screenshots** — when Pluggy misses transactions, upload screenshots of the issuer's app and Claude vision extracts them into reviewable rows (optional, gated on `ANTHROPIC_API_KEY`).
+- **Reconcile against the issuer's PDF** — upload the closed-bill statement and get a diff against what the app has: missing rows (insertable in one click), amount mismatches, rows only the app knows about. The PDF is parsed **in the browser**, so a password-protected statement is unlocked locally and its password — typically the holder's CPF or birth date — never leaves the machine; the server only ever receives extracted text.
 
 Multiple banks, multiple users: one Pluggy account powers everyone; each user is an env var (`USER_<NAME>_PASSWORD`) and gets an isolated SQLite file. No signup flow — the operator manages users by editing env.
 
 ## Demo account
 
-A hosted instance is available at [finance-demo-production.up.railway.app](https://finance-demo-production.up.railway.app/) (username `demo`, password `demo`). To run your own, the repo ships a sandboxed demo login for showcasing the app without exposing real data:
+The hosted instance linked above is one of these. To run your own, the repo ships a sandboxed demo login for showcasing the app without exposing real data:
 
 ```bash
 npm run -w @finance/api seed:demo
@@ -76,7 +77,7 @@ All env is read and validated in [`config.ts`](packages/api/src/config.ts); the 
 | `USER_<NAME>_PASSWORD` | — | Declares a user; none set → open single-user dev mode |
 | `USER_<NAME>_PARTNER` | — | Links two users for shared-card views |
 | `DEMO_USERS` | — | Demo usernames (default `demo`) |
-| `ANTHROPIC_API_KEY` | — | Enables screenshot fatura import |
+| `ANTHROPIC_API_KEY` | — | Enables fatura screenshot import and PDF reconciliation |
 
 ### Deployment
 

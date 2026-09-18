@@ -5,8 +5,8 @@ import { keys } from '../lib/queryKeys';
 
 /**
  * First-time setup for a card: ask the user for the closing day and due day.
- * Shown whenever /card-settings/:itemId returns 404. Pluggy can't tell us
- * these values — they have to come from the user, once.
+ * Shown whenever GET /account-settings/:accountId returns 404. Pluggy can't
+ * tell us these values — they have to come from the user, once.
  */
 export function CardSettingsSetup({
   itemId,

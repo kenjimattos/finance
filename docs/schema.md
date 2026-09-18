@@ -16,9 +16,16 @@ Read-through cache of CREDIT-account data. `accounts` is populated during sync f
 
 ### 2. Pluggy bank cache
 
-Tables: `bank_transactions`, `bank_transaction_description_overrides`, `bank_bill_payment_tags`, `bank_transaction_hidden`, `balance_snapshots`.
+Tables: `bank_transactions`, `bank_transaction_description_overrides`, `bank_bill_payment_tags`, `bank_transaction_hidden`, `balance_snapshots`, `balance_anchors`. Legacy: `bill_payment_tags`.
 
-BANK-account transactions live in their own table to isolate CashFlow concerns from credit-card sync. Sister tables hold description overrides, the bill-payment tag (the clickable source column that links a bank outflow to a credit-card bill), and a hide flag for visually-duplicate rows the bank reported twice (hidden rows stay in `bank_transactions` so subsequent syncs still touch them). `balance_snapshots` stores periodic account balances used to anchor the CashFlow running balance.
+BANK-account transactions live in their own table to isolate CashFlow concerns from credit-card sync. Sister tables hold description overrides, the bill-payment tag (the clickable source column that links a bank outflow to a credit-card bill), and a hide flag for visually-duplicate rows the bank reported twice (hidden rows stay in `bank_transactions` so subsequent syncs still touch them).
+
+Two tables anchor the CashFlow running balance, and the distinction matters:
+
+- `balance_snapshots` — balances as Pluggy reported them at sync time. Untrusted: the live balance field oscillates for some connectors, and on Itaú it includes unposted yield cents that no transaction explains.
+- `balance_anchors` — a balance the **user** confirmed for a given date, with a `source`. This is the *preferred* anchor; [routes/cashflow.ts](../packages/api/src/routes/cashflow.ts) falls back to a snapshot only when no anchor covers the period. Walking transactions forward from a user-confirmed anchor is more correct than trusting the connector's number.
+
+`bill_payment_tags` is the pre-split credit-side ancestor of `bank_bill_payment_tags`. A migration in [db/index.ts](../packages/api/src/db/index.ts) copied its rows over and emptied it; the table survives only so the migration stays idempotent. Nothing reads it.
 
 ### 3. User configuration
 
@@ -28,15 +35,17 @@ Per-account closing/due days (Pluggy does not expose these), plus the user's opt
 
 ### 4. User work
 
-Tables: `user_categories`, `transaction_categories`, `category_rules`, `transaction_bill_overrides`, `transaction_description_overrides`, `transaction_splits`, `transaction_sync_conflicts`.
+Tables: `user_categories`, `transaction_categories`, `category_rules`, `transaction_bill_overrides`, `transaction_description_overrides`, `transaction_splits`, `transaction_hidden`, `transaction_sync_conflicts`.
 
-Categorization, learned rules, manual bill-cycle shifts, description overrides, bill splitting, and recycled-ID sync audits. These are **separate join tables**, not columns on `transactions`, so a Pluggy re-sync never wipes them. `transaction_splits` only stores explicit shared markings (`'half'` = 50/50, `'theirs'` = partner owes 100%); categorized transactions without a split row are implicitly mine in split summaries.
+Categorization, learned rules, manual bill-cycle shifts, description overrides, bill splitting, hidden rows, and recycled-ID sync audits. These are **separate join tables**, not columns on `transactions`, so a Pluggy re-sync never wipes them. `transaction_splits` only stores explicit shared markings (`'half'` = 50/50, `'theirs'` = partner owes 100%); categorized transactions without a split row are implicitly mine in split summaries.
+
+`transaction_hidden` is the credit-side twin of `bank_transaction_hidden`: presence of a row means "this transaction is not real" (a phantom minted from a corrupted Pluggy payload, a connector duplicate). It is an exclusion that outranks categorization — hidden rows are dropped from every bill computation *and* skipped by `applyLearnedRules`, so a learned rule cannot re-categorize a phantom back into the totals on the next sync. See [sync.md](sync.md#the-categorized-only-rule).
 
 ### 5. Cash flow projections
 
 Table: `manual_entries`.
 
-Recurring entries (salary, rent, etc.) with `day_of_month` for placement. Each entry is scoped to a specific `month` (`YYYY-MM`) so each month edits independently — duplicate-to-next-month is the workflow for propagating recurring items. `sort_key` (also on `bank_transactions`) enables drag-and-drop reordering within a day group; NULL means "natural order".
+Recurring entries (salary, rent, etc.) with `day_of_month` for placement. Each entry is scoped to a specific `month` (`YYYY-MM`) so each month edits independently; propagating a recurring item to the next month means creating it there too. `sort_key` (also on `bank_transactions`) enables drag-and-drop reordering within a day group; NULL means "natural order".
 
 ## Cascade-delete trap
 
