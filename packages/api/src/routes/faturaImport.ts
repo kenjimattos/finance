@@ -9,6 +9,7 @@ import { computeBillWindowAtOffset, findOffsetForDate } from '../services/billWi
 import {
   buildReport,
   isPaymentLine,
+  issuerFromAccountName,
   reconcileWithModel,
   type AppLine,
 } from '../services/reconcileFatura.js';
@@ -38,6 +39,7 @@ const extractSchema = z.object({
 
 interface AccountSettingsRow {
   item_id: string;
+  name: string | null;
   closing_day: number;
   due_day: number;
 }
@@ -45,17 +47,17 @@ interface AccountSettingsRow {
 function loadAccount(db: Db, accountId: string): AccountSettingsRow | null {
   const row = db
     .prepare(
-      `SELECT a.item_id AS item_id, s.closing_day AS closing_day, s.due_day AS due_day
+      `SELECT a.item_id AS item_id, a.name AS name, s.closing_day AS closing_day, s.due_day AS due_day
        FROM accounts a
        LEFT JOIN account_settings s ON s.account_id = a.id
        WHERE a.id = ?`,
     )
     .get(accountId) as
-    | { item_id: string; closing_day: number | null; due_day: number | null }
+    | { item_id: string; name: string | null; closing_day: number | null; due_day: number | null }
     | undefined;
   if (!row) return null;
   if (row.closing_day == null || row.due_day == null) return null;
-  return { item_id: row.item_id, closing_day: row.closing_day, due_day: row.due_day };
+  return { item_id: row.item_id, name: row.name, closing_day: row.closing_day, due_day: row.due_day };
 }
 
 function todayYmd(): string {
@@ -286,6 +288,7 @@ faturaImportRouter.post('/transactions/import-fatura/reconcile', async (req, res
       periodEnd: win.periodEnd,
       dueDate: win.nextDueDate,
       referenceDate: todayYmd(),
+      issuer: issuerFromAccountName(account.name),
     });
     const report = buildReport(raw, appLines);
     console.log(

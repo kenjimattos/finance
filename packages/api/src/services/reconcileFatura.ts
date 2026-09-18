@@ -7,8 +7,9 @@
  * it as "Total dos lançamentos atuais", PicPay as "Total da fatura" next to a
  * gross "Total geral dos lançamentos"), and pairing statement lines with app
  * rows whose descriptions, dates and cents rarely agree verbatim. Encoding any
- * of that as per-issuer rules and matching heuristics kept breaking on the
- * next statement.
+ * of that as matching heuristics kept breaking on the next statement. What
+ * the model can't infer — what an issuer's boxes mean — it is told, as a
+ * layout description in the prompt (ISSUER_LAYOUTS), never as code rules.
  *
  * Code only does what the model is bad at or must not be trusted with:
  * arithmetic (row sums, per-pair diffs), bookkeeping (every app row accounted
@@ -52,7 +53,54 @@ export interface ReconcileContext {
   dueDate: string;
   /** Today (yyyy-mm-dd), for year inference. */
   referenceDate: string;
+  /** Known issuer, whose statement layout is described to the model. */
+  issuer: Issuer | null;
 }
+
+// ── Issuer layouts ──────────────────────────────────────────────────────────
+//
+// What a statement's boxes MEAN is not inferable from their labels: PicPay's
+// "Total geral dos lançamentos" reads like the net total and is gross. The app
+// knows the issuer, so it tells the model — as a description of the layout,
+// never with example values, which models copy into their answer.
+
+export type Issuer = 'picpay' | 'itau';
+
+/**
+ * Pluggy's connector name is the aggregator for every account here
+ * ("MeuPluggy"), so the issuer comes from the account's product name
+ * ("PIC PAY MASTERCARD BLACK", "LATAM PASS ITAU MASTERCARD PLATINUM").
+ */
+export function issuerFromAccountName(name: string | null): Issuer | null {
+  const n = (name ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '');
+  if (n.includes('PICPAY')) return 'picpay';
+  if (n.includes('ITAU')) return 'itau';
+  return null;
+}
+
+const ISSUER_LAYOUTS: Record<Issuer, string> = {
+  picpay: [
+    'This is a PicPay statement. Its layout:',
+    '- Page 1 has a "Resumo" box with, in order: "Fatura anterior", "Pagamento recebido", "Créditos e estornos" (printed negative), "Despesas do mês", "Total da fatura".',
+    '- Transactions are grouped by card: a first "Picpay Card" section with no card number, then one section per card headed "Picpay Card final NNNN". Two sections can sit side by side in two columns on the same page.',
+    '- Estornos appear inside the card sections as lines with a negative value. PicPay leaves them OUT of every "Subtotal dos lançamentos", of "Total geral dos lançamentos" and of "Despesas do mês" — those figures are GROSS, charges only — and totals them apart as "Créditos e estornos".',
+    '- So the net total is NOT "Total geral dos lançamentos" nor "Despesas do mês". It is "Despesas do mês" plus the negative "Créditos e estornos"; compute it from those two printed figures, and name both in the label.',
+    '- "PAGAMENTO DE FATURA" lines are payments of the previous bill, not lançamentos. Installments are marked "PARCxx/yy" glued to the merchant name.',
+  ].join('\n'),
+  itau: [
+    'This is an Itaú statement. Its layout:',
+    '- "Total dos lançamentos atuais" is the net total of this period\'s lines (estornos and reduções already subtracted). "Total desta fatura" also carries previous balance and financing charges — not the net total.',
+    '- Each transaction line may be followed by a category/city line; that is part of the line above, not a transaction.',
+    '- In the international block, the value to record is the R$ amount on the dd/mm merchant line. The lines below it (original amount and currency code, conversion rate) are details of that same purchase, never separate lines or the amount to record — even when the currency code is BRL.',
+    '- An IOF pass-through line in the international block is a real charge only if the statement prints it.',
+    '- "Lançamentos: produtos e serviços" (anuidade, reduções) are lines of this bill. The "Compras parceladas - próximas faturas" block lists FUTURE installments: not charges of this bill. The "Encargos cobrados nesta fatura" breakdown goes into `encargos`, not into the lines.',
+    '- Installments are a trailing "xx/yy" at the end of the merchant text.',
+  ].join('\n'),
+};
 
 export interface ReconcileReportCore {
   /** The printed net total the model picked, or null if none is printed. */
@@ -205,10 +253,11 @@ function buildPrompt(ctx: ReconcileContext, appLines: AppLine[]): string {
     '   - cardLast4: the last 4 digits of the card whose section the line sits in, or null when that section names no card number;',
     '   - installmentNumber / totalInstallments: from an installment marker such as "PARC03/06" or a trailing "03/06", else null.',
     '',
-    '2. FIND THE NET TOTAL. Find the printed figure that equals this period\'s charges minus its credits — the number the lines you recorded should add up to. Statements label it differently and often also print gross figures, or totals that fold in the previous balance, payments or financing charges; choose the one that is the net of this period\'s lines. Copy its value and its exact label, and say in one sentence why it is the net figure. Do not compute it yourself; use null if the statement prints none. Also copy the total of financing charges (juros, multa, IOF de financiamento) into `encargos` if printed, else null.',
+    '2. FIND THE NET TOTAL. Find the printed figure that equals this period\'s charges minus its credits — the number the lines you recorded should add up to. Statements label it differently and often also print gross figures, or totals that fold in the previous balance, payments or financing charges; choose the one that is the net of this period\'s lines. Copy its value and its exact label, and say in one sentence why it is the net figure. If the statement prints the net only in parts — a gross charges figure and a separate credits figure — compute it from those two printed figures and name both in the label. Never compute it by adding up the lines; use null if the statement prints neither. Also copy the total of financing charges (juros, multa, IOF de financiamento) into `encargos` if printed, else null.',
     '',
     '3. PAIR WITH THE APP. The app\'s rows for this bill are listed below, one JSON object per line. Set a statement line\'s `appRef` to the app row that is the same charge. Expect differences: bank feeds rename merchants and users edit descriptions; dates can differ by a few days, or the app may date an installment by its original purchase or by a billing date; manually entered installments can differ by a few cents. Pair them anyway when it is clearly the same charge. Each app row pairs with at most one statement line. For an unpaired statement line set appRef to null and, if useful, a short `note`. Every app row not paired goes into `onlyInApp` with a short reason (e.g. duplicate of another row, belongs to another cycle, not on the statement). Every app ref must appear exactly once: as some line\'s appRef or in onlyInApp.',
     '',
+    ...(ctx.issuer ? [ISSUER_LAYOUTS[ctx.issuer], ''] : []),
     'Write `note`, `reason` and `reasoning` in Portuguese.',
     '',
     '--- APP ROWS ---',

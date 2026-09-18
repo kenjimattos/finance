@@ -1,6 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReport, isPaymentLine, type AppLine, type RawReconciliation } from './reconcileFatura.js';
+import {
+  buildReport,
+  isPaymentLine,
+  issuerFromAccountName,
+  type AppLine,
+  type RawReconciliation,
+} from './reconcileFatura.js';
 
 const app = (over: Partial<AppLine> & { id: string; amount: number }): AppLine => ({
   date: '2026-08-23',
@@ -146,5 +152,18 @@ describe('buildReport', () => {
     );
     assert.equal(r.statementRowsTotal, 60.1);
     assert.deepEqual(r.warnings, []);
+  });
+});
+
+describe('issuerFromAccountName', () => {
+  it('recognizes the issuer from the product name', () => {
+    assert.equal(issuerFromAccountName('PIC PAY MASTERCARD BLACK'), 'picpay');
+    assert.equal(issuerFromAccountName('PicPay Card'), 'picpay');
+    assert.equal(issuerFromAccountName('LATAM PASS ITAU MASTERCARD PLATINUM'), 'itau');
+    assert.equal(issuerFromAccountName('Itaú Uniclass'), 'itau');
+  });
+  it('returns null for unknown issuers', () => {
+    assert.equal(issuerFromAccountName('NUBANK'), null);
+    assert.equal(issuerFromAccountName(null), null);
   });
 });
