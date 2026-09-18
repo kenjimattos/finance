@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Adicionado
 
+- **Favicon.** A aba mostrava o ícone genérico do navegador. Agora é um extrato estilizado: fundo tinta, duas linhas de lançamento cor de papel, o traço fino da soma e o total em laranja queimado, com a paleta do próprio app. Em SVG (`public/favicon.svg`), com um `apple-touch-icon.png` de 180px e cantos retos para a tela inicial do iOS, que aplica a própria máscara.
+
 - **Conciliação de fatura: PDFs protegidos por senha.** Faturas de emissor que vêm criptografadas (a senha costuma ser o CPF ou a data de nascimento do titular) simplesmente falhavam ao ser abertas. Agora, quando o PDF.js informa que o arquivo é protegido, o modal revela um campo "senha do pdf" e refaz a leitura com ela — errando a senha, a mensagem distingue "senha incorreta" de "este PDF é protegido", porque o PDF.js devolve os dois casos separadamente.
 
 - **Conciliação: progresso da espera em vez de um botão mudo.** Uma conciliação leva mais de um minuto — medido: ~76s, dos quais 99% é a única chamada de IA que lê a fatura (a abertura do PDF no navegador é de milissegundos, e o pareamento contra o app, 1ms). Durante toda essa espera o botão só dizia "Comparando…", o que é indistinguível de travado. Agora aparece a lista de etapas com a que está rodando marcada e um cronômetro ao lado dela, mais a expectativa em texto ("costuma levar cerca de 1 minuto"); passando de 90s a nota troca para explicar o que costuma alongar a leitura, em vez de deixar o silêncio falar. Não há barra de porcentagem porque não há porcentagem real a mostrar: a espera é uma chamada só, sem etapas intermediárias observáveis — um número ali seria inventado.
