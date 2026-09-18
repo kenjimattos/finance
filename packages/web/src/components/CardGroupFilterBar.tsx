@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { api, type CardGroup, type CardGroupFilter } from '../lib/api';
+import { api } from '../lib/api';
+import type { CardGroup, CardGroupFilter } from '../lib/apiTypes';
 import { keys } from '../lib/queryKeys';
 
 /**

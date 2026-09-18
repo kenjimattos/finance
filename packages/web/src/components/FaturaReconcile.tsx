@@ -2,12 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  api,
-  ApiError,
-  type ReconcileReport,
-  type ReconcileMissingRow,
-} from '../lib/api';
+import { api, ApiError } from '../lib/api';
+import type { ReconcileReport, ReconcileMissingRow } from '../lib/apiTypes';
 import { extractPdfText, PdfError } from '../lib/pdfText';
 import { LongWait, type WaitStep } from './LongWait';
 import { useToast } from './Toast';

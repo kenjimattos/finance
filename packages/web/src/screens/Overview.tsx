@@ -2,16 +2,16 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PluggyConnect } from 'react-pluggy-connect';
 import { motion } from 'motion/react';
-import {
-  api,
-  type Item,
-  type Account,
-  type AccountSettings,
-  type BillBreakdown,
-  type SplitSummary,
-  type PartnerCard,
-  type PartnerCardBreakdown,
-} from '../lib/api';
+import { api } from '../lib/api';
+import type {
+  Item,
+  Account,
+  AccountSettings,
+  BillBreakdown,
+  SplitSummary,
+  PartnerCard,
+  PartnerCardBreakdown,
+} from '../lib/apiTypes';
 import { formatBRL, formatDateLong, formatDelta, variationLabel } from '../lib/format';
 import { findOffsetForDueMonth, currentDueMonth } from '../lib/billWindow';
 import { SplitSection } from '../components/SplitSection';

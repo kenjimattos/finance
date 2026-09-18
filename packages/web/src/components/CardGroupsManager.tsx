@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
-import { api, type Card, type CardGroup } from '../lib/api';
+import { api } from '../lib/api';
+import type { Card, CardGroup } from '../lib/apiTypes';
 import { formatCardLabel, formatDateShort } from '../lib/format';
 import { keys } from '../lib/queryKeys';
 

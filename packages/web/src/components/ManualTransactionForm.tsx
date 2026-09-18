@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { Transaction } from '../lib/api';
+import type { Transaction } from '../lib/apiTypes';
 
 /**
  * Inline form for creating or editing a manual bill transaction.

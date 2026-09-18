@@ -1,4 +1,4 @@
-import type { BillCategoryBreakdown } from '../lib/api';
+import type { BillCategoryBreakdown } from '../lib/apiTypes';
 
 /**
  * Horizontal row of category tabs above the transaction list.

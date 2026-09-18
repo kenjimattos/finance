@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'motion/react';
-import { api, type Transaction } from '../lib/api';
+import { api } from '../lib/api';
+import type { Transaction } from '../lib/apiTypes';
 import { formatBRL } from '../lib/format';
 import type { CategoryTabFilter } from './CategoryTabs';
 import { TransactionRow } from './TransactionRow';

@@ -1,4 +1,4 @@
-import type { Category, Transaction } from '../lib/api';
+import type { Category, Transaction } from '../lib/apiTypes';
 import { formatBRL, formatCardLabel, formatDateShort } from '../lib/format';
 import { CategoryTrigger } from './CategoryPicker';
 import { RowActionsMenu, type RowAction } from './RowActionsMenu';

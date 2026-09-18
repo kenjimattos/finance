@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError, type ExtractedFaturaRow, type CommitFaturaRow } from '../lib/api';
+import { api, ApiError } from '../lib/api';
+import type { ExtractedFaturaRow, CommitFaturaRow } from '../lib/apiTypes';
 import { useToast } from './Toast';
 import { keys } from '../lib/queryKeys';
 

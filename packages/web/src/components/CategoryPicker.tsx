@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
-import { api, type Category } from '../lib/api';
+import { api } from '../lib/api';
+import type { Category } from '../lib/apiTypes';
 import { keys } from '../lib/queryKeys';
 
 /**

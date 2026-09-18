@@ -91,4 +91,4 @@ When adding a mutation, the question to answer is not "which keys did the neighb
 
 ## Types
 
-Frontend-facing types live in [packages/web/src/lib/api.ts](../packages/web/src/lib/api.ts) and are redeclared there to mirror the backend response shape. No shared package; extract one only when a second consumer appears.
+Frontend-facing types live in [packages/web/src/lib/apiTypes.ts](../packages/web/src/lib/apiTypes.ts) and are redeclared there to mirror the backend response shape — a hand-kept mirror, so a backend change not reflected here compiles fine and fails at runtime. No shared package between the workspaces; extract one only when a second consumer appears. [api.ts](../packages/web/src/lib/api.ts) next to it is the transport (`request<T>`, `ApiError`) plus one method per endpoint.

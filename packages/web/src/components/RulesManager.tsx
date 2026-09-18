@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
-import { api, type Category, type Rule } from '../lib/api';
+import { api } from '../lib/api';
+import type { Category, Rule } from '../lib/apiTypes';
 import { useToast } from './Toast';
 import { keys } from '../lib/queryKeys';
 

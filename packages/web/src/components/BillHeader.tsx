@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, type BillBreakdown } from '../lib/api';
+import { api } from '../lib/api';
+import type { BillBreakdown } from '../lib/apiTypes';
 import {
   formatBRL,
   formatDateLong,

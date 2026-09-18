@@ -16,7 +16,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { api } from '../lib/api';
-import type { CashFlowEntry, CashFlowDay, CashFlowResponse } from '../lib/api';
+import type { CashFlowEntry, CashFlowDay, CashFlowResponse } from '../lib/apiTypes';
 import { formatBRL, formatDateShort } from '../lib/format';
 import { RowActionsMenu } from '../components/RowActionsMenu';
 import { useIsDemo } from '../lib/useIsDemo';

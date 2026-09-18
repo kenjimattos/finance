@@ -1,12 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  api,
-  ApiError,
-  cardGroupFilterToQuery,
-  type CardGroupFilter,
-  type Account,
-} from '../lib/api';
+import { api, ApiError } from '../lib/api';
+import { cardGroupFilterToQuery, type CardGroupFilter, type Account } from '../lib/apiTypes';
 import { CardSettingsSetup } from '../components/CardSettingsSetup';
 import { BillHeader } from '../components/BillHeader';
 import { CardGroupFilterBar } from '../components/CardGroupFilterBar';
