@@ -10,7 +10,7 @@ The point is not just *viewing* transactions — banks already do that. It's the
 - **See the currently open bill** — total, delta vs the previous cycle, category breakdown, installment detail. Pluggy never returns open bills, so bill windows are computed locally from each card's closing/due day, with per-transaction nudging (`bill_shift`) for charges that post into a neighboring cycle.
 - **Split shared spend** — mark rows ½ or "dela"; the bill view totals what each person owes, per category, including installments.
 - **Project cash flow** — a day-by-day checking-account ledger: real bank transactions for the past, recurring manual entries plus upcoming credit-card bills for the future, grounded on a user-confirmed balance anchor instead of Pluggy's (unreliable) live balance field.
-- **Import faturas from screenshots** — when Pluggy misses transactions, upload screenshots of the issuer's app and Claude vision extracts them into reviewable rows (optional, gated on `ANTHROPIC_API_KEY`).
+- **Import faturas from screenshots** — when Pluggy misses transactions, upload screenshots of the issuer's app and an OpenAI-compatible vision model extracts them into reviewable rows (optional, gated on `OPENAI_API_KEY`).
 - **Reconcile against the issuer's PDF** — upload the closed-bill statement and get a diff against what the app has: missing rows (insertable in one click), amount mismatches, rows only the app knows about. The PDF is parsed **in the browser**, so a password-protected statement is unlocked locally and its password — typically the holder's CPF or birth date — never leaves the machine; the server only ever receives extracted text.
 
 Multiple banks, multiple users: one Pluggy account powers everyone; each user is an env var (`USER_<NAME>_PASSWORD`) and gets an isolated SQLite file. No signup flow — the operator manages users by editing env.
@@ -31,7 +31,7 @@ npm-workspaces monorepo, TypeScript end to end:
 
 | Package | What | Built with |
 | --- | --- | --- |
-| [`packages/api`](docs/api.md) | REST API, Pluggy sync, SQLite cache | Express, `pluggy-sdk`, `better-sqlite3`, Zod, `@anthropic-ai/sdk` |
+| [`packages/api`](docs/api.md) | REST API, Pluggy sync, SQLite cache | Express, `pluggy-sdk`, `better-sqlite3`, Zod, `openai` |
 | [`packages/web`](packages/web/) | SPA (Login → CashFlow → Overview → Dashboard) | React, Vite, Tailwind v4, TanStack Query, Motion |
 
 ## Engineering notes
@@ -77,7 +77,9 @@ All env is read and validated in [`config.ts`](packages/api/src/config.ts); the 
 | `USER_<NAME>_PASSWORD` | — | Declares a user; none set → open single-user dev mode |
 | `USER_<NAME>_PARTNER` | — | Links two users for shared-card views |
 | `DEMO_USERS` | — | Demo usernames (default `demo`) |
-| `ANTHROPIC_API_KEY` | — | Enables fatura screenshot import and PDF reconciliation |
+| `OPENAI_API_KEY` | — | Enables fatura screenshot import and PDF reconciliation (requires `OPENAI_MODEL`) |
+| `OPENAI_MODEL` | with key | Chat model id; must support vision + forced function calling |
+| `OPENAI_BASE_URL` | — | OpenAI-compatible gateway (e.g. `https://openrouter.ai/api/v1`); unset = OpenAI |
 
 ### Deployment
 

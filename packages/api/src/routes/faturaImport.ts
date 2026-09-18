@@ -66,7 +66,7 @@ function todayYmd(): string {
 faturaImportRouter.post('/transactions/import-fatura/extract', async (req, res, next) => {
   try {
     if (!isImportEnabled()) {
-      res.status(503).json({ error: 'Importação por screenshot não está configurada (ANTHROPIC_API_KEY ausente).' });
+      res.status(503).json({ error: 'Importação por screenshot não está configurada (OPENAI_API_KEY ausente).' });
       return;
     }
     const { db } = req;
@@ -245,7 +245,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 faturaImportRouter.post('/transactions/import-fatura/reconcile', async (req, res, next) => {
   try {
     if (!isImportEnabled()) {
-      res.status(503).json({ error: 'Conciliação por PDF não está configurada (ANTHROPIC_API_KEY ausente).' });
+      res.status(503).json({ error: 'Conciliação por PDF não está configurada (OPENAI_API_KEY ausente).' });
       return;
     }
     const { db } = req;

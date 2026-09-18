@@ -1,16 +1,21 @@
 /**
- * Extract credit-card transactions from fatura screenshots using Claude vision.
+ * Extract credit-card transactions from fatura screenshots (vision) or from the
+ * text of a statement PDF, using an OpenAI-compatible chat model.
  *
  * Pluggy does not expose open-bill transactions, and even closed bills can miss
- * rows. This service lets the user photograph the issuer's app statement; Claude
- * reads each line and returns structured transactions, which the import route
- * then inserts as `source='manual'`.
+ * rows. This service lets the user photograph the issuer's app statement; the
+ * model reads each line and returns structured transactions, which the import
+ * route then inserts as `source='manual'`.
  *
- * The model call is isolated behind `extractFaturaFromImages`. The parsing and
- * sign/installment normalization live in the pure `normalizeExtraction`, which
- * is unit-tested without any network.
+ * The client speaks the OpenAI Chat Completions format, so it works against
+ * OpenAI directly or any compatible gateway (OpenRouter) via OPENAI_BASE_URL.
+ *
+ * The model calls are isolated behind `extractFaturaFromImages` and
+ * `extractFaturaFromPdfText`. The parsing and sign/installment normalization
+ * live in the pure `normalizeExtraction`, which is unit-tested without any
+ * network.
  */
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { z } from 'zod';
 import { config } from '../config.js';
 
@@ -42,19 +47,7 @@ export interface ExtractedRow {
 }
 
 export function isImportEnabled(): boolean {
-  return Boolean(config.ANTHROPIC_API_KEY);
-}
-
-/**
- * Normalize a configured base URL for the Anthropic SDK.
- *
- * The SDK appends `/v1/messages` to baseURL itself. Gateways like OpenRouter
- * document their base as `https://openrouter.ai/api/v1` (OpenAI convention), so
- * a naive copy yields `…/api/v1/v1/messages` → 404. Strip a trailing `/v1` (and
- * any trailing slash) so both `…/api` and `…/api/v1` work.
- */
-export function normalizeBaseUrl(url: string): string {
-  return url.replace(/\/+$/, '').replace(/\/v1$/, '');
+  return Boolean(config.OPENAI_API_KEY);
 }
 
 /**
@@ -74,85 +67,100 @@ export interface StatementTotals {
   totalFatura: number | null;
 }
 
+const TOOL_NAME = 'record_transactions';
+
 // The tool the model is forced to call. Amounts come back as a POSITIVE
 // magnitude plus an `isRefund` flag; normalizeExtraction applies the sign.
-const RECORD_TOOL: Anthropic.Tool = {
-  name: 'record_transactions',
-  description:
-    'Record every purchase/charge line read from the credit-card fatura, plus the totals printed in its summary box.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      totals: {
-        type: 'object',
-        description:
-          'Totals copied verbatim from the statement summary. Only for PDFs that print them; omit or null each field otherwise.',
-        properties: {
-          lancamentos: {
-            type: ['number', 'null'],
-            description:
-              '"Total dos lançamentos atuais" / "Total dos lançamentos" as a positive number, or null if the statement does not print it.',
-          },
-          encargos: {
-            type: ['number', 'null'],
-            description: '"Total de encargos em R$" (juros/multa/IOF de financiamento), or null.',
-          },
-          totalFatura: {
-            type: ['number', 'null'],
-            description: '"Total desta fatura" / "O total da sua fatura é", or null.',
-          },
-        },
-      },
-      transactions: {
-        type: 'array',
-        items: {
+//
+// `strict: true` makes OpenAI constrain decoding to this schema, which in turn
+// requires every property to be listed in `required` and
+// `additionalProperties: false` on every object — optional fields are expressed
+// as nullable types instead.
+const RECORD_TOOL: OpenAI.ChatCompletionFunctionTool = {
+  type: 'function',
+  function: {
+    name: TOOL_NAME,
+    description:
+      'Record every purchase/charge line read from the credit-card fatura, plus the totals printed in its summary box.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        totals: {
           type: 'object',
+          additionalProperties: false,
+          description:
+            'Totals copied verbatim from the statement summary. Only for PDFs that print them; null each field otherwise.',
+          required: ['lancamentos', 'encargos', 'totalFatura'],
           properties: {
-            date: {
-              type: 'string',
-              description: 'Transaction date as yyyy-mm-dd. Infer the year from context.',
-            },
-            description: {
-              type: 'string',
-              description: 'Merchant/description exactly as shown.',
-            },
-            amount: {
-              type: 'number',
+            lancamentos: {
+              type: ['number', 'null'],
               description:
-                'Positive magnitude in BRL. "R$ 1.234,56" → 1234.56. Never negative.',
+                '"Total dos lançamentos atuais" / "Total dos lançamentos" as a positive number, or null if the statement does not print it.',
             },
-            isRefund: {
-              type: 'boolean',
-              description:
-                'true when the value is shown in green (estorno/refund/credit), else false.',
+            encargos: {
+              type: ['number', 'null'],
+              description: '"Total de encargos em R$" (juros/multa/IOF de financiamento), or null.',
             },
-            cardLast4: {
-              type: ['string', 'null'],
-              description:
-                'Last 4 digits of the card on the line (e.g. "3047" from "Cartão Adriely 3047"), or null if not shown.',
-            },
-            installmentNumber: {
-              type: ['integer', 'null'],
-              description: 'Current installment from "Parcela X de Y" (the X), or null.',
-            },
-            totalInstallments: {
-              type: ['integer', 'null'],
-              description: 'Total installments from "Parcela X de Y" (the Y), or null.',
+            totalFatura: {
+              type: ['number', 'null'],
+              description: '"Total desta fatura" / "O total da sua fatura é", or null.',
             },
           },
-          required: [
-            'date',
-            'description',
-            'amount',
-            'isRefund',
-            'cardLast4',
-            'installmentNumber',
-            'totalInstallments',
-          ],
+        },
+        transactions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              date: {
+                type: 'string',
+                description: 'Transaction date as yyyy-mm-dd. Infer the year from context.',
+              },
+              description: {
+                type: 'string',
+                description: 'Merchant/description exactly as shown.',
+              },
+              amount: {
+                type: 'number',
+                description:
+                  'Positive magnitude in BRL. "R$ 1.234,56" → 1234.56. Never negative.',
+              },
+              isRefund: {
+                type: 'boolean',
+                description:
+                  'true when the value is shown in green (estorno/refund/credit), else false.',
+              },
+              cardLast4: {
+                type: ['string', 'null'],
+                description:
+                  'Last 4 digits of the card on the line (e.g. "3047" from "Cartão Adriely 3047"), or null if not shown.',
+              },
+              installmentNumber: {
+                type: ['integer', 'null'],
+                description: 'Current installment from "Parcela X de Y" (the X), or null.',
+              },
+              totalInstallments: {
+                type: ['integer', 'null'],
+                description: 'Total installments from "Parcela X de Y" (the Y), or null.',
+              },
+            },
+            required: [
+              'date',
+              'description',
+              'amount',
+              'isRefund',
+              'cardLast4',
+              'installmentNumber',
+              'totalInstallments',
+            ],
+          },
         },
       },
+      required: ['totals', 'transactions'],
     },
-    required: ['transactions'],
   },
 };
 
@@ -257,21 +265,26 @@ export function normalizeStatementExtraction(raw: unknown): {
   return { rows, totals: normalizeTotals(totals) };
 }
 
-function makeClient(): Anthropic {
-  if (!config.ANTHROPIC_API_KEY) {
+function makeClient(): { client: OpenAI; model: string } {
+  // config.ts guarantees the model whenever the key is set; re-checked here so
+  // the type narrows.
+  if (!config.OPENAI_API_KEY || !config.OPENAI_MODEL) {
     throw new Error('IMPORT_DISABLED');
   }
-  return new Anthropic({
-    apiKey: config.ANTHROPIC_API_KEY,
-    // Free gateway tiers (e.g. OpenRouter's :free models) 429 under load. The
-    // SDK backs off and retries on 429/5xx; bump the count so transient upstream
-    // rate-limits usually clear within one import attempt.
-    maxRetries: 5,
-    timeout: 120_000,
-    ...(config.ANTHROPIC_BASE_URL
-      ? { baseURL: normalizeBaseUrl(config.ANTHROPIC_BASE_URL) }
-      : {}),
+  const client = new OpenAI({
+    apiKey: config.OPENAI_API_KEY,
+    // The SDK backs off and retries on 429/5xx and on timeouts. A timed-out
+    // extraction re-runs from scratch, so keep the count low: a stuck model
+    // should fail in minutes, not after half a dozen full re-reads.
+    maxRetries: 2,
+    // A 100-line statement is several thousand output tokens (more with a
+    // reasoning model); give one read room to finish.
+    timeout: 240_000,
+    // Unset = api.openai.com. For a gateway use its OpenAI-style base, which
+    // includes the version segment (e.g. https://openrouter.ai/api/v1).
+    ...(config.OPENAI_BASE_URL ? { baseURL: config.OPENAI_BASE_URL } : {}),
   });
+  return { client, model: config.OPENAI_MODEL };
 }
 
 /**
@@ -283,37 +296,55 @@ function makeClient(): Anthropic {
 const secs = (startedAt: number) => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
 
 async function callRecordTool(
-  messages: Anthropic.MessageParam[],
+  messages: OpenAI.ChatCompletionMessageParam[],
   label = 'read',
 ): Promise<{
-  toolUse: Anthropic.ToolUseBlock;
+  toolCall: OpenAI.ChatCompletionMessageFunctionToolCall;
   rows: ExtractedRow[];
   totals: StatementTotals;
 }> {
-  const client = makeClient();
+  const { client, model } = makeClient();
   const startedAt = Date.now();
-  const message = await client.messages.create({
-    model: config.ANTHROPIC_MODEL,
-    max_tokens: 8000,
+  const completion = await client.chat.completions.create({
+    model,
+    // Counts reasoning tokens too on reasoning models, hence the headroom over
+    // the few thousand tokens the JSON itself takes.
+    max_completion_tokens: 16_000,
     tools: [RECORD_TOOL],
-    tool_choice: { type: 'tool', name: 'record_transactions' },
+    tool_choice: { type: 'function', function: { name: TOOL_NAME } },
     messages,
   });
-  const u = message.usage;
+  const choice = completion.choices[0];
+  const u = completion.usage;
   console.log(
-    `[extract] ${label} took ${secs(startedAt)} — model=${config.ANTHROPIC_MODEL} ` +
-      `in=${u.input_tokens} out=${u.output_tokens} ` +
-      `cache_read=${u.cache_read_input_tokens ?? 0} cache_write=${u.cache_creation_input_tokens ?? 0} ` +
-      `stop=${message.stop_reason}`,
+    `[extract] ${label} took ${secs(startedAt)} — model=${completion.model} ` +
+      `in=${u?.prompt_tokens ?? '?'} out=${u?.completion_tokens ?? '?'} ` +
+      `cached=${u?.prompt_tokens_details?.cached_tokens ?? 0} ` +
+      `reasoning=${u?.completion_tokens_details?.reasoning_tokens ?? 0} ` +
+      `finish=${choice?.finish_reason}`,
   );
 
-  const toolUse = message.content.find(
-    (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+  const toolCall = choice?.message.tool_calls?.find(
+    (tc): tc is OpenAI.ChatCompletionMessageFunctionToolCall =>
+      tc.type === 'function' && tc.function.name === TOOL_NAME,
   );
-  if (!toolUse) {
-    throw new Error('Model did not return structured transactions');
+  if (!toolCall) {
+    // Models that ignore a forced tool_choice answer in prose instead; say so
+    // rather than failing on a parse error further down.
+    throw new Error(
+      `Model did not return structured transactions (finish_reason=${choice?.finish_reason})`,
+    );
   }
-  return { toolUse, ...normalizeStatementExtraction(toolUse.input) };
+  let args: unknown;
+  try {
+    args = JSON.parse(toolCall.function.arguments);
+  } catch {
+    // finish_reason=length lands here: the JSON was cut off mid-array.
+    throw new Error(
+      `Model returned malformed tool arguments (finish_reason=${choice.finish_reason})`,
+    );
+  }
+  return { toolCall, ...normalizeStatementExtraction(args) };
 }
 
 const sumRows = (rows: ExtractedRow[]) =>
@@ -323,7 +354,7 @@ const brl = (n: number) =>
   n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /**
- * Send the screenshots to Claude and return normalized rows.
+ * Send the screenshots to the model and return normalized rows.
  * Throws if the import feature is disabled (no API key) or the model declines
  * to call the tool.
  */
@@ -331,13 +362,10 @@ export async function extractFaturaFromImages(
   images: FaturaImage[],
   ctx: ExtractContext,
 ): Promise<ExtractedRow[]> {
-  const imageBlocks: Anthropic.ImageBlockParam[] = images.map((img) => ({
-    type: 'image',
-    source: {
-      type: 'base64',
-      media_type: img.mediaType as Anthropic.Base64ImageSource['media_type'],
-      data: img.data,
-    },
+  const imageBlocks: OpenAI.ChatCompletionContentPartImage[] = images.map((img) => ({
+    type: 'image_url',
+    // `high`: statement lines are small text; the low-res pass misreads cents.
+    image_url: { url: `data:${img.mediaType};base64,${img.data}`, detail: 'high' },
   }));
   const { rows } = await callRecordTool([
     { role: 'user', content: [...imageBlocks, { type: 'text', text: buildPrompt(ctx) }] },
@@ -405,10 +433,10 @@ export async function extractFaturaFromPdfText(
   pdfText: string,
   ctx: ExtractContext,
 ): Promise<{ rows: ExtractedRow[]; totals: StatementTotals }> {
-  const messages: Anthropic.MessageParam[] = [
+  const messages: OpenAI.ChatCompletionMessageParam[] = [
     {
       role: 'user',
-      content: [{ type: 'text', text: `${buildPdfPrompt(ctx)}\n\n--- STATEMENT TEXT ---\n${pdfText}` }],
+      content: `${buildPdfPrompt(ctx)}\n\n--- STATEMENT TEXT ---\n${pdfText}`,
     },
   ];
 
@@ -432,24 +460,19 @@ export async function extractFaturaFromPdfText(
     if (Math.abs(gap) < TOTAL_EPSILON) break;
 
     messages.push(
-      { role: 'assistant', content: [best.toolUse] },
+      { role: 'assistant', content: null, tool_calls: [best.toolCall] },
       {
-        role: 'user',
-        content: [
-          {
-            type: 'tool_result',
-            tool_use_id: best.toolUse.id,
-            content:
-              `The transactions you recorded sum to R$ ${brl(sumRows(best.rows))}, but the statement prints ` +
-              `R$ ${brl(target)} of lançamentos — a difference of R$ ${brl(gap)}. Something was misread.\n\n` +
-              (gap > 0
-                ? 'Too little was recorded: a line is missing, an estorno was marked on a line that is actually a charge, or a foreign-currency/exchange-rate figure was used instead of the R$ value on the dd/mm line.\n'
-                : 'Too much was recorded: a "Compras parceladas - próximas faturas" line was included, a line was recorded twice, a category/city continuation line was read as a transaction, or a negative line was recorded as positive.\n') +
-              '\nRe-read the statement text and call the tool again with the FULL corrected list (all transactions, not just the fix), plus the same totals. ' +
-              'Use the section subtotals to find the error: "Lançamentos no cartão", "Total lançamentos inter. em R$", "Lançamentos produtos e serviços". ' +
-              'Never invent, drop, or adjust a line just to make the sum agree — correct only what you actually misread, and if you cannot find the error, return the lines as you read them.',
-          },
-        ],
+        role: 'tool',
+        tool_call_id: best.toolCall.id,
+        content:
+          `The transactions you recorded sum to R$ ${brl(sumRows(best.rows))}, but the statement prints ` +
+          `R$ ${brl(target)} of lançamentos — a difference of R$ ${brl(gap)}. Something was misread.\n\n` +
+          (gap > 0
+            ? 'Too little was recorded: a line is missing, an estorno was marked on a line that is actually a charge, or a foreign-currency/exchange-rate figure was used instead of the R$ value on the dd/mm line.\n'
+            : 'Too much was recorded: a "Compras parceladas - próximas faturas" line was included, a line was recorded twice, a category/city continuation line was read as a transaction, or a negative line was recorded as positive.\n') +
+          '\nRe-read the statement text and call the tool again with the FULL corrected list (all transactions, not just the fix), plus the same totals. ' +
+          'Use the section subtotals to find the error: "Lançamentos no cartão", "Total lançamentos inter. em R$", "Lançamentos produtos e serviços". ' +
+          'Never invent, drop, or adjust a line just to make the sum agree — correct only what you actually misread, and if you cannot find the error, return the lines as you read them.',
       },
     );
 

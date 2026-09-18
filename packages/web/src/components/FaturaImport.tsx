@@ -8,14 +8,14 @@ import { useToast } from './Toast';
 import { keys } from '../lib/queryKeys';
 
 /**
- * Upload fatura screenshots → Claude extracts the lines → editable review →
+ * Upload fatura screenshots → the vision model extracts the lines → editable review →
  * insert as manual transactions. The import is contextual to the bill the user
  * is viewing (`billOffset`): each row carries the bill_shift needed to land it
  * in that bill, so an edge-of-cycle purchase (e.g. 17/06 on the bill that
  * closed 16/06) is pulled in automatically.
  */
 
-const MAX_DIM = 1568; // Claude's optimal long edge; keeps payload + cost down.
+const MAX_DIM = 1568; // Legible statement text without a huge payload; keeps cost down.
 
 /** Downscale an image file and return base64 JPEG (no data: prefix). */
 async function fileToDownscaled(file: File): Promise<{ data: string; mediaType: string }> {

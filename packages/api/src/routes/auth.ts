@@ -16,7 +16,7 @@ authRouter.get('/auth/me', (req, res) => {
   if (username) {
     const demo = isDemoUser(username);
     // Demo accounts never get the fatura-import button: the endpoint is
-    // blocked by demoGuard anyway (it spends Anthropic credits).
+    // blocked by demoGuard anyway (it spends LLM credits).
     const features = { importFaturaEnabled: isImportEnabled() && !demo };
     res.json({ authenticated: true, username, demo, features });
     return;

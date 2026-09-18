@@ -11,7 +11,7 @@ import { isDemoUser } from '../config.js';
  * Blocked surface:
  *   - Pluggy connect widget + item management (shared operator credentials)
  *   - sync endpoints (real Pluggy API calls)
- *   - fatura screenshot import (spends Anthropic credits)
+ *   - fatura screenshot import (spends LLM credits)
  *   - admin routes (raw DB restore)
  *
  * Mounted right after authMiddleware, so req.username is always set.
