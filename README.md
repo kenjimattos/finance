@@ -79,6 +79,7 @@ All env is read and validated in [`config.ts`](packages/api/src/config.ts); the 
 | `DEMO_USERS` | — | Demo usernames (default `demo`) |
 | `OPENAI_API_KEY` | — | Enables fatura screenshot import and PDF reconciliation (requires `OPENAI_MODEL`) |
 | `OPENAI_MODEL` | with key | Chat model id; must support vision + forced function calling |
+| `OPENAI_RECONCILE_MODEL` | — | Model for PDF reconciliation only (default `OPENAI_MODEL`); worth a stronger reasoning model |
 | `OPENAI_BASE_URL` | — | OpenAI-compatible gateway (e.g. `https://openrouter.ai/api/v1`); unset = OpenAI |
 
 ### Deployment

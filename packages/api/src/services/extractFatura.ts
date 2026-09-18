@@ -17,7 +17,7 @@
  */
 import OpenAI from 'openai';
 import { z } from 'zod';
-import { config } from '../config.js';
+import { makeClient, secs } from './llm.js';
 
 export interface FaturaImage {
   /** base64-encoded image bytes (no data: prefix). */
@@ -46,9 +46,7 @@ export interface ExtractedRow {
   isRefund: boolean;
 }
 
-export function isImportEnabled(): boolean {
-  return Boolean(config.OPENAI_API_KEY);
-}
+export { isLlmEnabled as isImportEnabled } from './llm.js';
 
 /**
  * Totals as PRINTED in the statement's own summary box.
@@ -265,36 +263,6 @@ export function normalizeStatementExtraction(raw: unknown): {
   return { rows, totals: normalizeTotals(totals) };
 }
 
-function makeClient(): { client: OpenAI; model: string } {
-  // config.ts guarantees the model whenever the key is set; re-checked here so
-  // the type narrows.
-  if (!config.OPENAI_API_KEY || !config.OPENAI_MODEL) {
-    throw new Error('IMPORT_DISABLED');
-  }
-  const client = new OpenAI({
-    apiKey: config.OPENAI_API_KEY,
-    // The SDK backs off and retries on 429/5xx and on timeouts. A timed-out
-    // extraction re-runs from scratch, so keep the count low: a stuck model
-    // should fail in minutes, not after half a dozen full re-reads.
-    maxRetries: 2,
-    // A 100-line statement is several thousand output tokens (more with a
-    // reasoning model); give one read room to finish.
-    timeout: 240_000,
-    // Unset = api.openai.com. For a gateway use its OpenAI-style base, which
-    // includes the version segment (e.g. https://openrouter.ai/api/v1).
-    ...(config.OPENAI_BASE_URL ? { baseURL: config.OPENAI_BASE_URL } : {}),
-  });
-  return { client, model: config.OPENAI_MODEL };
-}
-
-/**
- * Wall time of one model call, in seconds with one decimal. The import feels
- * slow and the reason is invisible from outside: a reconcile is 1-3 of these
- * back to back, and the SDK's own 429 backoff (maxRetries above) hides inside
- * a single call. Logging each one is what makes the wait explainable.
- */
-const secs = (startedAt: number) => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
-
 async function callRecordTool(
   messages: OpenAI.ChatCompletionMessageParam[],
   label = 'read',
@@ -303,7 +271,10 @@ async function callRecordTool(
   rows: ExtractedRow[];
   totals: StatementTotals;
 }> {
-  const { client, model } = makeClient();
+  // A 100-line statement is several thousand output tokens (more with a
+  // reasoning model); give one read room to finish, and fail rather than
+  // re-run a stuck read many times.
+  const { client, model } = makeClient('import', { timeoutMs: 240_000, maxRetries: 2 });
   const startedAt = Date.now();
   const completion = await client.chat.completions.create({
     model,

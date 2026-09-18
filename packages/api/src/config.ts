@@ -17,6 +17,10 @@ const schema = z.object({
   // No default: model ids churn, and the model must support vision plus forced
   // function calling — a silent fallback is how an unsuitable one sneaks in.
   OPENAI_MODEL: z.string().optional(),
+  // Optional override for PDF reconciliation, which reads a whole statement
+  // and pairs it against the app — worth a stronger (reasoning) model than
+  // screenshot import. Falls back to OPENAI_MODEL.
+  OPENAI_RECONCILE_MODEL: z.string().optional(),
 }).refine((env) => !env.OPENAI_API_KEY || env.OPENAI_MODEL, {
   message: 'OPENAI_MODEL is required when OPENAI_API_KEY is set',
   path: ['OPENAI_MODEL'],
