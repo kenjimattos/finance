@@ -35,7 +35,7 @@ export class ApiError extends Error {
   }
 }
 
-// ---------- Types ----------
+// ── Types: items, accounts, cards ──
 
 export interface Item {
   id: string;
@@ -101,6 +101,8 @@ export function cardGroupFilterToQuery(f: CardGroupFilter): string | undefined {
   return String(f);
 }
 
+// ── Types: transactions and learned rules ──
+
 export interface UserCategoryRef {
   id: number;
   name: string;
@@ -148,6 +150,8 @@ export interface Rule {
   created_at: string;
 }
 
+// ── Types: bills ──
+
 export interface BillCategoryBreakdown {
   id: number;
   name: string;
@@ -191,7 +195,7 @@ export interface BillBreakdown {
   hasNextBillTransactions: boolean;
 }
 
-// ---------- Cash Flow ----------
+// ── Types: cash flow ──
 
 export interface ManualEntry {
   id: number;
@@ -233,7 +237,7 @@ export interface CashFlowResponse {
   days: CashFlowDay[];
 }
 
-// ---------- Split Summary ----------
+// ── Types: split summary ──
 
 export interface SplitSummaryTransaction {
   id: string;
@@ -301,7 +305,7 @@ export interface SplitSummary {
   transactions: SplitSummaryTransaction[];
 }
 
-// ---------- Endpoints ----------
+// ── Types: partner cards (read-only) ──
 
 export interface PartnerCard {
   ownerUsername: string;
@@ -359,6 +363,8 @@ export interface PartnerCardCategory {
   /** halfTotal + theirsTotal. */
   total: number;
 }
+
+// ── Types: fatura import and reconciliation ──
 
 /** A transaction extracted from fatura screenshots, pending review/insert. */
 export interface ExtractedFaturaRow {
@@ -438,6 +444,8 @@ export interface CommitFaturaRow {
   totalInstallments: number | null;
   billShift: number;
 }
+
+// ── Endpoints ──
 
 export const api = {
   connectToken: () =>
@@ -767,7 +775,7 @@ export const api = {
       features?: { importFaturaEnabled: boolean };
     }>('/auth/me'),
 
-  // ----- Fatura import (screenshots → manual transactions) -----
+  // ── Fatura import (screenshots → manual transactions) ──
   extractFatura: (body: {
     accountId: string;
     billOffset: number;
