@@ -61,15 +61,6 @@ export interface AccountSettings {
   updated_at: string;
 }
 
-export interface CardSettings {
-  item_id: string;
-  display_name: string | null;
-  closing_day: number;
-  due_day: number;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface Category {
   id: number;
   name: string;
@@ -472,17 +463,6 @@ export const api = {
     body: { displayName?: string; closingDay: number; dueDay: number },
   ) =>
     request<AccountSettings>(`/account-settings/${accountId}`, {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    }),
-
-  getCardSettings: (itemId: string) =>
-    request<CardSettings>(`/card-settings/${itemId}`),
-  putCardSettings: (
-    itemId: string,
-    body: { displayName?: string; closingDay: number; dueDay: number },
-  ) =>
-    request<CardSettings>(`/card-settings/${itemId}`, {
       method: 'PUT',
       body: JSON.stringify(body),
     }),

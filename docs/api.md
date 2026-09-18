@@ -24,7 +24,7 @@ Usernames listed in `DEMO_USERS` (default: `demo`) get a 403 `DemoRestricted` fr
 - `GET /accounts?itemId=...` — list accounts for the item. Frontend uses CREDIT accounts for billing and BANK accounts for cash flow.
 - `GET /account-settings/:accountId` → 404 triggers the per-account setup form. In the Overview, unconfigured accounts render as "Configurar" cards.
 - `PUT /account-settings/:accountId { closingDay, dueDay, displayName? }` — one-time config per account.
-- `GET /card-settings/:itemId` / `PUT /card-settings/:itemId` — **legacy**, per-item instead of per-account. Still mounted and still backed by the `card_settings` table, but nothing calls them: the frontend reads and writes `/account-settings/:accountId`.
+- `GET /card-settings/:itemId` / `PUT /card-settings/:itemId` — **legacy**, per-item instead of per-account. Still mounted and still backed by the `card_settings` table, but unreachable from the app: the frontend reads and writes `/account-settings/:accountId`, and the client methods for these two were deleted. Kept only because the table still holds pre-migration rows; delete both together when that stops being true.
 
 ## Cards
 
