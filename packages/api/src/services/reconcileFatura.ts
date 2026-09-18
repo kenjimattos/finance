@@ -1,31 +1,36 @@
 /**
- * Reconcile a closed-bill statement (extracted from the issuer's PDF) against
- * the transactions the app has for the same bill window.
+ * Reconcile a closed-bill statement PDF against the transactions the app has
+ * for the same bill window — done by the model, checked by code.
  *
- * Pure — no SQL, no network — so it carries unit tests. The route loads the
- * app rows (shift-aware, same three-window logic as routes/bills.ts) and the
- * statement rows (services/extractFatura.ts), and this module pairs them:
+ * The judgment calls all belong to the model: reading a layout that differs by
+ * issuer, telling which printed total is the period's net charges (Itaú prints
+ * it as "Total dos lançamentos atuais", PicPay as "Total da fatura" next to a
+ * gross "Total geral dos lançamentos"), and pairing statement lines with app
+ * rows whose descriptions, dates and cents rarely agree verbatim. Encoding any
+ * of that as per-issuer rules and matching heuristics kept breaking on the
+ * next statement.
  *
- *   matched           statement line found in the app with the same value
- *   amountMismatches  same purchase, few-cents difference (typically manual
- *                     installment rows whose cent distribution differs from
- *                     the issuer's)
- *   missingInApp      statement lines with no app counterpart → insert candidates
- *   onlyInApp         app rows the statement doesn't show (duplicates, rows the
- *                     issuer moved to another cycle…)
- *
- * Matching is greedy in tiers, strictest first. Amount is the anchor: within a
- * single bill an exact amount collision on different purchases is rare, and
- * date/installment/card metadata disambiguates the rest.
+ * Code only does what the model is bad at or must not be trusted with:
+ * arithmetic (row sums, per-pair diffs), bookkeeping (every app row accounted
+ * for exactly once, no invented ids) and surfacing whatever failed those
+ * checks as warnings. `buildReport` is that half — pure, and unit-tested.
  */
+import type OpenAI from 'openai';
+import { z } from 'zod';
+import { makeClient, secs } from './llm.js';
 
+/** A line as read from the statement. `amount` is signed: credits negative. */
 export interface StatementLine {
+  /** The line exactly as printed, so the user can audit the reading. */
+  quote: string;
   date: string; // yyyy-mm-dd (parceladas keep the original purchase date)
   description: string;
-  amount: number; // signed: estornos negative
+  amount: number;
   cardLast4: string | null;
   installmentNumber: number | null;
   totalInstallments: number | null;
+  /** Model's remark on an unpaired line (Portuguese), if any. */
+  note: string | null;
 }
 
 export interface AppLine {
@@ -40,144 +45,343 @@ export interface AppLine {
   category: string | null;
 }
 
-export interface AmountMismatch {
-  statement: StatementLine;
-  app: AppLine;
-  /** statement.amount - app.amount (what the app must add to agree). */
-  diff: number;
+export interface ReconcileContext {
+  periodStart: string;
+  /** Closing date of the bill (yyyy-mm-dd). */
+  periodEnd: string;
+  dueDate: string;
+  /** Today (yyyy-mm-dd), for year inference. */
+  referenceDate: string;
 }
 
-export interface ReconcileResult {
+export interface ReconcileReportCore {
+  /** The printed net total the model picked, or null if none is printed. */
+  statementTotal: number | null;
+  /** The label of that figure, copied from the PDF ("Total da fatura"). */
+  statementTotalLabel: string | null;
+  /** One sentence on why that figure is the net one. */
+  statementTotalReasoning: string;
+  /** "Total de encargos" when the statement prints one. */
+  statementCharges: number | null;
+  /** Sum of the lines the model read — computed here, never by the model. */
+  statementRowsTotal: number;
   matched: Array<{ statement: StatementLine; app: AppLine }>;
-  amountMismatches: AmountMismatch[];
+  amountMismatches: Array<{ statement: StatementLine; app: AppLine; diff: number }>;
   missingInApp: StatementLine[];
-  onlyInApp: AppLine[];
+  onlyInApp: Array<AppLine & { reason: string }>;
+  /** Checks the model's answer failed, in Portuguese, for the report. */
+  warnings: string[];
 }
 
 /** Payment rows live in the transactions table but are not statement lançamentos. */
 const PAYMENT_RE = /pagamento\s+(de\s+fatura|recebido)/i;
 
 export function isPaymentLine(description: string | null): boolean {
-  return PAYMENT_RE.test(description ?? '');
+  return description != null && PAYMENT_RE.test(description);
 }
 
-const r2 = (n: number) => Math.round(n * 100) / 100;
+// ── What the model returns ──────────────────────────────────────────────────
 
-/** Lowercase alphanumerics only — survives casing/punctuation/truncation noise. */
-function norm(s: string): string {
-  return s
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
+// Strict structured output: every property required, nullable instead of
+// optional, no extra keys.
+const RECONCILIATION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['netTotal', 'encargos', 'statementLines', 'onlyInApp'],
+  properties: {
+    netTotal: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['amount', 'label', 'reasoning'],
+      properties: {
+        amount: { type: ['number', 'null'] },
+        label: { type: ['string', 'null'] },
+        reasoning: { type: 'string' },
+      },
+    },
+    encargos: { type: ['number', 'null'] },
+    statementLines: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'quote',
+          'date',
+          'description',
+          'amount',
+          'cardLast4',
+          'installmentNumber',
+          'totalInstallments',
+          'appRef',
+          'note',
+        ],
+        properties: {
+          quote: { type: 'string' },
+          date: { type: 'string' },
+          description: { type: 'string' },
+          amount: { type: 'number' },
+          cardLast4: { type: ['string', 'null'] },
+          installmentNumber: { type: ['integer', 'null'] },
+          totalInstallments: { type: ['integer', 'null'] },
+          appRef: { type: ['string', 'null'] },
+          note: { type: ['string', 'null'] },
+        },
+      },
+    },
+    onlyInApp: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['appRef', 'reason'],
+        properties: {
+          appRef: { type: 'string' },
+          reason: { type: 'string' },
+        },
+      },
+    },
+  },
+} as const;
+
+const rawSchema = z.object({
+  netTotal: z.object({
+    amount: z.number().finite().nullable(),
+    label: z.string().nullable(),
+    reasoning: z.string(),
+  }),
+  encargos: z.number().finite().nullable(),
+  statementLines: z.array(
+    z.object({
+      quote: z.string(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      description: z.string(),
+      amount: z.number().finite(),
+      cardLast4: z.string().nullable(),
+      installmentNumber: z.number().int().nullable(),
+      totalInstallments: z.number().int().nullable(),
+      appRef: z.string().nullable(),
+      note: z.string().nullable(),
+    }),
+  ),
+  onlyInApp: z.array(z.object({ appRef: z.string(), reason: z.string() })),
+});
+
+export type RawReconciliation = z.infer<typeof rawSchema>;
+
+// ── The model's half ────────────────────────────────────────────────────────
+
+/** Short, stable refs for the prompt: cheaper and easier to copy than UUIDs. */
+export const appRef = (index: number) => `A${index + 1}`;
+
+function describeAppLines(appLines: AppLine[]): string {
+  return appLines
+    .map((l, i) =>
+      JSON.stringify({
+        ref: appRef(i),
+        date: l.date,
+        description: l.description,
+        amount: l.amount,
+        card: l.cardLast4,
+        installment:
+          l.installmentNumber != null && l.totalInstallments != null
+            ? `${l.installmentNumber}/${l.totalInstallments}`
+            : null,
+        source: l.source,
+      }),
+    )
+    .join('\n');
+}
+
+function buildPrompt(ctx: ReconcileContext, appLines: AppLine[]): string {
+  return [
+    'You are reconciling a Brazilian credit-card statement (fatura, the attached PDF) against the transactions a personal-finance app has recorded for the same bill.',
+    `The bill cycle runs ${ctx.periodStart} to ${ctx.periodEnd} (closing date), due ${ctx.dueDate}. Today is ${ctx.referenceDate}.`,
+    '',
+    '1. READ THE STATEMENT. Record every line that is a charge or credit of THIS bill: purchases, installment charges, estornos/credits, and fees the statement itemizes as their own lines. Do not record payments of previous bills, previews of future installments, or any summary figure, subtotal, limit or interest simulation. Record only what is printed — never add a line the statement does not show. For each line:',
+    '   - quote: the line exactly as printed;',
+    '   - date: yyyy-mm-dd. Statements print dd/mm, day first. Choose the year that puts the date on or before the closing date; installment charges keep their original purchase date, which may be months or a year earlier;',
+    '   - amount: in BRL, signed — credits and estornos negative;',
+    '   - cardLast4: the last 4 digits of the card whose section the line sits in, or null when that section names no card number;',
+    '   - installmentNumber / totalInstallments: from an installment marker such as "PARC03/06" or a trailing "03/06", else null.',
+    '',
+    '2. FIND THE NET TOTAL. Find the printed figure that equals this period\'s charges minus its credits — the number the lines you recorded should add up to. Statements label it differently and often also print gross figures, or totals that fold in the previous balance, payments or financing charges; choose the one that is the net of this period\'s lines. Copy its value and its exact label, and say in one sentence why it is the net figure. Do not compute it yourself; use null if the statement prints none. Also copy the total of financing charges (juros, multa, IOF de financiamento) into `encargos` if printed, else null.',
+    '',
+    '3. PAIR WITH THE APP. The app\'s rows for this bill are listed below, one JSON object per line. Set a statement line\'s `appRef` to the app row that is the same charge. Expect differences: bank feeds rename merchants and users edit descriptions; dates can differ by a few days, or the app may date an installment by its original purchase or by a billing date; manually entered installments can differ by a few cents. Pair them anyway when it is clearly the same charge. Each app row pairs with at most one statement line. For an unpaired statement line set appRef to null and, if useful, a short `note`. Every app row not paired goes into `onlyInApp` with a short reason (e.g. duplicate of another row, belongs to another cycle, not on the statement). Every app ref must appear exactly once: as some line\'s appRef or in onlyInApp.',
+    '',
+    'Write `note`, `reason` and `reasoning` in Portuguese.',
+    '',
+    '--- APP ROWS ---',
+    describeAppLines(appLines) || '(none)',
+  ].join('\n');
 }
 
 /**
- * Loose same-merchant check. Statements truncate differently than the app
- * ("171 - RIACHUELPARC01/03" vs "171 - Riachuelo - Sb C Sao Bernardo Bra"),
- * so compare a normalized prefix instead of the whole string.
+ * Send the statement PDF and the app's rows to the model and return its raw
+ * reconciliation. Throws `IMPORT_DISABLED` without a key, or when the model
+ * returns no usable answer.
  */
-export function descSimilar(a: string, b: string): boolean {
-  const na = norm(a);
-  const nb = norm(b);
-  if (na.length === 0 || nb.length === 0) return false;
-  const n = Math.min(na.length, nb.length, 8);
-  return na.slice(0, n) === nb.slice(0, n);
-}
-
-function sameInstallment(a: StatementLine, b: AppLine): boolean {
-  return (
-    a.installmentNumber != null &&
-    a.installmentNumber === b.installmentNumber &&
-    a.totalInstallments === b.totalInstallments
-  );
-}
-
-function dayDiff(a: string, b: string): number {
-  return Math.abs(Date.parse(a + 'T00:00:00Z') - Date.parse(b + 'T00:00:00Z')) / 86_400_000;
-}
-
-type Pair = { statement: StatementLine; app: AppLine };
-
-/**
- * One greedy pass: for each unmatched statement line, pick the best unmatched
- * app row accepted by `accept`. Preference order: same card, then closest date.
- */
-function pass(
-  statement: Set<StatementLine>,
-  app: Set<AppLine>,
-  accept: (s: StatementLine, a: AppLine) => boolean,
-): Pair[] {
-  const pairs: Pair[] = [];
-  for (const s of statement) {
-    let best: AppLine | null = null;
-    let bestScore = -Infinity;
-    for (const a of app) {
-      if (!accept(s, a)) continue;
-      const cardBonus = s.cardLast4 != null && s.cardLast4 === a.cardLast4 ? 1000 : 0;
-      const score = cardBonus - dayDiff(s.date, a.date);
-      if (score > bestScore) {
-        bestScore = score;
-        best = a;
-      }
-    }
-    if (best) {
-      pairs.push({ statement: s, app: best });
-      statement.delete(s);
-      app.delete(best);
-    }
-  }
-  return pairs;
-}
-
-/** Cent-drift tolerance: manual installment rounding is off by a few centavos. */
-const MISMATCH_TOLERANCE = 0.15;
-
-export function reconcileFatura(
-  statementLines: StatementLine[],
+export async function reconcileWithModel(
+  pdfBase64: string,
   appLines: AppLine[],
-): ReconcileResult {
-  // Payments are not lançamentos: the extractor is told to skip them, and the
-  // app keeps them uncategorized. Drop both sides defensively.
-  const statement = new Set(statementLines.filter((s) => !isPaymentLine(s.description)));
-  const app = new Set(appLines.filter((a) => !isPaymentLine(a.description)));
-
-  const sameAmount = (s: StatementLine, a: AppLine) => r2(s.amount) === r2(a.amount);
-
-  const matched: Pair[] = [
-    // 1. Same value on the same day.
-    ...pass(statement, app, (s, a) => sameAmount(s, a) && s.date === a.date),
-    // 2. Same value + same installment X/Y — parceladas keep the original
-    //    purchase date on the statement but a window date in the app.
-    ...pass(statement, app, (s, a) => sameAmount(s, a) && sameInstallment(s, a)),
-    // 3. Same value a few days apart (posting delay).
-    ...pass(statement, app, (s, a) => sameAmount(s, a) && dayDiff(s.date, a.date) <= 3),
-    // 4. Same value anywhere in the window, same merchant.
-    ...pass(statement, app, (s, a) => sameAmount(s, a) && descSimilar(s.description, a.description)),
+  ctx: ReconcileContext,
+): Promise<RawReconciliation> {
+  // A reasoning model reading a full statement can take minutes; a retry
+  // re-runs all of it, so allow one.
+  const { client, model } = makeClient('reconcile', { timeoutMs: 300_000, maxRetries: 1 });
+  const content: OpenAI.ChatCompletionContentPart[] = [
+    {
+      type: 'file',
+      file: { filename: 'fatura.pdf', file_data: `data:application/pdf;base64,${pdfBase64}` },
+    },
+    { type: 'text', text: buildPrompt(ctx, appLines) },
   ];
 
-  // 5. Cent drift: same purchase (installment pair or same-day + merchant),
-  //    value within a few centavos.
-  const nearAmount = (s: StatementLine, a: AppLine) =>
-    Math.abs(s.amount - a.amount) <= MISMATCH_TOLERANCE &&
-    Math.sign(s.amount) === Math.sign(a.amount);
-  const amountMismatches: AmountMismatch[] = [
-    ...pass(
-      statement,
-      app,
-      (s, a) => nearAmount(s, a) && sameInstallment(s, a) && descSimilar(s.description, a.description),
-    ),
-    ...pass(
-      statement,
-      app,
-      (s, a) => nearAmount(s, a) && dayDiff(s.date, a.date) <= 3 && descSimilar(s.description, a.description),
-    ),
-  ].map((p) => ({ ...p, diff: r2(p.statement.amount - p.app.amount) }));
+  const startedAt = Date.now();
+  console.log(
+    `[reconcile] model start — ${Math.round((pdfBase64.length * 3) / 4 / 1024)}KB pdf, ` +
+      `${appLines.length} app row(s), window ${ctx.periodStart}..${ctx.periodEnd}`,
+  );
+  const completion = await client.chat.completions.create({
+    model,
+    // Room for ~100 lines with quotes and notes, plus reasoning tokens.
+    max_completion_tokens: 32_000,
+    response_format: {
+      type: 'json_schema',
+      json_schema: { name: 'reconciliation', strict: true, schema: RECONCILIATION_SCHEMA },
+    },
+    messages: [{ role: 'user', content }],
+  });
+  const choice = completion.choices[0];
+  const u = completion.usage;
+  console.log(
+    `[reconcile] model took ${secs(startedAt)} — model=${completion.model} ` +
+      `in=${u?.prompt_tokens ?? '?'} out=${u?.completion_tokens ?? '?'} ` +
+      `reasoning=${u?.completion_tokens_details?.reasoning_tokens ?? 0} ` +
+      `finish=${choice?.finish_reason}`,
+  );
+
+  const text = choice?.message.content;
+  if (!text) {
+    throw new Error(
+      `Model returned no reconciliation (finish_reason=${choice?.finish_reason}` +
+        (choice?.message.refusal ? `, refusal: ${choice.message.refusal}` : '') +
+        ')',
+    );
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // finish_reason=length lands here: the JSON was cut off.
+    throw new Error(`Model returned malformed JSON (finish_reason=${choice.finish_reason})`);
+  }
+  return rawSchema.parse(json);
+}
+
+// ── The code's half: check, don't interpret ─────────────────────────────────
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Turn the model's answer into the report, verifying what can be verified:
+ * refs must exist and be used once, every app row must be accounted for, and
+ * the sums and per-pair diffs are computed here. Anything that fails a check
+ * is kept visible (as missing / only-in-app) and explained in `warnings`,
+ * never silently dropped.
+ */
+export function buildReport(raw: RawReconciliation, appLines: AppLine[]): ReconcileReportCore {
+  const byRef = new Map(appLines.map((l, i) => [appRef(i), l]));
+  const used = new Set<string>();
+  const warnings: string[] = [];
+
+  const matched: ReconcileReportCore['matched'] = [];
+  const amountMismatches: ReconcileReportCore['amountMismatches'] = [];
+  const missingInApp: StatementLine[] = [];
+
+  for (const r of raw.statementLines) {
+    const statement: StatementLine = {
+      quote: r.quote,
+      date: r.date,
+      description: r.description.trim(),
+      amount: round2(r.amount),
+      cardLast4: r.cardLast4?.trim() || null,
+      installmentNumber: r.installmentNumber,
+      totalInstallments: r.totalInstallments,
+      note: r.note,
+    };
+    if (r.appRef == null) {
+      missingInApp.push(statement);
+      continue;
+    }
+    const app = byRef.get(r.appRef);
+    if (!app) {
+      warnings.push(`A IA pareou "${r.quote}" com ${r.appRef}, que não existe; tratada como ausente no app.`);
+      missingInApp.push(statement);
+      continue;
+    }
+    if (used.has(r.appRef)) {
+      warnings.push(`A IA pareou "${r.quote}" com ${r.appRef}, já usada por outra linha; tratada como ausente no app.`);
+      missingInApp.push(statement);
+      continue;
+    }
+    used.add(r.appRef);
+    const diff = round2(statement.amount - app.amount);
+    if (Math.abs(diff) < 0.005) matched.push({ statement, app });
+    else amountMismatches.push({ statement, app, diff });
+  }
+
+  const onlyInApp: ReconcileReportCore['onlyInApp'] = [];
+  for (const o of raw.onlyInApp) {
+    const app = byRef.get(o.appRef);
+    if (!app) {
+      warnings.push(`A IA citou ${o.appRef} como só no app, mas essa linha não existe.`);
+      continue;
+    }
+    if (used.has(o.appRef)) {
+      warnings.push(`A IA citou ${o.appRef} como só no app, mas também a pareou com a fatura; mantido o pareamento.`);
+      continue;
+    }
+    used.add(o.appRef);
+    onlyInApp.push({ ...app, reason: o.reason });
+  }
+
+  // The model must account for every app row; one it skipped is still an app
+  // row the statement doesn't explain, so it is listed, flagged.
+  let skipped = 0;
+  appLines.forEach((app, i) => {
+    if (used.has(appRef(i))) return;
+    skipped++;
+    onlyInApp.push({ ...app, reason: 'Não analisada pela IA.' });
+  });
+  if (skipped > 0) {
+    warnings.push(
+      `A IA não analisou ${skipped} ${skipped === 1 ? 'linha' : 'linhas'} do app; ${skipped === 1 ? 'ela aparece' : 'elas aparecem'} em "só no app".`,
+    );
+  }
+
+  const statementRowsTotal = round2(raw.statementLines.reduce((s, r) => s + r.amount, 0));
+  const statementTotal = raw.netTotal.amount == null ? null : round2(raw.netTotal.amount);
+  if (statementTotal != null && Math.abs(statementTotal - statementRowsTotal) >= 0.01) {
+    warnings.push(
+      `As linhas lidas somam ${brl(statementRowsTotal)}, mas o total impresso escolhido é ${brl(statementTotal)} ` +
+        `(diferença de ${brl(round2(statementTotal - statementRowsTotal))}). Alguma linha foi lida errado ou ficou de fora.`,
+    );
+  }
 
   return {
+    statementTotal,
+    statementTotalLabel: raw.netTotal.label,
+    statementTotalReasoning: raw.netTotal.reasoning,
+    statementCharges: raw.encargos,
+    statementRowsTotal,
     matched,
     amountMismatches,
-    missingInApp: [...statement],
-    onlyInApp: [...app],
+    missingInApp,
+    onlyInApp,
+    warnings,
   };
 }
+
+const brl = (n: number) =>
+  n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });

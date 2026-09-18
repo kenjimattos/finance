@@ -404,9 +404,9 @@ export const api = {
       '/transactions/import-fatura/commit',
       { method: 'POST', body: JSON.stringify(body) },
     ),
-  // `pdfText`, not the PDF: extraction happens in the browser (lib/pdfText.ts)
-  // so a protected statement's password never leaves the machine.
-  reconcileFatura: (body: { accountId: string; billOffset: number; pdfText: string }) =>
+  // The PDF itself, base64: the model reads the real layout. Encrypted files
+  // are rejected in the browser before this call (lib/pdfFile.ts).
+  reconcileFatura: (body: { accountId: string; billOffset: number; pdfBase64: string }) =>
     request<ReconcileReport>('/transactions/import-fatura/reconcile', {
       method: 'POST',
       body: JSON.stringify(body),

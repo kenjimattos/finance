@@ -2,19 +2,23 @@ import { Router, json } from 'express';
 import { z } from 'zod';
 import {
   extractFaturaFromImages,
-  extractFaturaFromPdfText,
   isImportEnabled,
   type FaturaImage,
 } from '../services/extractFatura.js';
 import { computeBillWindowAtOffset, findOffsetForDate } from '../services/billWindow.js';
-import { reconcileFatura, type AppLine } from '../services/reconcileFatura.js';
+import {
+  buildReport,
+  isPaymentLine,
+  reconcileWithModel,
+  type AppLine,
+} from '../services/reconcileFatura.js';
 import { insertManualTransaction } from '../db/manualTransaction.js';
 import type { Db } from '../db/index.js';
 
 export const faturaImportRouter = Router();
 
-// Screenshots are base64 in the JSON body and statement text runs to hundreds
-// of KB, so this router needs a larger limit than the global express.json().
+// Screenshots and the statement PDF travel as base64 in the JSON body, so this
+// router needs a larger limit than the global express.json().
 // Scoped here (prefix match, so it also covers /reconcile) so other routes keep
 // the default.
 faturaImportRouter.use('/transactions/import-fatura', json({ limit: '25mb' }));
@@ -180,16 +184,23 @@ faturaImportRouter.post('/transactions/import-fatura/commit', (req, res, next) =
 
 // ── Reconciliation: closed-bill PDF vs the app's bill ───────────────────────
 
+/** 10MB of PDF → ~13.4MB of base64, inside the router's 25mb body limit. */
+const MAX_PDF_BASE64 = 14_000_000;
+
 const reconcileSchema = z.object({
   accountId: z.string().min(1),
   billOffset: z.number().int(),
   /**
-   * Plain text of the statement PDF. Extraction happens in the browser
-   * (packages/web/src/lib/pdfText.ts) so that password-protected statements
-   * can be unlocked without the password — often the holder's CPF or birth
-   * date — ever leaving the user's machine.
+   * The statement PDF itself, base64 (no data: prefix). The model reads the
+   * real layout — card sections, columns, summary box — which flattened text
+   * loses. Encrypted PDFs are rejected in the browser: it can open them but
+   * not write a decrypted copy, and the password must not leave the machine.
    */
-  pdfText: z.string().min(1),
+  pdfBase64: z
+    .string()
+    .max(MAX_PDF_BASE64)
+    // Every PDF starts with "%PDF-", which is "JVBERi0" in base64.
+    .refine((s) => s.startsWith('JVBERi0'), 'not a PDF'),
 });
 
 /**
@@ -239,8 +250,9 @@ function loadWindowLines(
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-// POST /transactions/import-fatura/reconcile — read a closed-bill PDF and diff
-// it against the bill the user is viewing. Read-only: returns the report; the
+// POST /transactions/import-fatura/reconcile — send the closed-bill PDF and the
+// app's rows for the viewed bill to the model, which reads the statement and
+// pairs it; buildReport checks its answer. Read-only: returns the report; the
 // user applies fixes through the existing commit/manual endpoints.
 faturaImportRouter.post('/transactions/import-fatura/reconcile', async (req, res, next) => {
   try {
@@ -262,43 +274,37 @@ faturaImportRouter.post('/transactions/import-fatura/reconcile', async (req, res
     const prev = computeBillWindowAtOffset(settings, body.billOffset - 1);
     const nxt = computeBillWindowAtOffset(settings, body.billOffset + 1);
 
-    // The client sends already-extracted text, never the PDF: cheap, and
-    // gateway-agnostic (no PDF support needed upstream). The browser rejects
-    // text-less PDFs before getting here; this guard covers any other caller.
-    const text = body.pdfText;
-    if (text.trim().length < 100) {
-      res.status(422).json({ error: 'O PDF não tem texto extraível (escaneado?). Use a importação por screenshots.' });
-      return;
-    }
+    // Payments of the previous bill sit in the transactions table but are not
+    // lançamentos; the model is told to skip them on the statement side.
+    const appLines = loadWindowLines(db, body.accountId, win, prev, nxt).filter(
+      (l) => !isPaymentLine(l.description),
+    );
 
-    // Timing split. The perceived slowness is almost entirely the model call
-    // (see the [extract] lines for its per-round breakdown); this says how much
-    // of the wait is anything else, so the two never get confused.
     const startedAt = Date.now();
-    const { rows: statementLines, totals } = await extractFaturaFromPdfText(text, {
+    const raw = await reconcileWithModel(body.pdfBase64, appLines, {
       periodStart: win.periodStart,
       periodEnd: win.periodEnd,
+      dueDate: win.nextDueDate,
       referenceDate: todayYmd(),
     });
-    const extractedAt = Date.now();
-
-    const appLines = loadWindowLines(db, body.accountId, win, prev, nxt);
-    const result = reconcileFatura(statementLines, appLines);
+    const report = buildReport(raw, appLines);
     console.log(
-      `[reconcile] extraction ${((extractedAt - startedAt) / 1000).toFixed(1)}s, ` +
-        `matching ${Date.now() - extractedAt}ms — ` +
-        `${statementLines.length} statement line(s) vs ${appLines.length} app row(s)`,
+      `[reconcile] done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ` +
+        `${raw.statementLines.length} statement line(s) vs ${appLines.length} app row(s): ` +
+        `${report.matched.length} matched, ${report.amountMismatches.length} mismatched, ` +
+        `${report.missingInApp.length} missing, ${report.onlyInApp.length} only-in-app, ` +
+        `${report.warnings.length} warning(s)`,
     );
 
     // Insert candidates: bill queries only honor shift ±1, so a statement line
     // whose natural cycle is further away (parceladas keep the original
     // purchase date) is re-dated to the closing date — the same convention the
     // manual installment rows already follow.
-    const missingInApp = result.missingInApp.map((s) => {
+    const missingInApp = report.missingInApp.map((s) => {
       const natural = findOffsetForDate(settings, s.date);
       const shift = natural == null ? null : body.billOffset - natural;
       if (shift != null && Math.abs(shift) <= 1) {
-        return { ...s, date: s.date, statementDate: s.date, billShift: shift };
+        return { ...s, statementDate: s.date, billShift: shift };
       }
       return { ...s, date: win.periodEnd, statementDate: s.date, billShift: 0 };
     });
@@ -306,39 +312,25 @@ faturaImportRouter.post('/transactions/import-fatura/reconcile', async (req, res
     const appBillTotal = round2(
       appLines.filter((l) => l.category != null).reduce((sum, l) => sum + l.amount, 0),
     );
-    // What the extracted lines add up to. Useful, but only as good as the
-    // extraction: a line the model misread or dropped silently shrinks it.
-    const statementRowsTotal = round2(
-      [...result.matched, ...result.amountMismatches]
-        .map((p) => p.statement.amount)
-        .concat(result.missingInApp.map((s) => s.amount))
-        .reduce((sum, a) => sum + a, 0),
-    );
-
-    // The issuer's own "total dos lançamentos" is the authority when the PDF
-    // prints it — the app's bill is a sum of lançamentos, so that (not "total
-    // desta fatura", which also carries encargos/saldo financiado) is the
-    // apples-to-apples figure. Fall back to the row sum for statements that
-    // print no summary box.
-    const statementTotal = totals.lancamentos ?? statementRowsTotal;
-    // Non-zero means the extraction did not read every line: the delta below is
-    // real, but the missing/only-in-app lists are incomplete by this much.
-    const extractionGap = round2(statementTotal - statementRowsTotal);
+    // The printed net total is the authority; fall back to the lines the model
+    // read for statements that print none.
+    const statementTotal = report.statementTotal ?? report.statementRowsTotal;
 
     res.json({
       window: { periodStart: win.periodStart, periodEnd: win.periodEnd, nextDueDate: win.nextDueDate },
       appBillTotal,
       statementTotal,
-      statementRowsTotal,
-      statementTotalSource: totals.lancamentos != null ? 'printed' : 'rows',
-      extractionGap,
-      statementCharges: totals.encargos,
-      statementBillTotal: totals.totalFatura,
+      statementTotalLabel: report.statementTotalLabel,
+      statementTotalReasoning: report.statementTotalReasoning,
+      statementTotalSource: report.statementTotal != null ? 'printed' : 'rows',
+      statementRowsTotal: report.statementRowsTotal,
+      statementCharges: report.statementCharges,
       delta: round2(appBillTotal - statementTotal),
-      matchedCount: result.matched.length,
+      matchedCount: report.matched.length,
       missingInApp,
-      amountMismatches: result.amountMismatches,
-      onlyInApp: result.onlyInApp,
+      amountMismatches: report.amountMismatches,
+      onlyInApp: report.onlyInApp,
+      warnings: report.warnings,
     });
   } catch (err) {
     if (err instanceof Error && err.message === 'IMPORT_DISABLED') {

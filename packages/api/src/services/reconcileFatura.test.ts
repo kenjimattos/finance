@@ -1,170 +1,150 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  reconcileFatura,
-  descSimilar,
-  isPaymentLine,
-  type AppLine,
-  type StatementLine,
-} from './reconcileFatura.js';
+import { buildReport, isPaymentLine, type AppLine, type RawReconciliation } from './reconcileFatura.js';
 
-function st(partial: Partial<StatementLine> & { amount: number }): StatementLine {
-  return {
-    date: '2026-07-01',
-    description: 'MERCHANT',
-    cardLast4: null,
-    installmentNumber: null,
-    totalInstallments: null,
-    ...partial,
-  };
-}
+const app = (over: Partial<AppLine> & { id: string; amount: number }): AppLine => ({
+  date: '2026-08-23',
+  description: 'SACOLAO SAUDE',
+  cardLast4: '3021',
+  installmentNumber: null,
+  totalInstallments: null,
+  source: 'pluggy',
+  category: 'Mercado',
+  ...over,
+});
 
-let nextId = 0;
-function app(partial: Partial<AppLine> & { amount: number }): AppLine {
-  return {
-    id: `app-${nextId++}`,
-    date: '2026-07-01',
-    description: 'MERCHANT',
-    cardLast4: null,
-    installmentNumber: null,
-    totalInstallments: null,
-    source: 'manual',
-    category: 'Compras',
-    ...partial,
-  };
-}
+type RawLine = RawReconciliation['statementLines'][number];
+const line = (over: Partial<RawLine> & { amount: number }): RawLine => ({
+  quote: `23/08 SACOLAO SAUDE ${over.amount}`,
+  date: '2026-08-23',
+  description: 'SACOLAO SAUDE',
+  cardLast4: '3021',
+  installmentNumber: null,
+  totalInstallments: null,
+  appRef: null,
+  note: null,
+  ...over,
+});
 
-describe('descSimilar', () => {
-  it('matches statement truncation vs app truncation of the same merchant', () => {
-    assert.equal(descSimilar('171 - RIACHUELPARC01/03', '171 - Riachuelo - Sb C Sao Bernardo Bra'), true);
-    assert.equal(descSimilar('PERNAMBUCANAS PARC01/05', 'Pernambucanas Sao Bernardo Bra'), true);
-    assert.equal(descSimilar('AMAZONMKTPLC*MPARC02/05', 'Amazonmktplc*mparc02/05'), true);
-  });
-
-  it('rejects different merchants', () => {
-    assert.equal(descSimilar('CARREFOUR SP CSB 335', 'Sacolao Saude'), false);
-  });
+const raw = (over: Partial<RawReconciliation>): RawReconciliation => ({
+  netTotal: { amount: null, label: null, reasoning: '' },
+  encargos: null,
+  statementLines: [],
+  onlyInApp: [],
+  ...over,
 });
 
 describe('isPaymentLine', () => {
   it('detects both payment phrasings', () => {
     assert.equal(isPaymentLine('PAGAMENTO DE FATURA'), true);
     assert.equal(isPaymentLine('Pagamento recebido'), true);
-    assert.equal(isPaymentLine('Posto Pagamento Legal'), false);
+    assert.equal(isPaymentLine('PAGAMENTO*LOJA FURDUNC'), false);
+    assert.equal(isPaymentLine(null), false);
   });
 });
 
-describe('reconcileFatura', () => {
-  it('matches same amount + same date', () => {
-    const r = reconcileFatura(
-      [st({ amount: 354.42, date: '2026-06-20', description: 'GALETERIA METROPOLIS' })],
-      [app({ amount: 354.42, date: '2026-06-20', description: 'Galeteria Metropolis' })],
+describe('buildReport', () => {
+  it('splits pairs into matched and amount mismatches by the diff it computes', () => {
+    const apps = [app({ id: 'x', amount: 50.73 }), app({ id: 'y', amount: 56.36 })];
+    const r = buildReport(
+      raw({
+        statementLines: [line({ amount: 50.73, appRef: 'A1' }), line({ amount: 56.37, appRef: 'A2' })],
+      }),
+      apps,
     );
     assert.equal(r.matched.length, 1);
-    assert.equal(r.missingInApp.length, 0);
-    assert.equal(r.onlyInApp.length, 0);
-  });
-
-  it('matches parceladas by installment pair across different dates', () => {
-    // Statement keeps the original purchase date (24/08/2025); the app books
-    // the installment on the closing date.
-    const r = reconcileFatura(
-      [st({ amount: 169.7, date: '2025-08-24', description: 'ZP *CPARC11/12', installmentNumber: 11, totalInstallments: 12 })],
-      [app({ amount: 169.7, date: '2026-07-16', description: 'Zp *cparc11/12', installmentNumber: 11, totalInstallments: 12 })],
-    );
-    assert.equal(r.matched.length, 1);
-  });
-
-  it('matches same amount a few days apart (posting delay)', () => {
-    const r = reconcileFatura(
-      [st({ amount: 133.37, date: '2026-07-09', description: 'OBA HORTIFRUTI SAO BER' })],
-      [app({ amount: 133.37, date: '2026-07-10', description: 'Oba Hortifrutti S o Ber' })],
-    );
-    assert.equal(r.matched.length, 1);
-  });
-
-  it('flags cent drift on the same installment as a mismatch, not missing', () => {
-    const r = reconcileFatura(
-      [st({ amount: 150.65, date: '2026-06-27', description: '171 - RIACHUELPARC01/03', installmentNumber: 1, totalInstallments: 3 })],
-      [app({ amount: 150.64, date: '2026-06-27', description: '171 - Riachuelo - Sb C Sao Bernardo Bra', installmentNumber: 1, totalInstallments: 3 })],
-    );
-    assert.equal(r.matched.length, 0);
+    assert.equal(r.matched[0].app.id, 'x');
     assert.equal(r.amountMismatches.length, 1);
+    assert.equal(r.amountMismatches[0].app.id, 'y');
     assert.equal(r.amountMismatches[0].diff, 0.01);
-    assert.equal(r.missingInApp.length, 0);
-    assert.equal(r.onlyInApp.length, 0);
+    assert.deepEqual(r.warnings, []);
   });
 
-  it('reports statement lines absent from the app (estorno case)', () => {
-    const r = reconcileFatura(
-      [
-        st({ amount: 167.38, date: '2026-06-30', description: 'NIKE PARC01/06', installmentNumber: 1, totalInstallments: 6 }),
-        st({ amount: -399.99, date: '2026-06-30', description: 'NIKE' }),
-      ],
-      [app({ amount: 167.38, date: '2026-06-30', description: 'Nike Parc01/06', installmentNumber: 1, totalInstallments: 6 })],
-    );
-    assert.equal(r.matched.length, 1);
-    assert.equal(r.missingInApp.length, 1);
-    assert.equal(r.missingInApp[0].amount, -399.99);
-  });
-
-  it('reports app rows absent from the statement', () => {
-    const r = reconcileFatura(
+  it('keeps unpaired lines as missing, with the model note', () => {
+    const r = buildReport(
+      raw({ statementLines: [line({ amount: 101.96, note: 'Não há SHELLBOX no app.' })] }),
       [],
-      [app({ amount: 50, date: '2026-07-02', description: 'Duplicada Manual' })],
     );
-    assert.equal(r.onlyInApp.length, 1);
-  });
-
-  it('ignores payment rows on both sides', () => {
-    const r = reconcileFatura(
-      [st({ amount: -3565, date: '2026-06-25', description: 'PAGAMENTO DE FATURA' })],
-      [app({ amount: -3565, date: '2026-06-25', description: 'Pagamento recebido', source: 'pluggy', category: null })],
-    );
-    assert.equal(r.matched.length, 0);
-    assert.equal(r.missingInApp.length, 0);
-    assert.equal(r.onlyInApp.length, 0);
-  });
-
-  it('does not cross-match a refund with a charge of the same magnitude', () => {
-    const r = reconcileFatura(
-      [st({ amount: -29.9, date: '2026-06-27', description: 'MERCADOLIVRE*ORNAMODE' })],
-      [app({ amount: 29.9, date: '2026-06-27', description: 'Mercadolivre*ornamode' })],
-    );
-    assert.equal(r.matched.length, 0);
-    assert.equal(r.amountMismatches.length, 0);
     assert.equal(r.missingInApp.length, 1);
-    assert.equal(r.onlyInApp.length, 1);
+    assert.equal(r.missingInApp[0].note, 'Não há SHELLBOX no app.');
   });
 
-  it('uses cardLast4 to disambiguate equal amounts on the same day', () => {
-    const s1 = st({ amount: 100, date: '2026-06-21', description: 'AUTO POSTO NOVA PETRO', cardLast4: '3047' });
-    const a1 = app({ amount: 100, date: '2026-06-21', description: 'Posto Shell', cardLast4: '3021' });
-    const a2 = app({ amount: 100, date: '2026-06-21', description: 'Auto Posto Nova Petro', cardLast4: '3047' });
-    const r = reconcileFatura([s1], [a1, a2]);
-    assert.equal(r.matched.length, 1);
-    assert.equal(r.matched[0].app.id, a2.id);
+  it('treats a pair to an unknown ref as missing and warns', () => {
+    const r = buildReport(raw({ statementLines: [line({ amount: 10, appRef: 'A9' })] }), [
+      app({ id: 'x', amount: 10 }),
+    ]);
+    assert.equal(r.missingInApp.length, 1);
+    assert.equal(r.onlyInApp.length, 1, 'the real app row is still accounted for');
+    assert.ok(r.warnings.some((w) => w.includes('A9')));
   });
 
-  it('reconciles a mixed bill end-to-end', () => {
-    const statement = [
-      st({ amount: 214.7, date: '2026-07-10', description: 'BASTA' }),
-      st({ amount: 35, date: '2026-07-10', description: 'REAL BREAD PRODUTOS DE' }),
-      st({ amount: 180, date: '2026-06-28', description: 'PERNAMBUCANAS PARC01/05', installmentNumber: 1, totalInstallments: 5 }),
-      st({ amount: 44.99, date: '2026-06-22', description: 'DROGASIL 4057' }),
-    ];
-    const appRows = [
-      app({ amount: 179.98, date: '2026-06-28', description: 'Pernambucanas Sao Bernardo Bra', installmentNumber: 1, totalInstallments: 5 }),
-      app({ amount: 44.99, date: '2026-06-22', description: 'Drogasil 4057' }),
-      app({ amount: 12.5, date: '2026-07-01', description: 'Linha Fantasma' }),
-    ];
-    const r = reconcileFatura(statement, appRows);
-    assert.equal(r.matched.length, 1); // Drogasil
-    assert.equal(r.amountMismatches.length, 1); // Pernambucanas cents
-    assert.deepEqual(
-      r.missingInApp.map((x) => x.description).sort(),
-      ['BASTA', 'REAL BREAD PRODUTOS DE'],
+  it('never pairs one app row twice', () => {
+    const r = buildReport(
+      raw({
+        statementLines: [line({ amount: 1.5, appRef: 'A1' }), line({ amount: 1.5, appRef: 'A1' })],
+      }),
+      [app({ id: 'x', amount: 1.5 })],
     );
-    assert.equal(r.onlyInApp.length, 1); // Linha Fantasma
+    assert.equal(r.matched.length, 1);
+    assert.equal(r.missingInApp.length, 1);
+    assert.ok(r.warnings.some((w) => w.includes('já usada')));
+  });
+
+  it('carries the model reason for only-in-app rows', () => {
+    const r = buildReport(raw({ onlyInApp: [{ appRef: 'A1', reason: 'Duplicata de A2.' }] }), [
+      app({ id: 'x', amount: 5 }),
+    ]);
+    assert.equal(r.onlyInApp[0].id, 'x');
+    assert.equal(r.onlyInApp[0].reason, 'Duplicata de A2.');
+  });
+
+  it('prefers the pairing when a row is both paired and only-in-app', () => {
+    const r = buildReport(
+      raw({
+        statementLines: [line({ amount: 5, appRef: 'A1' })],
+        onlyInApp: [{ appRef: 'A1', reason: 'x' }],
+      }),
+      [app({ id: 'x', amount: 5 })],
+    );
+    assert.equal(r.matched.length, 1);
+    assert.equal(r.onlyInApp.length, 0);
+    assert.equal(r.warnings.length, 1);
+  });
+
+  it('lists app rows the model never mentioned as only-in-app, flagged', () => {
+    const r = buildReport(raw({}), [app({ id: 'x', amount: 5 }), app({ id: 'y', amount: 6 })]);
+    assert.deepEqual(
+      r.onlyInApp.map((o) => o.id),
+      ['x', 'y'],
+    );
+    assert.ok(r.warnings.some((w) => w.includes('2 linhas')));
+  });
+
+  it('sums the lines itself and warns when they miss the printed total', () => {
+    // PicPay setembro/2026: the model picked "Total da fatura" 9.972,58 but
+    // also invented a R$ 24,99 line — the sum exposes it.
+    const r = buildReport(
+      raw({
+        netTotal: { amount: 9972.58, label: 'Total da fatura', reasoning: '…' },
+        statementLines: [line({ amount: 9987.47 }), line({ amount: -39.9 }), line({ amount: 24.99 })],
+      }),
+      [],
+    );
+    assert.equal(r.statementRowsTotal, 9972.56);
+    assert.equal(r.statementTotal, 9972.58);
+    assert.equal(r.statementTotalLabel, 'Total da fatura');
+    assert.ok(r.warnings.some((w) => w.includes('somam')));
+  });
+
+  it('does not warn when the lines add up to the printed total', () => {
+    const r = buildReport(
+      raw({
+        netTotal: { amount: 60.1, label: 'Total da fatura', reasoning: '…' },
+        statementLines: [line({ amount: 100 }), line({ amount: -39.9 })],
+      }),
+      [],
+    );
+    assert.equal(r.statementRowsTotal, 60.1);
+    assert.deepEqual(r.warnings, []);
   });
 });

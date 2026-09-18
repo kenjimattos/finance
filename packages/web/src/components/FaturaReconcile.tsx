@@ -4,34 +4,33 @@ import { motion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import type { ReconcileReport, ReconcileMissingRow } from '../lib/apiTypes';
-import { extractPdfText, PdfError } from '../lib/pdfText';
+import { readPdfForUpload, PdfError } from '../lib/pdfFile';
 import { LongWait, type WaitStep } from './LongWait';
 import { useToast } from './Toast';
 import { keys } from '../lib/queryKeys';
 
 /**
- * Pick the issuer's closed-bill PDF → its text is extracted here in the browser
- * (lib/pdfText.ts), so only text is uploaded and a protected statement's
- * password never leaves the machine → the API diffs those lines against the
- * bill being viewed → the user applies the fixes:
+ * Pick the issuer's closed-bill PDF → it is checked here (encrypted files are
+ * refused: reading them would mean sending the password) and uploaded → the
+ * model reads it and pairs it against the bill being viewed, and the API
+ * checks that answer → the user audits it (each line carries the printed text
+ * and the model's reason) and applies the fixes:
  *   - insert statement lines missing from the app (as manual transactions)
  *   - fix cent drift on manual installment rows
  * "Só no app" rows are informational (duplicates / cycle differences).
  */
 
-const MAX_PDF_BYTES = 20 * 1024 * 1024;
-
-// The two halves of the wait, in the order they run. Timings come from the
-// [pdf] / [extract] logs: the parse is milliseconds, the model call is the
-// whole minute, so only the second step gets an expectation.
+// The two halves of the wait, in the order they run: reading the file is
+// milliseconds, the model call is the whole wait, so only it gets an
+// expectation.
 const WAIT_STEPS: WaitStep[] = [
-  { key: 'pdf', label: 'abrindo o PDF' },
+  { key: 'pdf', label: 'preparando o PDF' },
   {
     key: 'llm',
-    label: 'lendo os lançamentos',
-    hint: 'A fatura é lida por IA — costuma levar cerca de 1 minuto.',
+    label: 'conciliando com o app',
+    hint: 'A IA lê a fatura e compara com o app — pode levar alguns minutos.',
     slowHint:
-      'Ainda lendo. Leituras longas acontecem quando a fatura tem muitos lançamentos ou o provedor de IA está congestionado.',
+      'Ainda conciliando. Faturas com muitos lançamentos e modelos de raciocínio demoram mais; o provedor de IA também pode estar congestionado.',
   },
 ];
 
@@ -60,9 +59,6 @@ export function FaturaReconcile({
   const [file, setFile] = useState<File | null>(null);
   // Which WAIT_STEPS entry is running, or null when idle.
   const [waitStep, setWaitStep] = useState<string | null>(null);
-  // Set once the PDF turns out to be encrypted; reveals the password field.
-  const [needsPassword, setNeedsPassword] = useState(false);
-  const [password, setPassword] = useState('');
   const [report, setReport] = useState<ReconcileReport | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
@@ -83,14 +79,11 @@ export function FaturaReconcile({
   const reconcileM = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error('no file');
-      if (file.size > MAX_PDF_BYTES) throw new Error('PDF_TOO_LARGE');
       setWaitStep('pdf');
-      const pdfText = await extractPdfText(file, password || undefined);
-      // The round trip the user is actually waiting on; [pdf] above logs the
-      // local half, so the two together account for the whole wait.
+      const pdfBase64 = await readPdfForUpload(file);
       setWaitStep('llm');
       const startedAt = performance.now();
-      const report = await api.reconcileFatura({ accountId, billOffset, pdfText });
+      const report = await api.reconcileFatura({ accountId, billOffset, pdfBase64 });
       console.log(`[reconcile] server round trip ${Math.round(performance.now() - startedAt)}ms`);
       return report;
     },
@@ -100,29 +93,17 @@ export function FaturaReconcile({
       setSelected(new Set(res.missingInApp.map((_, i) => i)));
     },
     onError: (err) => {
-      // Encrypted statement: keep the file, reveal the password field and let
-      // the user retry. Nothing has been uploaded at this point.
-      if (err instanceof PdfError && (err.kind === 'NEEDS_PASSWORD' || err.kind === 'WRONG_PASSWORD')) {
-        setNeedsPassword(true);
-        toast.show({
-          message:
-            err.kind === 'WRONG_PASSWORD'
-              ? 'Senha incorreta.'
-              : 'Este PDF é protegido. Digite a senha para abrir.',
-        });
-        return;
-      }
-      let msg = 'Falha ao ler o PDF. Tente novamente.';
-      if (err instanceof Error && err.message === 'PDF_TOO_LARGE') {
-        msg = 'PDF acima de 20MB.';
-      } else if (err instanceof PdfError && err.kind === 'NO_TEXT') {
-        msg = 'PDF sem texto extraível (escaneado?). Use a importação por screenshots.';
+      // Nothing has been uploaded when a PdfError is thrown.
+      let msg = 'Falha na conciliação. Tente novamente.';
+      if (err instanceof PdfError && err.kind === 'ENCRYPTED') {
+        msg =
+          'Este PDF é protegido por senha. Para conciliar, salve uma cópia sem senha (ex.: imprimir como PDF) — a senha não é enviada ao servidor.';
+      } else if (err instanceof PdfError && err.kind === 'TOO_LARGE') {
+        msg = 'PDF acima de 10MB.';
       } else if (err instanceof PdfError) {
-        msg = 'Não foi possível abrir o PDF. O arquivo está corrompido?';
+        msg = 'O arquivo não é um PDF.';
       } else if (err instanceof ApiError && err.status === 503) {
         msg = 'Conciliação não configurada no servidor.';
-      } else if (err instanceof ApiError && err.status === 422) {
-        msg = 'PDF sem texto extraível (escaneado?). Use a importação por screenshots.';
       } else if (err instanceof ApiError && err.status === 429) {
         msg = 'Provedor de IA ocupado. Tente de novo em alguns segundos.';
       }
@@ -187,7 +168,6 @@ export function FaturaReconcile({
   const selectedRows = missing.filter((_, i) => selected.has(i));
   const manualMismatches = (report?.amountMismatches ?? []).filter((m) => m.app.source === 'manual');
   const deltaOk = report != null && Math.abs(report.delta) < 0.005;
-  const gapOff = report != null && Math.abs(report.extractionGap) >= 0.01;
 
   return createPortal(
     <motion.div
@@ -231,11 +211,7 @@ export function FaturaReconcile({
               type="file"
               accept="application/pdf"
               className="hidden"
-              onChange={(e) => {
-                setFile(e.target.files?.[0] ?? null);
-                setNeedsPassword(false);
-                setPassword('');
-              }}
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
             <button
               type="button"
@@ -245,41 +221,10 @@ export function FaturaReconcile({
               {file ? `${file.name} — trocar` : 'Escolher PDF da fatura'}
             </button>
 
-            {/* Shown only once PDF.js reports the file is encrypted. The
-                password decrypts it here in the browser; it is never sent to
-                the server nor persisted. */}
-            {needsPassword && (
-              <div className="mt-5 space-y-2">
-                <label
-                  htmlFor="pdf-password"
-                  className="block font-mono text-xs uppercase tracking-widest text-[color:var(--color-ink-muted)]"
-                >
-                  senha do pdf
-                </label>
-                <input
-                  id="pdf-password"
-                  type="password"
-                  autoFocus
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && password && !reconcileM.isPending) reconcileM.mutate();
-                  }}
-                  disabled={reconcileM.isPending}
-                  className="w-full max-w-[24ch] border-b border-[color:var(--color-rule)] bg-transparent pb-2 font-mono text-lg text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
-                  autoComplete="off"
-                />
-                <p className="font-body text-xs text-[color:var(--color-ink-muted)]">
-                  O PDF é aberto aqui no navegador — a senha não é enviada ao
-                  servidor.
-                </p>
-              </div>
-            )}
-
             <div className="mt-6 flex justify-end">
               <button
                 type="button"
-                disabled={!file || reconcileM.isPending || (needsPassword && !password)}
+                disabled={!file || reconcileM.isPending}
                 onClick={() => reconcileM.mutate()}
                 className="bg-[color:var(--color-accent)] px-5 py-2 font-mono text-sm text-[color:var(--color-paper)] disabled:opacity-40"
               >
@@ -312,31 +257,36 @@ export function FaturaReconcile({
                 </div>
               </div>
 
-              {/* O total vem do resumo impresso no PDF. Se as linhas lidas não
-                  somam esse valor, a leitura perdeu algo — avisar, porque as
-                  listas abaixo ficam incompletas na mesma medida. */}
-              {gapOff && (
-                <p className="mt-3 border-t border-[color:var(--color-ink)]/15 pt-2 font-body text-xs text-[color:var(--color-accent)]">
-                  As linhas lidas somam {BRL.format(report.statementRowsTotal)} —{' '}
-                  {BRL.format(Math.abs(report.extractionGap))}{' '}
-                  {report.extractionGap > 0 ? 'a menos que' : 'a mais que'} o total impresso na
-                  fatura. Alguma linha do PDF não foi lida corretamente; as listas abaixo podem
-                  estar incompletas.
-                </p>
-              )}
-              {report.statementTotalSource === 'rows' && (
+              {/* De onde veio o total da fatura: a IA escolhe o valor impresso
+                  que é o líquido do período (cada emissor rotula diferente) e
+                  diz por quê — mostrado para que a escolha possa ser conferida. */}
+              {report.statementTotalSource === 'printed' ? (
                 <p className="mt-3 border-t border-[color:var(--color-ink)]/15 pt-2 font-body text-xs text-[color:var(--color-ink-muted)]">
-                  O PDF não traz um total de lançamentos — o valor acima é a soma das linhas lidas.
+                  <span className="font-mono text-[color:var(--color-ink)]">
+                    “{report.statementTotalLabel ?? 'total impresso'}”
+                  </span>{' '}
+                  — {report.statementTotalReasoning}
+                </p>
+              ) : (
+                <p className="mt-3 border-t border-[color:var(--color-ink)]/15 pt-2 font-body text-xs text-[color:var(--color-ink-muted)]">
+                  O PDF não traz um total — o valor acima é a soma das linhas lidas.
                 </p>
               )}
               {report.statementCharges != null && report.statementCharges !== 0 && (
                 <p className="mt-2 font-body text-xs text-[color:var(--color-ink-muted)]">
                   Fora dos lançamentos, a fatura cobra {BRL.format(report.statementCharges)} de
-                  encargos
-                  {report.statementBillTotal != null &&
-                    ` (total desta fatura: ${BRL.format(report.statementBillTotal)})`}
-                  .
+                  encargos.
                 </p>
+              )}
+              {/* Checagens que a resposta da IA não passou (soma das linhas ×
+                  total, pareamentos inválidos). As listas abaixo continuam
+                  válidas, mas incompletas ou suspeitas na mesma medida. */}
+              {report.warnings.length > 0 && (
+                <ul className="mt-3 space-y-1 border-t border-[color:var(--color-ink)]/15 pt-2 font-body text-xs text-[color:var(--color-accent)]">
+                  {report.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
               )}
             </div>
 
@@ -373,12 +323,20 @@ export function FaturaReconcile({
                         }}
                       />
                       <span className="w-12 shrink-0 font-mono text-xs text-[color:var(--color-ink-muted)]">{fmtDate(r.statementDate)}</span>
-                      <span className="min-w-0 flex-1 truncate font-body text-sm text-[color:var(--color-ink)]">
-                        {r.description}
-                        {r.installmentNumber != null && (
-                          <span className="ml-1 font-mono text-xs text-[color:var(--color-ink-muted)]">
-                            {r.installmentNumber}/{r.totalInstallments}
-                          </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-body text-sm text-[color:var(--color-ink)]">
+                          {r.description}
+                          {r.installmentNumber != null && (
+                            <span className="ml-1 font-mono text-xs text-[color:var(--color-ink-muted)]">
+                              {r.installmentNumber}/{r.totalInstallments}
+                            </span>
+                          )}
+                        </span>
+                        <span className="block truncate font-mono text-[11px] text-[color:var(--color-ink-muted)]" title={r.quote}>
+                          {r.quote}
+                        </span>
+                        {r.note && (
+                          <span className="block font-body text-xs text-[color:var(--color-ink-muted)]">{r.note}</span>
                         )}
                       </span>
                       {r.cardLast4 && (
@@ -396,11 +354,11 @@ export function FaturaReconcile({
               </section>
             )}
 
-            {/* Centavos divergentes */}
+            {/* Valores divergentes: a IA pareou, o valor não bate (o diff é do código) */}
             {report.amountMismatches.length > 0 && (
               <section>
                 <div className="mb-2 flex items-baseline justify-between">
-                  <div className="eyebrow">centavos divergentes ({report.amountMismatches.length})</div>
+                  <div className="eyebrow">valores divergentes ({report.amountMismatches.length})</div>
                   <button
                     type="button"
                     disabled={manualMismatches.length === 0 || fixM.isPending}
@@ -419,13 +377,18 @@ export function FaturaReconcile({
                       className="flex items-center gap-3 border border-[color:var(--color-ink)]/20 px-3 py-2"
                     >
                       <span className="w-12 shrink-0 font-mono text-xs text-[color:var(--color-ink-muted)]">{fmtDate(m.app.date)}</span>
-                      <span className="min-w-0 flex-1 truncate font-body text-sm text-[color:var(--color-ink)]">
-                        {m.app.description}
-                        {m.app.installmentNumber != null && (
-                          <span className="ml-1 font-mono text-xs text-[color:var(--color-ink-muted)]">
-                            {m.app.installmentNumber}/{m.app.totalInstallments}
-                          </span>
-                        )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-body text-sm text-[color:var(--color-ink)]">
+                          {m.app.description}
+                          {m.app.installmentNumber != null && (
+                            <span className="ml-1 font-mono text-xs text-[color:var(--color-ink-muted)]">
+                              {m.app.installmentNumber}/{m.app.totalInstallments}
+                            </span>
+                          )}
+                        </span>
+                        <span className="block truncate font-mono text-[11px] text-[color:var(--color-ink-muted)]" title={m.statement.quote}>
+                          fatura: {m.statement.quote}
+                        </span>
                       </span>
                       <span className="font-mono text-xs text-[color:var(--color-ink-muted)]">
                         {BRL.format(m.app.amount)} → {BRL.format(m.statement.amount)}
@@ -455,14 +418,17 @@ export function FaturaReconcile({
                       className="flex items-center gap-3 border border-[color:var(--color-ink)]/10 px-3 py-2 opacity-70"
                     >
                       <span className="w-12 shrink-0 font-mono text-xs text-[color:var(--color-ink-muted)]">{fmtDate(l.date)}</span>
-                      <span className="min-w-0 flex-1 truncate font-body text-sm text-[color:var(--color-ink)]">{l.description}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-body text-sm text-[color:var(--color-ink)]">{l.description}</span>
+                        <span className="block font-body text-xs text-[color:var(--color-ink-muted)]">{l.reason}</span>
+                      </span>
                       <span className="font-mono text-[10px] uppercase text-[color:var(--color-ink-muted)]">{l.source}</span>
                       <span className="font-mono text-sm text-[color:var(--color-ink)]">{BRL.format(l.amount)}</span>
                     </div>
                   ))}
                 </div>
                 <p className="mt-2 font-body text-xs text-[color:var(--color-ink-muted)]">
-                  Estão no app mas não no PDF — confira se são duplicadas ou de outro ciclo.
+                  Estão no app mas não no PDF — o motivo em cada linha é a leitura da IA.
                 </p>
               </section>
             )}

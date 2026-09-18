@@ -358,8 +358,10 @@ export interface ExtractedFaturaRow {
   billShift: number;
 }
 
-/** A statement line from the closed-bill PDF, as used in reconciliation. */
+/** A statement line from the closed-bill PDF, as read by the model. */
 export interface StatementLine {
+  /** The line exactly as printed, so the reading can be audited. */
+  quote: string;
   date: string;
   description: string;
   /** Signed: estornos negative. */
@@ -367,11 +369,19 @@ export interface StatementLine {
   cardLast4: string | null;
   installmentNumber: number | null;
   totalInstallments: number | null;
+  /** The model's remark on an unpaired line, if any. */
+  note: string | null;
 }
 
 /** An app transaction inside the reconciled bill window. */
-export interface ReconcileAppLine extends StatementLine {
+export interface ReconcileAppLine {
   id: string;
+  date: string;
+  description: string;
+  amount: number;
+  cardLast4: string | null;
+  installmentNumber: number | null;
+  totalInstallments: number | null;
   source: string;
   category: string | null;
 }
@@ -387,18 +397,18 @@ export interface ReconcileReport {
   window: { periodStart: string; periodEnd: string; nextDueDate: string };
   /** Sum of categorized app rows — mirrors the bill headline. */
   appBillTotal: number;
-  /** The statement's lançamentos total — printed by the issuer when available. */
+  /** The statement's net total as printed (picked by the model), else the line sum. */
   statementTotal: number;
-  /** Net sum of the lines actually read from the PDF (payments excluded). */
-  statementRowsTotal: number;
+  /** The printed label of that figure, e.g. "Total da fatura". */
+  statementTotalLabel: string | null;
+  /** The model's one-sentence reason that figure is the net one. */
+  statementTotalReasoning: string;
   /** Where statementTotal came from: the PDF's summary box, or the read lines. */
   statementTotalSource: 'printed' | 'rows';
-  /** statementTotal - statementRowsTotal: how much the extraction missed. */
-  extractionGap: number;
+  /** Sum of the lines the model read — computed by the API, not the model. */
+  statementRowsTotal: number;
   /** "Total de encargos" (juros/multa/IOF), when the statement charges any. */
   statementCharges: number | null;
-  /** "Total desta fatura" — lançamentos + encargos + saldo. */
-  statementBillTotal: number | null;
   /** appBillTotal - statementTotal. */
   delta: number;
   matchedCount: number;
@@ -409,7 +419,9 @@ export interface ReconcileReport {
     /** statement - app: what the app row must gain to agree. */
     diff: number;
   }>;
-  onlyInApp: ReconcileAppLine[];
+  onlyInApp: Array<ReconcileAppLine & { reason: string }>;
+  /** Checks the model's answer failed (Portuguese, ready to show). */
+  warnings: string[];
 }
 
 /** The payload the user confirms for insertion. */
