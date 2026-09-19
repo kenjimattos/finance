@@ -10,7 +10,9 @@ import { recomputeShiftForDateChange } from './billWindow.js';
  * corrupted ones from the 2026-07 PicPay incident, preserved as fixtures
  * in syncCreditTransactions.test.ts).
  *
- * For each incoming payload the engine picks one of four outcomes:
+ * The engine runs two passes over the account's complete served set.
+ *
+ * Pass 1 — payloads whose provider ID is already known:
  *
  *   1. provider ID known, identity hash matches (or stored hash is NULL)
  *      → update mutable fields only
@@ -19,9 +21,16 @@ import { recomputeShiftForDateChange } from './billWindow.js';
  *      date; move the date in place and recompute any bill-shift override
  *   3. provider ID known, materially different content → recycled ID:
  *      keep the old row, mint a new one, log to transaction_sync_conflicts
- *   4. provider ID unknown → if the content hash matches an existing
- *      pluggy row, treat as a reconnect (adopt the new provider ID);
- *      otherwise insert a brand-new row
+ *
+ * Pass 2 — payloads whose provider ID is unknown, run only after pass 1 so
+ * the set of IDs served in this sync is complete:
+ *
+ *   4. the content hash matches a pluggy row whose provider ID was NOT
+ *      served in this sync (an orphan) → the same purchase re-served under
+ *      a new ID (reconnect, PicPay's daily ID rotation): adopt the new ID
+ *   5. otherwise → insert a brand-new row. A hash match against a row that
+ *      WAS served is a genuinely distinct purchase with identical content —
+ *      Pluggy returning both records side by side is the proof
  *
  * Full state machine documentation: docs/sync.md.
  */
@@ -158,17 +167,17 @@ export function upsertCreditTransactions(
     WHERE id = ?
   `);
 
-  // Fallback lookup by content hash — used when provider_transaction_id is
-  // not found (e.g. bank reconnect where Pluggy issues new IDs for the same
-  // physical card). Matches only pluggy-sourced rows to avoid colliding with
-  // manual transactions that share a date/amount/slug.
+  // Pass-2 lookup by content hash — used when provider_transaction_id is
+  // not found (reconnects, where Pluggy issues new IDs for the same physical
+  // card; PicPay re-minting IDs per scrape). Matches only pluggy-sourced
+  // rows to avoid colliding with manual transactions. Returns every
+  // candidate; the caller keeps only orphans.
   const findByIdentityHash = db.prepare(`
-    SELECT id, identity_hash, raw_json
+    SELECT id, provider_transaction_id
     FROM transactions
     WHERE identity_hash = ?
       AND source = 'pluggy'
-    ORDER BY first_seen_at DESC
-    LIMIT 1
+    ORDER BY first_seen_at DESC, rowid DESC
   `);
 
   // Like updateTx but also records the new provider_transaction_id.
@@ -238,19 +247,29 @@ export function upsertCreditTransactions(
 
   const runBatch = db.transaction(() => {
     const syncRunId = Number(insertSyncRun.run(accountId, txs.length).lastInsertRowid);
+    // Every provider ID Pluggy served for this account in this sync. A row
+    // whose provider ID is absent is an orphan: Pluggy stopped serving it.
+    const servedIds = new Set(txs.map((t) => t.id));
+    const unknownIds: IncomingCreditTransaction[] = [];
 
+    const record = (t: IncomingCreditTransaction, rawJson: string, appliedTo: string) =>
+      logPayload.run(accountId, t.id, appliedTo, payloadHash(rawJson), rawJson, syncRunId, syncRunId);
+
+    // ── Pass 1: known provider IDs ────────────────────────────────────────
     for (const t of txs) {
+      const siblings = findByProviderId.all(t.id) as ExistingRow[];
+      const existing: ExistingRow | undefined = siblings[0];
+      if (!existing) {
+        unknownIds.push(t);
+        continue;
+      }
+
       const metadata = t.creditCardMetadata ?? null;
       const newDate = toYmd(t.date);
       const newPayload = JSON.stringify(t);
+      const newHash = computeIdentityHash(toInstant(t.date), t.amount, t.description ?? null);
       // The local row this payload ends up on, for the observation log.
       let appliedTo: string;
-      const record = () =>
-        logPayload.run(accountId, t.id, appliedTo, payloadHash(newPayload), newPayload, syncRunId, syncRunId);
-      const newHash = computeIdentityHash(newDate, t.amount, t.description ?? null);
-
-      const siblings = findByProviderId.all(t.id) as ExistingRow[];
-      const existing: ExistingRow | undefined = siblings[0];
 
       // Absorb a corrupted or implausible in-place mutation: keep the row's
       // identity and display fields untouched, refresh raw_json/last_seen so
@@ -265,44 +284,6 @@ export function upsertCreditTransactions(
         counts.suppressed++;
         return row.id;
       };
-
-      if (!existing) {
-        // Provider ID not found — check by content hash (reconnect /
-        // generation-rotation case).
-        const existingByHash = findByIdentityHash.get(newHash) as
-          | { id: string; identity_hash: string | null; raw_json: string }
-          | undefined;
-        // The hash covers date+amount+slug only — enough to dedupe the same
-        // purchase re-served under a fresh ID (reconnects; PicPay re-mints
-        // IDs on every daily scrape), but it would ALSO swallow a genuinely
-        // distinct second purchase at the same merchant for the same amount
-        // on the same day. The full payload timestamp separates the two:
-        // re-served records carry the identical instant down to the
-        // millisecond, while two real purchases differ.
-        if (existingByHash && sameInstant(existingByHash.raw_json, t.date)) {
-          // Same purchase, new Pluggy ID — update with the new provider ID.
-          console.log(`[sync] Hash match for new provider ID ${t.id} — updating existing row ${existingByHash.id}`);
-          updateTxWithProvider.run(t.id, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existingByHash.id);
-          appliedTo = existingByHash.id;
-          counts.updated++;
-        } else {
-          // Brand-new transaction — insert fresh row.
-          appliedTo = randomUUID();
-          insertTx.run(
-            appliedTo, t.id, accountId, itemId, newDate,
-            t.description ?? null, t.amount,
-            t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
-            t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
-            metadata?.installmentNumber ?? null, metadata?.totalInstallments ?? null,
-            metadata?.billId ?? null, lastFourDigits(metadata?.cardNumber),
-            newHash, newPayload,
-          );
-          counts.inserted++;
-        }
-        record();
-        counts.processed++;
-        continue;
-      }
 
       // Match the payload against ANY sibling generation, not just the
       // newest: if Pluggy reverts a mutated record to a previous content,
@@ -410,7 +391,47 @@ export function upsertCreditTransactions(
         appliedTo = newLocalId;
         counts.recycled++;
       }
-      record();
+      record(t, newPayload, appliedTo);
+      counts.processed++;
+    }
+
+    // ── Pass 2: unknown provider IDs ──────────────────────────────────────
+    for (const t of unknownIds) {
+      const metadata = t.creditCardMetadata ?? null;
+      const newDate = toYmd(t.date);
+      const newPayload = JSON.stringify(t);
+      const newHash = computeIdentityHash(toInstant(t.date), t.amount, t.description ?? null);
+      let appliedTo: string;
+
+      // Same content under a new ID only counts as the same purchase when
+      // the old ID stopped being served. If Pluggy still serves the old
+      // record alongside this one, they are two purchases with identical
+      // content (seen in prod: two metro taps, or Itaú's older records that
+      // all carry the same synthetic 18:00:01 time) and both must stay.
+      const orphan = (findByIdentityHash.all(newHash) as Array<{
+        id: string;
+        provider_transaction_id: string | null;
+      }>).find((r) => r.provider_transaction_id === null || !servedIds.has(r.provider_transaction_id));
+
+      if (orphan) {
+        console.log(`[sync] Hash match for new provider ID ${t.id} — adopting orphan row ${orphan.id}`);
+        updateTxWithProvider.run(t.id, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, orphan.id);
+        appliedTo = orphan.id;
+        counts.updated++;
+      } else {
+        appliedTo = randomUUID();
+        insertTx.run(
+          appliedTo, t.id, accountId, itemId, newDate,
+          t.description ?? null, t.amount,
+          t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
+          t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
+          metadata?.installmentNumber ?? null, metadata?.totalInstallments ?? null,
+          metadata?.billId ?? null, lastFourDigits(metadata?.cardNumber),
+          newHash, newPayload,
+        );
+        counts.inserted++;
+      }
+      record(t, newPayload, appliedTo);
       counts.processed++;
     }
 
@@ -447,30 +468,6 @@ function isChimeraMutation(
   );
 }
 
-/**
- * Compare the full timestamp stored in a row's raw payload against an
- * incoming payload date. Pluggy re-serves the same purchase under fresh IDs
- * with the instant preserved down to the millisecond, while two genuinely
- * distinct same-day purchases at the same merchant differ in time-of-day.
- *
- * Falls back to `true` (treat as the same purchase — the historical
- * behavior) when either side lacks a parseable timestamp, so date-only
- * connectors keep the old dedup semantics.
- */
-function sameInstant(rawJson: string, incoming: Date | string): boolean {
-  let storedDate: unknown;
-  try {
-    storedDate = (JSON.parse(rawJson) as { date?: unknown }).date;
-  } catch {
-    return true;
-  }
-  if (typeof storedDate !== 'string') return true;
-  const a = Date.parse(storedDate);
-  const b = typeof incoming === 'string' ? Date.parse(incoming) : incoming.getTime();
-  if (Number.isNaN(a) || Number.isNaN(b)) return true;
-  return a === b;
-}
-
 /** Content fingerprint of a raw payload, for the observation log. */
 function payloadHash(rawJson: string): string {
   return createHash('sha256').update(rawJson).digest('hex').slice(0, 32);
@@ -482,24 +479,57 @@ function daysBetween(a: string, b: string): number {
 }
 
 /**
- * Stable fingerprint for a transaction: SHA-256 of date + amount + merchant
- * slug. Used by sync to detect Pluggy ID recycling AND to deduplicate across
- * reconnects (same purchase, different Pluggy connection = new provider IDs
- * but same content hash).
+ * Stable fingerprint for a transaction: SHA-256 of the full payload instant
+ * (ISO, millisecond precision) + amount + merchant slug. Used by sync to
+ * detect Pluggy ID recycling AND to deduplicate across reconnects (same
+ * purchase, different Pluggy connection = new provider IDs but same content
+ * hash).
+ *
+ * The instant, not just the day, is what separates two real purchases of the
+ * same amount at the same merchant on the same day — they differ in
+ * time-of-day, while a re-served record keeps the instant to the millisecond.
  *
  * Account ID is intentionally excluded so the hash is portable across
  * reconnections where Pluggy assigns new account IDs for the same physical card.
  */
 export function computeIdentityHash(
-  date: string,
+  instant: string,
   amount: number,
   description: string | null,
 ): string {
   const slug = extractMerchantSlug(description) ?? '';
   return createHash('sha256')
-    .update(`${date}|${amount}|${slug}`)
+    .update(`${instant}|${amount}|${slug}`)
     .digest('hex')
     .slice(0, 32);
+}
+
+/**
+ * Normalize a payload date to the ISO instant the identity hash uses. Pluggy
+ * delivers a Date or an ISO string; unparseable strings pass through as-is
+ * so the hash stays deterministic.
+ */
+export function toInstant(d: Date | string): string {
+  const ms = typeof d === 'string' ? Date.parse(d) : d.getTime();
+  return Number.isNaN(ms) ? String(d) : new Date(ms).toISOString();
+}
+
+/**
+ * The instant to hash for an already-stored row: the time-of-day from its
+ * raw payload, but only when that payload still describes the row's own
+ * date. Suppressed mutations leave a foreign payload in raw_json (a stale
+ * record re-dated months away) and must not rewrite the row's identity, so
+ * those — and rows without a timestamp, like the demo seed — fall back to
+ * midnight UTC of the stored date.
+ */
+export function storedIdentityInstant(date: string, rawJson: string): string {
+  try {
+    const raw = (JSON.parse(rawJson) as { date?: unknown }).date;
+    if (typeof raw === 'string' && raw.slice(0, 10) === date) return toInstant(raw);
+  } catch {
+    // fall through
+  }
+  return `${date}T00:00:00.000Z`;
 }
 
 /**

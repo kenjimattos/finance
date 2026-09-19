@@ -4,6 +4,8 @@ import Database, { type Database as DB } from 'better-sqlite3';
 import {
   upsertCreditTransactions,
   computeIdentityHash,
+  storedIdentityInstant,
+  toInstant,
   lastFourDigits,
   toYmd,
   type IncomingCreditTransaction,
@@ -188,7 +190,7 @@ describe('upsertCreditTransactions', () => {
     assert.equal(r.card_last4, '3047');
     assert.equal(
       r.identity_hash,
-      computeIdentityHash('2026-04-22', 101.14, CLARO.description ?? null),
+      computeIdentityHash('2026-04-22T15:41:22.001Z', 101.14, CLARO.description ?? null),
     );
   });
 
@@ -483,10 +485,59 @@ describe('sync guards', () => {
     const second = { ...first, id: 'coffee-2', date: '2026-07-10T15:47:33.001Z' };
 
     run([first]);
-    const counts = run([second]);
+    const counts = run([first, second]);
 
     assert.equal(counts.inserted, 1, 'second purchase inserted, not swallowed');
     assert.equal(allRows().length, 2);
+  });
+
+  it('keeps identical-content purchases that Pluggy serves side by side (Itaú synthetic 18:00:01)', () => {
+    // Real prod pattern (Itaú, 2025 records): two R$ 4,50 purchases at the
+    // same merchant on the same day, both stamped with the synthetic
+    // 18:00:01.000 time — same identity hash, two provider IDs, both still
+    // served on every sync. They are two purchases, not one re-served.
+    const a = payload({
+      id: '1b9f965e-itau',
+      description: 'Rua Major Paladino     Sao Paulo     BRA',
+      descriptionRaw: 'Rua Major Paladino     Sao Paulo     BRA',
+      amount: 4.5,
+      date: '2025-05-21T18:00:01.000Z',
+      status: 'POSTED',
+    });
+    const b = { ...a, id: '91dcbf19-itau' };
+
+    run([a, b]);
+    assert.equal(allRows().length, 2, 'first sync: both inserted');
+
+    run([a, b]);
+    assert.equal(allRows().length, 2, 'next sync: still two, nothing adopted');
+  });
+
+  it('a new ID whose twin arrives in a later sync is inserted, not adopted, while the first ID is still served', () => {
+    const a = payload({ id: 'twin-a', amount: 4.5, date: '2025-05-21T18:00:01.000Z' });
+    const b = { ...a, id: 'twin-b' };
+
+    run([a]);
+    const counts = run([a, b]);
+
+    assert.equal(counts.inserted, 1);
+    const pids = allRows().map((r) => r.provider_transaction_id).sort();
+    assert.deepEqual(pids, ['twin-a', 'twin-b']);
+  });
+
+  it('adopts only when the old ID stopped being served', () => {
+    const a = payload({ id: 'gen-a', amount: 17.73, date: '2026-07-13T17:06:14.001Z' });
+    run([a]);
+    const [row] = allRows();
+
+    const counts = run([{ ...a, id: 'gen-b' }]); // gen-a no longer served
+
+    assert.equal(counts.updated, 1);
+    assert.equal(counts.inserted, 0);
+    const rows = allRows();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, row.id);
+    assert.equal(rows[0].provider_transaction_id, 'gen-b');
   });
 
   it('does not mint a third row when Pluggy flip-flops a mutated record back to its old content', () => {
@@ -557,10 +608,37 @@ describe('observation log', () => {
 
 describe('helpers', () => {
   it('computeIdentityHash ignores account and is stable', () => {
-    const a = computeIdentityHash('2026-07-13', 17.73, 'CARREFOUR SP CSB 335     .SAO BERNAR BRA');
-    const b = computeIdentityHash('2026-07-13', 17.73, 'CARREFOUR SP CSB 335  .SAO BERNAR BRA');
+    const t = '2026-07-13T17:06:14.001Z';
+    const a = computeIdentityHash(t, 17.73, 'CARREFOUR SP CSB 335     .SAO BERNAR BRA');
+    const b = computeIdentityHash(t, 17.73, 'CARREFOUR SP CSB 335  .SAO BERNAR BRA');
     assert.equal(a, b, 'same slug → same hash despite whitespace noise');
-    assert.notEqual(a, computeIdentityHash('2026-07-14', 17.73, 'CARREFOUR SP CSB 335'));
+    assert.notEqual(a, computeIdentityHash('2026-07-13T09:12:00.001Z', 17.73, 'CARREFOUR SP CSB 335'),
+      'same day, different time → different hash');
+  });
+
+  it('toInstant normalizes Dates and ISO strings to one ISO form', () => {
+    assert.equal(toInstant('2026-07-13T17:06:14.001Z'), '2026-07-13T17:06:14.001Z');
+    assert.equal(toInstant(new Date('2026-07-13T17:06:14.001Z')), '2026-07-13T17:06:14.001Z');
+    assert.equal(toInstant('2026-07-13'), '2026-07-13T00:00:00.000Z');
+    assert.equal(toInstant('garbage'), 'garbage');
+  });
+
+  it('storedIdentityInstant reproduces the hash sync computed for the row', () => {
+    run([CLARO]);
+    const [row] = allRows();
+    const rehashed = computeIdentityHash(
+      storedIdentityInstant(row.date as string, row.raw_json as string),
+      row.amount as number,
+      row.description as string,
+    );
+    assert.equal(rehashed, row.identity_hash);
+  });
+
+  it('storedIdentityInstant ignores a foreign payload left by a suppressed mutation', () => {
+    // raw_json re-dated to July while the row still describes April.
+    const raw = JSON.stringify({ date: '2026-07-20T11:59:53.001Z' });
+    assert.equal(storedIdentityInstant('2026-04-22', raw), '2026-04-22T00:00:00.000Z');
+    assert.equal(storedIdentityInstant('2026-04-22', '{}'), '2026-04-22T00:00:00.000Z');
   });
 
   it('lastFourDigits handles the known cardNumber shapes', () => {

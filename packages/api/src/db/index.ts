@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
+import { computeIdentityHash, storedIdentityInstant } from '../services/syncCreditTransactions.js';
 
 export type { Db };
 
@@ -88,7 +89,7 @@ function runSchema(db: Db): void {
   --
   -- id is a local application UUID (stable, never changes). provider_transaction_id
   -- holds the Pluggy-issued ID, which may be recycled across different purchases.
-  -- identity_hash is SHA-256(account+date+amount+merchant_slug) and lets sync
+  -- identity_hash is SHA-256(payload instant+amount+merchant_slug) and lets sync
   -- detect when Pluggy reuses an ID for a materially different transaction.
   CREATE TABLE IF NOT EXISTS transactions (
     id                         TEXT PRIMARY KEY,
@@ -902,6 +903,45 @@ db.exec(
       })();
     } finally {
       db.pragma('foreign_keys = ON');
+    }
+  }
+}
+
+// Migration (user_version 1): identity_hash covers the full payload instant
+// instead of the calendar day. The day-only hash made two real same-day
+// purchases collide, which a separate timestamp check then had to undo —
+// and that check broke Itaú's PENDING→POSTED (the POSTED arrives with the
+// same content, a new ID, and a time shifted by -3h). Rehash every pluggy
+// row from its stored date plus the time-of-day in its raw payload; without
+// this, no stored hash would match on the next sync and every row would be
+// treated as a repost. user_version is the marker because the change is to
+// values, not to the table's shape.
+{
+  const version = db.pragma('user_version', { simple: true }) as number;
+  if (version < 1) {
+    const rows = db
+      .prepare(
+        `SELECT id, date, amount, description, raw_json FROM transactions WHERE source = 'pluggy'`,
+      )
+      .all() as Array<{
+      id: string;
+      date: string;
+      amount: number;
+      description: string | null;
+      raw_json: string;
+    }>;
+    const setHash = db.prepare(`UPDATE transactions SET identity_hash = ? WHERE id = ?`);
+    db.transaction(() => {
+      for (const r of rows) {
+        setHash.run(
+          computeIdentityHash(storedIdentityInstant(r.date, r.raw_json), r.amount, r.description),
+          r.id,
+        );
+      }
+      db.pragma('user_version = 1');
+    })();
+    if (rows.length > 0) {
+      console.log(`[migration] identity_hash recomputed with full instant for ${rows.length} row(s).`);
     }
   }
 }

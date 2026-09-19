@@ -16,11 +16,12 @@
  *
  * The RNG is seeded, so two runs on the same day produce identical data.
  */
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { getDb, type Db } from '../db/index.js';
 import { isDemoUser } from '../config.js';
 import { extractMerchantSlug } from '../services/merchantSlug.js';
 import { CATEGORY_PALETTE } from '../services/categoryColors.js';
+import { computeIdentityHash } from '../services/syncCreditTransactions.js';
 
 const argv = process.argv.slice(2);
 const force = argv.includes('--force');
@@ -296,10 +297,7 @@ const seed = db.transaction(() => {
   function addTx(t: TxInput): void {
     const id = randomUUID();
     const slug = extractMerchantSlug(t.desc) ?? '';
-    const hash = createHash('sha256')
-      .update(`${t.date}|${t.amount}|${slug}`)
-      .digest('hex')
-      .slice(0, 32);
+    const hash = computeIdentityHash(`${t.date}T00:00:00.000Z`, t.amount, t.desc);
     insTx.run(
       id,
       `demo-${id.slice(0, 18)}`,
