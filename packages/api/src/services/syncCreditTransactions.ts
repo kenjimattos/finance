@@ -81,8 +81,12 @@ interface ExistingRow {
 }
 
 /**
- * Upsert one batch (page) of credit-card transactions for an account,
- * inside a single SQLite transaction. Returns per-outcome counts.
+ * Upsert everything Pluggy served for one account in one sync, inside a
+ * single SQLite transaction. Returns per-outcome counts.
+ *
+ * `txs` must be the account's COMPLETE result set (all pages), not a page:
+ * each call is recorded as one sync run, and every payload is logged to
+ * transaction_payloads against that run.
  */
 export function upsertCreditTransactions(
   db: Database,
@@ -204,6 +208,25 @@ export function upsertCreditTransactions(
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
+  const insertSyncRun = db.prepare(
+    `INSERT INTO sync_runs (account_id, served_count) VALUES (?, ?)`,
+  );
+  const finishSyncRun = db.prepare(`UPDATE sync_runs SET counts_json = ? WHERE id = ?`);
+
+  // Observation log (see the table comment in db/index.ts). An unchanged
+  // payload only advances last_seen; the local row it landed on is refreshed
+  // because adoption can move a provider ID onto a different row.
+  const logPayload = db.prepare(`
+    INSERT INTO transaction_payloads
+      (account_id, provider_transaction_id, transaction_id, payload_hash, raw_json,
+       first_sync_run_id, last_sync_run_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(provider_transaction_id, payload_hash) DO UPDATE SET
+      transaction_id   = excluded.transaction_id,
+      last_seen_at     = datetime('now'),
+      last_sync_run_id = excluded.last_sync_run_id
+  `);
+
   const counts: UpsertCounts = {
     processed: 0,
     inserted: 0,
@@ -214,10 +237,16 @@ export function upsertCreditTransactions(
   };
 
   const runBatch = db.transaction(() => {
+    const syncRunId = Number(insertSyncRun.run(accountId, txs.length).lastInsertRowid);
+
     for (const t of txs) {
       const metadata = t.creditCardMetadata ?? null;
       const newDate = toYmd(t.date);
       const newPayload = JSON.stringify(t);
+      // The local row this payload ends up on, for the observation log.
+      let appliedTo: string;
+      const record = () =>
+        logPayload.run(accountId, t.id, appliedTo, payloadHash(newPayload), newPayload, syncRunId, syncRunId);
       const newHash = computeIdentityHash(newDate, t.amount, t.description ?? null);
 
       const siblings = findByProviderId.all(t.id) as ExistingRow[];
@@ -227,13 +256,14 @@ export function upsertCreditTransactions(
       // identity and display fields untouched, refresh raw_json/last_seen so
       // the anomaly is visible but doesn't repeat, and log it once (repeat
       // deliveries of the same payload produce no new conflict rows).
-      const suppressMutation = (row: ExistingRow, why: string) => {
+      const suppressMutation = (row: ExistingRow, why: string): string => {
         if (row.raw_json !== newPayload) {
           console.warn(`[sync] Suppressed in-place mutation of ${t.id} (${why}).`);
           insertConflict.run(t.id, row.id, null, 'mutation-suppressed', row.raw_json, newPayload);
         }
         touchTx.run(newPayload, row.id);
         counts.suppressed++;
+        return row.id;
       };
 
       if (!existing) {
@@ -253,11 +283,13 @@ export function upsertCreditTransactions(
           // Same purchase, new Pluggy ID — update with the new provider ID.
           console.log(`[sync] Hash match for new provider ID ${t.id} — updating existing row ${existingByHash.id}`);
           updateTxWithProvider.run(t.id, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existingByHash.id);
+          appliedTo = existingByHash.id;
           counts.updated++;
         } else {
           // Brand-new transaction — insert fresh row.
+          appliedTo = randomUUID();
           insertTx.run(
-            randomUUID(), t.id, accountId, itemId, newDate,
+            appliedTo, t.id, accountId, itemId, newDate,
             t.description ?? null, t.amount,
             t.amountInAccountCurrency ?? null, t.currencyCode ?? null,
             t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
@@ -267,6 +299,7 @@ export function upsertCreditTransactions(
           );
           counts.inserted++;
         }
+        record();
         counts.processed++;
         continue;
       }
@@ -284,6 +317,7 @@ export function upsertCreditTransactions(
         // Same transaction — only update fields that Pluggy legitimately
         // changes over time.
         updateTx.run(t.status ?? null, metadata?.billId ?? null, newHash, newPayload, hashMatch.id);
+        appliedTo = hashMatch.id;
         counts.updated++;
       } else if (isChimeraMutation(t, existing)) {
         // Corrupted half-mutation (2026-07 PicPay incident): Pluggy rewrote
@@ -291,7 +325,7 @@ export function upsertCreditTransactions(
         // amount still belong to the OLD content. The payload is a chimera —
         // a real merchant name grafted onto a stale record's amount — and
         // minting it would put a phantom on the bill.
-        suppressMutation(existing, 'chimera: descriptionRaw/amount still match the old record');
+        appliedTo = suppressMutation(existing, 'chimera: descriptionRaw/amount still match the old record');
       } else if (
         existing.amount === t.amount &&
         extractMerchantSlug(existing.description) === extractMerchantSlug(t.description ?? null) &&
@@ -301,7 +335,7 @@ export function upsertCreditTransactions(
         // PENDING→POSTED repost, it's Pluggy re-dating a stale record. Moving
         // the row would drag old (often categorized) spend into the current
         // bill, so absorb the mutation instead.
-        suppressMutation(
+        appliedTo = suppressMutation(
           existing,
           `date jump ${existing.date} → ${newDate} exceeds ${REPOST_MAX_DAYS} days`,
         );
@@ -318,6 +352,7 @@ export function upsertCreditTransactions(
           `(status ${t.status ?? '?'}). Updating in place.`,
         );
         updateTxRepost.run(newDate, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existing.id);
+        appliedTo = existing.id;
         counts.reposts++;
 
         // The date moved, so any bill shift the user applied under the old
@@ -372,10 +407,14 @@ export function upsertCreditTransactions(
           newHash, newPayload,
         );
         insertConflict.run(t.id, existing.id, newLocalId, 'recycled', existing.raw_json, newPayload);
+        appliedTo = newLocalId;
         counts.recycled++;
       }
+      record();
       counts.processed++;
     }
+
+    finishSyncRun.run(JSON.stringify(counts), syncRunId);
   });
   runBatch();
 
@@ -430,6 +469,11 @@ function sameInstant(rawJson: string, incoming: Date | string): boolean {
   const b = typeof incoming === 'string' ? Date.parse(incoming) : incoming.getTime();
   if (Number.isNaN(a) || Number.isNaN(b)) return true;
   return a === b;
+}
+
+/** Content fingerprint of a raw payload, for the observation log. */
+function payloadHash(rawJson: string): string {
+  return createHash('sha256').update(rawJson).digest('hex').slice(0, 32);
 }
 
 /** Whole days between two yyyy-mm-dd strings (absolute, UTC). */

@@ -574,6 +574,9 @@ async function syncItem(db: Db, itemId: string) {
     // rows into both tables.
     if (account.type !== 'CREDIT') continue;
 
+    // Collect every page before touching the DB: the engine needs the
+    // account's complete served set in one call (one sync run).
+    const served: Awaited<ReturnType<typeof pluggy.fetchTransactions>>['results'] = [];
     let page = 1;
     let totalPages = 1;
     do {
@@ -581,11 +584,13 @@ async function syncItem(db: Db, itemId: string) {
         pageSize: 500,
         page,
       });
-      const counts = upsertCreditTransactions(db, txPage.results, account.id, itemId);
-      txCount += counts.processed;
+      served.push(...txPage.results);
       totalPages = txPage.totalPages;
       page++;
     } while (page <= totalPages);
+
+    const counts = upsertCreditTransactions(db, served, account.id, itemId);
+    txCount += counts.processed;
   }
 
   // Apply learned rules to transactions that don't yet have a user category.

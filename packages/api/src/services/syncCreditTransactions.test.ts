@@ -93,6 +93,28 @@ function createSchema(d: DB): void {
       detected_at             TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE sync_runs (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id   TEXT NOT NULL,
+      started_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      served_count INTEGER NOT NULL,
+      counts_json  TEXT
+    );
+
+    CREATE TABLE transaction_payloads (
+      id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id              TEXT NOT NULL,
+      provider_transaction_id TEXT NOT NULL,
+      transaction_id          TEXT,
+      payload_hash            TEXT NOT NULL,
+      raw_json                TEXT NOT NULL,
+      first_seen_at           TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at            TEXT NOT NULL DEFAULT (datetime('now')),
+      first_sync_run_id       INTEGER NOT NULL,
+      last_sync_run_id        INTEGER NOT NULL,
+      UNIQUE (provider_transaction_id, payload_hash)
+    );
+
     CREATE TABLE account_settings (
       account_id   TEXT PRIMARY KEY,
       display_name TEXT,
@@ -487,6 +509,49 @@ describe('sync guards', () => {
     assert.equal(counts.recycled, 0);
     assert.equal(allRows().length, 2, 'no third copy minted');
     assert.equal(conflicts().length, 1, 'no extra conflict logged');
+  });
+});
+
+describe('observation log', () => {
+  function payloads() {
+    return db
+      .prepare(`SELECT * FROM transaction_payloads ORDER BY id`)
+      .all() as Array<Record<string, unknown>>;
+  }
+
+  it('records one sync run per call with the served count and outcome counts', () => {
+    run([CLARO, payload({ id: 'other', amount: 9.9 })]);
+
+    const runs = db.prepare(`SELECT * FROM sync_runs`).all() as Array<Record<string, unknown>>;
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].account_id, ACCOUNT_ID);
+    assert.equal(runs[0].served_count, 2);
+    assert.equal(JSON.parse(runs[0].counts_json as string).inserted, 2);
+  });
+
+  it('an unchanged payload only advances last_sync_run_id; a changed one adds a row', () => {
+    run([CLARO]);
+    run([CLARO]);
+    let ps = payloads();
+    assert.equal(ps.length, 1, 'same content → same row');
+    assert.equal(ps[0].first_sync_run_id, 1);
+    assert.equal(ps[0].last_sync_run_id, 2);
+
+    run([{ ...CLARO, status: 'POSTED' }]);
+    ps = payloads();
+    assert.equal(ps.length, 2, 'changed content → new row');
+    assert.equal(ps[1].first_sync_run_id, 3);
+    assert.equal(JSON.parse(ps[1].raw_json as string).status, 'POSTED');
+  });
+
+  it('links each payload to the local row it was applied to, including suppressed ones', () => {
+    run([CLARO]);
+    const [row] = allRows();
+    run([{ ...CLARO, date: '2026-07-20T11:59:53.001Z' }]); // implausible date jump → suppressed
+
+    const ps = payloads();
+    assert.equal(ps.length, 2);
+    assert.ok(ps.every((p) => p.transaction_id === row.id));
   });
 });
 

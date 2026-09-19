@@ -342,6 +342,46 @@ function runSchema(db: Db): void {
     detected_at             TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Observation log of the credit-card sync, kept so connector behavior can
+  -- be studied from data instead of guessed (how an issuer re-times a
+  -- PENDING when it posts, whether it re-mints IDs, when a record stops
+  -- being served). Append-only; nothing in the app reads it.
+  --
+  -- sync_runs: one row per account per sync, with the engine's outcome
+  -- counts. Tells "no sync happened" apart from "the record stopped coming".
+  CREATE TABLE IF NOT EXISTS sync_runs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   TEXT NOT NULL,
+    started_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    served_count INTEGER NOT NULL,
+    counts_json  TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sync_runs_account ON sync_runs(account_id, id);
+
+  -- transaction_payloads: every distinct payload Pluggy served for a provider
+  -- ID. A payload that comes back unchanged only advances last_seen_* — a new
+  -- row appears only when the content changes, so the table grows with
+  -- Pluggy's edits, not with the number of syncs. A provider ID was served in
+  -- run N when first_sync_run_id <= N <= last_sync_run_id for one of its rows.
+  -- transaction_id is the local row the payload was applied to; no FK, so
+  -- the history outlives deleted rows.
+  CREATE TABLE IF NOT EXISTS transaction_payloads (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id              TEXT NOT NULL,
+    provider_transaction_id TEXT NOT NULL,
+    transaction_id          TEXT,
+    payload_hash            TEXT NOT NULL,
+    raw_json                TEXT NOT NULL,
+    first_seen_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    first_sync_run_id       INTEGER NOT NULL,
+    last_sync_run_id        INTEGER NOT NULL,
+    UNIQUE (provider_transaction_id, payload_hash)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_payloads_tx ON transaction_payloads(transaction_id);
+
   -- BANK transactions live in their own table because their identity model
   -- differs from credit cards. Pluggy provider_transaction_id is the only
   -- stable identity signal for BANK (no installment refreshes, no observed

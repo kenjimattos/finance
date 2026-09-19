@@ -14,6 +14,8 @@ Read-through cache of CREDIT-account data. `accounts` is populated during sync f
 
 `transactions.source` distinguishes `'pluggy'` (synced) from `'manual'` (user-created). Manual transactions persist across re-syncs; Pluggy-sourced rows can be wiped and re-synced without losing user work because all user work lives in separate join tables keyed on the local UUID.
 
+Two append-only tables log what the credit sync observed, so connector behavior can be studied from data rather than inferred from whatever `raw_json` last held: `sync_runs` (one row per account per sync, with served count and outcome counts) and `transaction_payloads` (every distinct payload served per provider ID, with the first and last sync run that carried it and the local row it was applied to). An unchanged payload only advances `last_seen_at` / `last_sync_run_id`, so the log grows with Pluggy's edits, not with sync frequency. No FK to `transactions` — the history outlives deleted rows. Nothing in the app reads these tables; they are for analysis.
+
 ### 2. Pluggy bank cache
 
 Tables: `bank_transactions`, `bank_transaction_description_overrides`, `bank_bill_payment_tags`, `bank_transaction_hidden`, `balance_snapshots`, `balance_anchors`. Legacy: `bill_payment_tags`.
