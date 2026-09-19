@@ -10,8 +10,9 @@ import { useToast } from './Toast';
 import { keys } from '../lib/queryKeys';
 
 /**
- * Pick the issuer's closed-bill PDF → it is checked here (encrypted files are
- * refused: reading them would mean sending the password) and uploaded → the
+ * Pick the issuer's closed-bill PDF → a protected one is decrypted here with
+ * the password the user types, so only the unlocked copy is uploaded and the
+ * password never leaves the machine (lib/pdfFile.ts) → the
  * model reads it and pairs it against the bill being viewed, and the API
  * checks that answer → the user audits it (each line carries the printed text
  * and the model's reason) and applies the fixes:
@@ -59,6 +60,9 @@ export function FaturaReconcile({
   const [file, setFile] = useState<File | null>(null);
   // Which WAIT_STEPS entry is running, or null when idle.
   const [waitStep, setWaitStep] = useState<string | null>(null);
+  // Set once the PDF turns out to be encrypted; reveals the password field.
+  const [needsPassword, setNeedsPassword] = useState(false);
+  const [password, setPassword] = useState('');
   const [report, setReport] = useState<ReconcileReport | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
@@ -80,7 +84,7 @@ export function FaturaReconcile({
     mutationFn: async () => {
       if (!file) throw new Error('no file');
       setWaitStep('pdf');
-      const pdfBase64 = await readPdfForUpload(file);
+      const pdfBase64 = await readPdfForUpload(file, password || undefined);
       setWaitStep('llm');
       const startedAt = performance.now();
       const report = await api.reconcileFatura({ accountId, billOffset, pdfBase64 });
@@ -93,11 +97,22 @@ export function FaturaReconcile({
       setSelected(new Set(res.missingInApp.map((_, i) => i)));
     },
     onError: (err) => {
-      // Nothing has been uploaded when a PdfError is thrown.
+      // Nothing has been uploaded when a PdfError is thrown. Encrypted
+      // statement: keep the file, reveal the password field, let them retry.
+      if (err instanceof PdfError && (err.kind === 'NEEDS_PASSWORD' || err.kind === 'WRONG_PASSWORD')) {
+        setNeedsPassword(true);
+        toast.show({
+          message:
+            err.kind === 'WRONG_PASSWORD'
+              ? 'Senha incorreta.'
+              : 'Este PDF é protegido. Digite a senha para abrir.',
+        });
+        return;
+      }
       let msg = 'Falha na conciliação. Tente novamente.';
-      if (err instanceof PdfError && err.kind === 'ENCRYPTED') {
+      if (err instanceof PdfError && err.kind === 'UNDECRYPTABLE') {
         msg =
-          'Este PDF é protegido por senha. Para conciliar, salve uma cópia sem senha (ex.: imprimir como PDF) — a senha não é enviada ao servidor.';
+          'Não foi possível remover a senha deste PDF. Salve uma cópia sem senha (ex.: imprimir como PDF) e envie essa cópia.';
       } else if (err instanceof PdfError && err.kind === 'TOO_LARGE') {
         msg = 'PDF acima de 10MB.';
       } else if (err instanceof PdfError) {
@@ -211,7 +226,11 @@ export function FaturaReconcile({
               type="file"
               accept="application/pdf"
               className="hidden"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                setFile(e.target.files?.[0] ?? null);
+                setNeedsPassword(false);
+                setPassword('');
+              }}
             />
             <button
               type="button"
@@ -221,10 +240,42 @@ export function FaturaReconcile({
               {file ? `${file.name} — trocar` : 'Escolher PDF da fatura'}
             </button>
 
+            {/* Shown only once the file turns out to be encrypted. The
+                password decrypts it here in the browser; it is never sent to
+                the server nor persisted. */}
+            {needsPassword && (
+              <div className="mt-5 space-y-2">
+                <label
+                  htmlFor="pdf-password"
+                  className="block font-mono text-xs uppercase tracking-widest text-[color:var(--color-ink-muted)]"
+                >
+                  senha do pdf
+                </label>
+                <input
+                  id="pdf-password"
+                  type="password"
+                  autoFocus
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && password && !reconcileM.isPending) reconcileM.mutate();
+                  }}
+                  disabled={reconcileM.isPending}
+                  className="w-full max-w-[24ch] border-b border-[color:var(--color-rule)] bg-transparent pb-2 font-mono text-lg text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-accent)]"
+                  autoComplete="off"
+                />
+                <p className="font-body text-xs text-[color:var(--color-ink-muted)]">
+                  A senha é usada aqui no navegador para gerar uma cópia sem
+                  senha — só essa cópia é enviada; a senha não sai do seu
+                  computador.
+                </p>
+              </div>
+            )}
+
             <div className="mt-6 flex justify-end">
               <button
                 type="button"
-                disabled={!file || reconcileM.isPending}
+                disabled={!file || reconcileM.isPending || (needsPassword && !password)}
                 onClick={() => reconcileM.mutate()}
                 className="bg-[color:var(--color-accent)] px-5 py-2 font-mono text-sm text-[color:var(--color-paper)] disabled:opacity-40"
               >
