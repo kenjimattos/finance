@@ -179,7 +179,7 @@ describe('upsertCreditTransactions', () => {
   it('inserts a brand-new transaction with a local UUID and identity hash', () => {
     const counts = run([CLARO]);
 
-    assert.deepEqual(counts, { processed: 1, inserted: 1, updated: 0, reposts: 0, recycled: 0, suppressed: 0 });
+    assert.deepEqual(counts, { processed: 1, inserted: 1, updated: 0, reposts: 0, recycled: 0, suppressed: 0, pendingPosted: 0 });
     const rows = allRows();
     assert.equal(rows.length, 1);
     const r = rows[0];
@@ -560,6 +560,138 @@ describe('sync guards', () => {
     assert.equal(counts.recycled, 0);
     assert.equal(allRows().length, 2, 'no third copy minted');
     assert.equal(conflicts().length, 1, 'no extra conflict logged');
+  });
+});
+
+describe('PENDING→POSTED under a new provider ID', () => {
+  // Real prod pair (Itaú, kenji, Sept 2026 bill): the PENDING was served
+  // 10/08–20/08, then Pluggy stopped serving it; on 11/09 the POSTED arrived
+  // under a new ID with the time shifted by exactly -3h and a bill ID.
+  // Provider IDs are the real 8-char prefixes.
+  const BASTA_PENDING = payload({
+    id: 'df2ac30a',
+    description: 'BASTASANTO ANDREBRA',
+    descriptionRaw: 'BASTASANTO ANDREBRA',
+    amount: 280.24,
+    date: '2026-08-08T04:12:23.000Z',
+    status: 'PENDING',
+    creditCardMetadata: { cardNumber: '3177' },
+  });
+  const BASTA_POSTED = payload({
+    ...BASTA_PENDING,
+    id: 'a654edea',
+    date: '2026-08-08T01:12:23.000Z',
+    status: 'POSTED',
+    creditCardMetadata: { cardNumber: '3177', billId: '59184689-8854-444a-b073-4265cba62d9e' },
+  });
+  const UNRELATED = payload({ id: 'unrelated', amount: 9.9, date: '2026-08-20T10:00:00.000Z' });
+
+  it('promotes the orphan PENDING row in place; category survives, no duplicate', () => {
+    run([BASTA_PENDING]);
+    const [row] = allRows();
+    db.prepare(`INSERT INTO user_categories (name) VALUES ('Alimentação')`).run();
+    db.prepare(
+      `INSERT INTO transaction_categories (transaction_id, user_category_id, assigned_by)
+       VALUES (?, 1, 'manual')`,
+    ).run(row.id);
+
+    run([UNRELATED]); // 20/08 on: the PENDING is no longer served
+    const counts = run([UNRELATED, BASTA_POSTED]);
+
+    assert.equal(counts.pendingPosted, 1);
+    assert.equal(counts.inserted, 0);
+    const rows = allRows().filter((r) => r.amount === 280.24);
+    assert.equal(rows.length, 1, 'one purchase, one row');
+    assert.equal(rows[0].id, row.id, 'same local UUID');
+    assert.equal(rows[0].provider_transaction_id, 'a654edea');
+    assert.equal(rows[0].status, 'POSTED');
+    assert.equal(rows[0].bill_id, '59184689-8854-444a-b073-4265cba62d9e');
+    assert.equal(
+      rows[0].identity_hash,
+      computeIdentityHash('2026-08-08T01:12:23.000Z', 280.24, 'BASTASANTO ANDREBRA'),
+    );
+    assert.ok(
+      db.prepare(`SELECT 1 FROM transaction_categories WHERE transaction_id = ?`).get(row.id),
+      'category stays on the row',
+    );
+
+    // Next sync serves the POSTED again: plain pass-1 update.
+    const again = run([UNRELATED, BASTA_POSTED]);
+    assert.equal(again.updated, 2);
+    assert.equal(allRows().length, 2);
+  });
+
+  it('follows the date when the -3h shift crosses midnight UTC', () => {
+    const pending = { ...BASTA_PENDING, date: '2026-08-08T01:30:00.000Z' };
+    const posted = { ...BASTA_POSTED, date: '2026-08-07T22:30:00.000Z' };
+    run([pending]);
+    const [row] = allRows();
+
+    const counts = run([posted]);
+
+    assert.equal(counts.pendingPosted, 1);
+    const [promoted] = allRows();
+    assert.equal(promoted.id, row.id);
+    assert.equal(promoted.date, '2026-08-07');
+  });
+
+  it('does not promote while Pluggy still serves the PENDING', () => {
+    run([BASTA_PENDING]);
+    const counts = run([BASTA_PENDING, BASTA_POSTED]);
+
+    assert.equal(counts.pendingPosted, 0);
+    assert.equal(counts.inserted, 1);
+    assert.equal(allRows().length, 2, 'two served records stay two rows');
+  });
+
+  it('does not promote across more than PENDING_POSTED_MAX_HOURS', () => {
+    run([BASTA_PENDING]);
+    const counts = run([{ ...BASTA_POSTED, date: '2026-08-12T01:12:23.000Z' }]); // ~4 days
+
+    assert.equal(counts.pendingPosted, 0);
+    assert.equal(counts.inserted, 1);
+  });
+
+  it('does not promote onto a PENDING of another merchant with the same amount', () => {
+    run([BASTA_PENDING]);
+    const counts = run([{ ...BASTA_POSTED, description: 'OUTRA LOJA SANTO ANDREBRA', descriptionRaw: 'OUTRA LOJA SANTO ANDREBRA' }]);
+
+    assert.equal(counts.pendingPosted, 0);
+    assert.equal(counts.inserted, 1);
+  });
+
+  it('inserts for review when several orphan PENDINGs fit', () => {
+    run([BASTA_PENDING, { ...BASTA_PENDING, id: 'second-pending', date: '2026-08-08T05:00:00.000Z' }]);
+    const counts = run([BASTA_POSTED]);
+
+    assert.equal(counts.pendingPosted, 0);
+    assert.equal(counts.inserted, 1);
+    const cs = conflicts();
+    assert.equal(cs.length, 1);
+    assert.equal(cs[0].kind, 'pending-posted-ambiguous');
+    const minted = allRows().find((r) => r.provider_transaction_id === 'a654edea')!;
+    assert.equal(cs[0].new_transaction_id, minted.id, 'minted row is flagged, so learned rules skip it');
+  });
+
+  it('realigns a bill shift when the promotion moves the date', () => {
+    // Closing day 1: a PENDING dated 02/09 (next cycle) shifted -1 by the
+    // user onto the bill closing 01/09; the POSTED lands on 31/08, inside
+    // that bill naturally, so the shift must go.
+    db.prepare(
+      `INSERT INTO account_settings (account_id, closing_day, due_day) VALUES (?, 1, 10)`,
+    ).run(ACCOUNT_ID);
+    const pending = { ...BASTA_PENDING, date: '2026-09-02T01:00:00.000Z' };
+    run([pending]);
+    const [row] = allRows();
+    db.prepare(`INSERT INTO transaction_bill_overrides (transaction_id, shift) VALUES (?, -1)`).run(row.id);
+
+    run([{ ...BASTA_POSTED, date: '2026-08-31T22:00:00.000Z' }]);
+
+    assert.equal(allRows()[0].date, '2026-08-31');
+    assert.equal(
+      db.prepare(`SELECT shift FROM transaction_bill_overrides WHERE transaction_id = ?`).get(row.id),
+      undefined,
+    );
   });
 });
 

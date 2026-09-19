@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Corrigido
 
+- **Compras do Itaú que viravam duas linhas ao passar de PENDING para POSTED.** Na fatura de setembro, sete compras de agosto apareciam duplicadas: o PENDING, que o Pluggy enviou até 20/08, e o POSTED, que chegou em 11/09. Ao lançar a compra, o Itaú troca o ID e atrasa o horário em exatamente 3h, então nada ligava uma linha à outra. Agora, quando chega um POSTED com ID novo, o sync procura um PENDING da mesma conta que o Pluggy parou de enviar, com mesmo valor, mesmo comerciante e horário a até 72h, e atualiza essa linha em vez de criar outra. Categoria, divisão e deslocamento de fatura continuam nela, e a data acompanha a do POSTED mesmo quando as 3h viram o dia. Se houver mais de um PENDING possível, o sync não escolhe: insere o POSTED e deixa na caixa de entrada para você decidir. As sete duplicatas que já existem não são desfeitas por esta mudança.
+
 - **Divisão desatualizada depois de categorizar ou mover uma transação.** O `GET /bills/current/split-summary` faz `INNER JOIN` em `transaction_categories` e resolve a janela da fatura através do `bill_shift` — ou seja, categorizar uma linha ou empurrá-la para a fatura vizinha muda os totais da divisão, não só marcá-la ½/dela. Mas só as mutações de divisão (e a de ocultar) invalidavam esse cache, então as colunas da divisão ficavam com o valor antigo até a próxima ida ao servidor. Agora toda mutação de transação invalida a divisão junto com a fatura. Na mesma linha, descategorizar passou a invalidar a lista de categorias, que é ordenada por `usage_count`.
 
 ### Alterado

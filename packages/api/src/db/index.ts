@@ -332,6 +332,12 @@ function runSchema(db: Db): void {
   --                                 date jump). Nothing was minted —
   --                                 new_transaction_id is NULL; the payload was
   --                                 absorbed into the kept row's raw_json only.
+  --   kind = 'pending-posted-ambiguous': a POSTED arrived under a new ID and
+  --                                 more than one orphan PENDING could be its
+  --                                 predecessor. The POSTED was minted
+  --                                 (new_transaction_id) for review instead of
+  --                                 guessing; kept_transaction_id is one of
+  --                                 the candidates.
   CREATE TABLE IF NOT EXISTS transaction_sync_conflicts (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_transaction_id TEXT NOT NULL,

@@ -28,7 +28,11 @@ import { recomputeShiftForDateChange } from './billWindow.js';
  *   4. the content hash matches a pluggy row whose provider ID was NOT
  *      served in this sync (an orphan) → the same purchase re-served under
  *      a new ID (reconnect, PicPay's daily ID rotation): adopt the new ID
- *   5. otherwise → insert a brand-new row. A hash match against a row that
+ *   5. a POSTED payload matching exactly one orphan PENDING row (same
+ *      amount + merchant slug, instants within PENDING_POSTED_MAX_HOURS) →
+ *      the issuer posted the purchase under a new ID (Itaú): promote the
+ *      PENDING row in place, so user work stays attached
+ *   6. otherwise → insert a brand-new row. A hash match against a row that
  *      WAS served is a genuinely distinct purchase with identical content —
  *      Pluggy returning both records side by side is the proof
  *
@@ -69,6 +73,8 @@ export interface UpsertCounts {
   recycled: number;
   /** Corrupted in-place mutations absorbed without minting a row. */
   suppressed: number;
+  /** Orphan PENDING rows promoted by their POSTED successor under a new ID. */
+  pendingPosted: number;
 }
 
 /**
@@ -79,6 +85,14 @@ export interface UpsertCounts {
  * row would drag old categorized spend into the open bill.
  */
 export const REPOST_MAX_DAYS = 45;
+
+/**
+ * How far apart the PENDING and POSTED instants of one purchase may be when
+ * the issuer re-mints the ID on posting. Itaú shifts the time by exactly
+ * -3h (observed on every prod pair); the slack covers the calendar day
+ * flipping at midnight and issuers that stamp the posting time instead.
+ */
+export const PENDING_POSTED_MAX_HOURS = 72;
 
 interface ExistingRow {
   id: string;
@@ -210,6 +224,34 @@ export function upsertCreditTransactions(
     `SELECT closing_day, due_day FROM account_settings WHERE account_id = ?`,
   );
 
+  // Pass-2 candidates for a POSTED payload under a new ID: this account's
+  // PENDING rows with the same amount. Slug, orphan status and time window
+  // are checked in JS.
+  const findPendingByAmount = db.prepare(`
+    SELECT id, provider_transaction_id, date, description, raw_json
+    FROM transactions
+    WHERE account_id = ?
+      AND source = 'pluggy'
+      AND status = 'PENDING'
+      AND amount = ?
+  `);
+
+  // Promote a PENDING row to its POSTED successor: the row takes the new
+  // provider ID and every field the posting legitimately changes. Identity
+  // display fields (description, amount, card) stay, like in a repost.
+  const promotePending = db.prepare(`
+    UPDATE transactions SET
+      provider_transaction_id = ?,
+      date          = ?,
+      status        = ?,
+      bill_id       = ?,
+      identity_hash = ?,
+      last_seen_at  = datetime('now'),
+      raw_json      = ?,
+      synced_at     = datetime('now')
+    WHERE id = ?
+  `);
+
   const insertConflict = db.prepare(`
     INSERT INTO transaction_sync_conflicts
       (provider_transaction_id, kept_transaction_id, new_transaction_id,
@@ -236,6 +278,43 @@ export function upsertCreditTransactions(
       last_sync_run_id = excluded.last_sync_run_id
   `);
 
+  // Bill shifts are relative to the transaction's date, so moving a row's
+  // date (repost, PENDING promotion) invalidates the stored shift — it
+  // would drag the row to a neighboring bill. Recompute it so the row keeps
+  // displaying on the bill the user placed it on. Typical case: a pending
+  // Itaú installment dated on the bill's due date, shifted -1 to land on the
+  // right bill — once it posts with the real date it falls on that bill
+  // naturally and the shift must go.
+  const realignShift = (rowId: string, oldDate: string, newDate: string, providerId: string) => {
+    if (oldDate === newDate) return;
+    const override = getShiftOverride.get(rowId) as { shift: number } | undefined;
+    if (!override || override.shift === 0) return;
+    const settings = getAccountSettings.get(accountId) as
+      | { closing_day: number; due_day: number }
+      | undefined;
+    if (!settings) return;
+    const newShift = recomputeShiftForDateChange(
+      { closingDay: settings.closing_day, dueDay: settings.due_day },
+      oldDate,
+      newDate,
+      override.shift,
+    );
+    if (newShift === null || Math.abs(newShift) > 1) {
+      // Can't place the row on the original target bill with a ±1 shift —
+      // its natural cycle (usually the true bill after a repost) is the
+      // least wrong option.
+      console.warn(
+        `[sync] ${providerId} moved ${oldDate} → ${newDate} across ` +
+        `multiple cycles (required shift ${newShift}); clearing stale shift ${override.shift}.`,
+      );
+      deleteShiftOverride.run(rowId);
+    } else if (newShift === 0) {
+      deleteShiftOverride.run(rowId);
+    } else if (newShift !== override.shift) {
+      setShiftOverride.run(newShift, rowId);
+    }
+  };
+
   const counts: UpsertCounts = {
     processed: 0,
     inserted: 0,
@@ -243,6 +322,7 @@ export function upsertCreditTransactions(
     reposts: 0,
     recycled: 0,
     suppressed: 0,
+    pendingPosted: 0,
   };
 
   const runBatch = db.transaction(() => {
@@ -335,41 +415,7 @@ export function upsertCreditTransactions(
         updateTxRepost.run(newDate, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, existing.id);
         appliedTo = existing.id;
         counts.reposts++;
-
-        // The date moved, so any bill shift the user applied under the old
-        // date now targets the wrong cycle. Recompute it so the row keeps
-        // displaying on the bill the user placed it on. Typical case: a
-        // pending Itaú installment dated on the bill's due date, shifted -1
-        // to land on the right bill — once it posts with the real date it
-        // falls on that bill naturally and the shift must go.
-        const override = getShiftOverride.get(existing.id) as { shift: number } | undefined;
-        if (override && override.shift !== 0 && existing.date !== newDate) {
-          const settings = getAccountSettings.get(accountId) as
-            | { closing_day: number; due_day: number }
-            | undefined;
-          if (settings) {
-            const newShift = recomputeShiftForDateChange(
-              { closingDay: settings.closing_day, dueDay: settings.due_day },
-              existing.date,
-              newDate,
-              override.shift,
-            );
-            if (newShift === null || Math.abs(newShift) > 1) {
-              // Can't place the row on the original target bill with a ±1
-              // shift — its natural cycle (usually the true bill after a
-              // repost) is the least wrong option.
-              console.warn(
-                `[sync] Repost of ${t.id} moved ${existing.date} → ${newDate} across ` +
-                `multiple cycles (required shift ${newShift}); clearing stale shift ${override.shift}.`,
-              );
-              deleteShiftOverride.run(existing.id);
-            } else if (newShift === 0) {
-              deleteShiftOverride.run(existing.id);
-            } else if (newShift !== override.shift) {
-              setShiftOverride.run(newShift, existing.id);
-            }
-          }
-        }
+        realignShift(existing.id, existing.date, newDate, t.id);
       } else {
         // Recycled Pluggy ID: the incoming payload is a materially different
         // purchase. Keep the old row intact and insert the new one separately.
@@ -413,11 +459,42 @@ export function upsertCreditTransactions(
         provider_transaction_id: string | null;
       }>).find((r) => r.provider_transaction_id === null || !servedIds.has(r.provider_transaction_id));
 
+      // PENDING→POSTED under a new ID (Itaú): the POSTED keeps amount and
+      // merchant but carries a new provider ID and a shifted time, so its
+      // hash never matches the PENDING's. The PENDING row must be an orphan
+      // too — if Pluggy still serves it, the two are separate records.
+      const pendingMatches =
+        orphan || t.status !== 'POSTED'
+          ? []
+          : (findPendingByAmount.all(accountId, t.amount) as Array<{
+              id: string;
+              provider_transaction_id: string | null;
+              date: string;
+              description: string | null;
+              raw_json: string;
+            }>).filter(
+              (p) =>
+                (p.provider_transaction_id === null || !servedIds.has(p.provider_transaction_id)) &&
+                extractMerchantSlug(p.description) === extractMerchantSlug(t.description ?? null) &&
+                hoursBetween(storedIdentityInstant(p.date, p.raw_json), toInstant(t.date)) <=
+                  PENDING_POSTED_MAX_HOURS,
+            );
+
       if (orphan) {
         console.log(`[sync] Hash match for new provider ID ${t.id} — adopting orphan row ${orphan.id}`);
         updateTxWithProvider.run(t.id, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, orphan.id);
         appliedTo = orphan.id;
         counts.updated++;
+      } else if (pendingMatches.length === 1) {
+        const pending = pendingMatches[0];
+        console.log(
+          `[sync] POSTED ${t.id} succeeds orphan PENDING row ${pending.id} ` +
+          `(${pending.provider_transaction_id}); promoting in place.`,
+        );
+        promotePending.run(t.id, newDate, t.status ?? null, metadata?.billId ?? null, newHash, newPayload, pending.id);
+        realignShift(pending.id, pending.date, newDate, t.id);
+        appliedTo = pending.id;
+        counts.pendingPosted++;
       } else {
         appliedTo = randomUUID();
         insertTx.run(
@@ -430,6 +507,19 @@ export function upsertCreditTransactions(
           newHash, newPayload,
         );
         counts.inserted++;
+        if (pendingMatches.length > 1) {
+          // Several orphan PENDINGs fit: guessing would move user work onto
+          // the wrong purchase. Insert, and log a conflict so the row skips
+          // learned rules and lands in the inbox for a human.
+          console.warn(
+            `[sync] POSTED ${t.id} fits ${pendingMatches.length} orphan PENDING rows; ` +
+            `inserting ${appliedTo} for review.`,
+          );
+          insertConflict.run(
+            t.id, pendingMatches[0].id, appliedTo, 'pending-posted-ambiguous',
+            pendingMatches[0].raw_json, newPayload,
+          );
+        }
       }
       record(t, newPayload, appliedTo);
       counts.processed++;
@@ -471,6 +561,11 @@ function isChimeraMutation(
 /** Content fingerprint of a raw payload, for the observation log. */
 function payloadHash(rawJson: string): string {
   return createHash('sha256').update(rawJson).digest('hex').slice(0, 32);
+}
+
+/** Hours between two ISO instants (absolute). */
+function hoursBetween(a: string, b: string): number {
+  return Math.abs(Date.parse(a) - Date.parse(b)) / 3_600_000;
 }
 
 /** Whole days between two yyyy-mm-dd strings (absolute, UTC). */
