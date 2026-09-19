@@ -20,7 +20,7 @@ Stored hashes are recomputed from `date` + the time-of-day in `raw_json` by a on
 
 Five FK tables reference `transactions.id` (local UUID), all `ON DELETE CASCADE`: `transaction_categories`, `transaction_bill_overrides`, `transaction_description_overrides`, `transaction_splits`, `transaction_hidden`. A sixth, `bill_payment_tags`, still has the constraint but was drained by a migration into `bank_bill_payment_tags` and is no longer read. Manual transactions have `provider_transaction_id = NULL`.
 
-The same lookup-based logic runs in `POST /cashflow/sync` for `bank_transactions`.
+None of this runs for `bank_transactions`. `POST /cashflow/sync` is deliberately naive: a known provider ID overwrites the row's mutable fields, an unknown one inserts a row — no identity hash, no recycled-ID or PENDING→POSTED handling, and no payload log.
 
 ## The open bill problem
 
