@@ -25,8 +25,9 @@ import { recomputeShiftForDateChange } from './billWindow.js';
  * Pass 2 — payloads whose provider ID is unknown, run only after pass 1 so
  * the set of IDs served in this sync is complete:
  *
- *   4. the content hash matches a pluggy row whose provider ID was NOT
- *      served in this sync (an orphan) → the same purchase re-served under
+ *   4. the content hash matches a pluggy row that no payload of this sync
+ *      landed on (an orphan — its provider ID is gone, or was recycled onto
+ *      another purchase) → the same purchase re-served under
  *      a new ID (reconnect, PicPay's daily ID rotation): adopt the new ID
  *   5. a POSTED payload matching exactly one orphan PENDING row (same
  *      amount + merchant slug, instants within PENDING_POSTED_MAX_HOURS) →
@@ -327,13 +328,18 @@ export function upsertCreditTransactions(
 
   const runBatch = db.transaction(() => {
     const syncRunId = Number(insertSyncRun.run(accountId, txs.length).lastInsertRowid);
-    // Every provider ID Pluggy served for this account in this sync. A row
-    // whose provider ID is absent is an orphan: Pluggy stopped serving it.
-    const servedIds = new Set(txs.map((t) => t.id));
+    // Every local row some payload of this sync landed on. A row outside
+    // this set is an orphan: Pluggy stopped serving it. That includes a row
+    // whose provider ID IS still served but now carries a different purchase
+    // (PicPay recycles a stale PENDING's ID onto a new purchase, and the
+    // payload lands on a sibling row) — the ID lives on, the record doesn't.
+    const servedRows = new Set<string>();
     const unknownIds: IncomingCreditTransaction[] = [];
 
-    const record = (t: IncomingCreditTransaction, rawJson: string, appliedTo: string) =>
+    const record = (t: IncomingCreditTransaction, rawJson: string, appliedTo: string) => {
+      servedRows.add(appliedTo);
       logPayload.run(accountId, t.id, appliedTo, payloadHash(rawJson), rawJson, syncRunId, syncRunId);
+    };
 
     // ── Pass 1: known provider IDs ────────────────────────────────────────
     for (const t of txs) {
@@ -450,14 +456,14 @@ export function upsertCreditTransactions(
       let appliedTo: string;
 
       // Same content under a new ID only counts as the same purchase when
-      // the old ID stopped being served. If Pluggy still serves the old
+      // the old record stopped being served. If Pluggy still serves the old
       // record alongside this one, they are two purchases with identical
       // content (seen in prod: two metro taps, or Itaú's older records that
       // all carry the same synthetic 18:00:01 time) and both must stay.
       const orphan = (findByIdentityHash.all(newHash) as Array<{
         id: string;
         provider_transaction_id: string | null;
-      }>).find((r) => r.provider_transaction_id === null || !servedIds.has(r.provider_transaction_id));
+      }>).find((r) => !servedRows.has(r.id));
 
       // PENDING→POSTED under a new ID (Itaú): the POSTED keeps amount and
       // merchant but carries a new provider ID and a shifted time, so its
@@ -474,7 +480,7 @@ export function upsertCreditTransactions(
               raw_json: string;
             }>).filter(
               (p) =>
-                (p.provider_transaction_id === null || !servedIds.has(p.provider_transaction_id)) &&
+                !servedRows.has(p.id) &&
                 extractMerchantSlug(p.description) === extractMerchantSlug(t.description ?? null) &&
                 hoursBetween(storedIdentityInstant(p.date, p.raw_json), toInstant(t.date)) <=
                   PENDING_POSTED_MAX_HOURS,

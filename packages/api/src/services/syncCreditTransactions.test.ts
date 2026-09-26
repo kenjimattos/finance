@@ -540,6 +540,45 @@ describe('sync guards', () => {
     assert.equal(rows[0].provider_transaction_id, 'gen-b');
   });
 
+  it('adopts when the old ID is still served but was recycled onto another purchase', () => {
+    // Real prod pattern (PicPay, Sept 2026 bill): the Drogasil PENDING's ID
+    // 5c1cd4ca was recycled onto a Carrefour purchase, and the Drogasil
+    // POSTED arrived under 094f4a41 with the exact same identity hash. The
+    // ID is still served, but no longer carries the Drogasil record.
+    const drogasil = payload({
+      id: '5c1cd4ca',
+      description: 'DROGASIL1841  PARC01/02',
+      descriptionRaw: 'DROGASIL1841  PARC01/02',
+      amount: 193.51,
+      date: '2026-08-19T10:03:42.001Z',
+    });
+    run([drogasil]);
+    const [row] = allRows();
+    db.prepare(`INSERT INTO user_categories (name) VALUES ('Farmácia')`).run();
+    db.prepare(
+      `INSERT INTO transaction_categories (transaction_id, user_category_id, assigned_by)
+       VALUES (?, 1, 'manual')`,
+    ).run(row.id);
+
+    const carrefour = payload({
+      id: '5c1cd4ca',
+      description: 'CARREFOUR SP CSB 335     .SAO BERNAR BRA',
+      descriptionRaw: 'CARREFOUR SP CSB 335     .SAO BERNAR BRA',
+      amount: 38.98,
+      date: '2026-09-18T21:13:44.001Z',
+    });
+    run([carrefour]); // recycle: Drogasil row kept, Carrefour minted
+
+    const counts = run([carrefour, { ...drogasil, id: '094f4a41', status: 'POSTED' }]);
+
+    assert.equal(counts.inserted, 0, 'no duplicate Drogasil row');
+    const rows = allRows().filter((r) => r.amount === 193.51);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, row.id, 'user work stays attached');
+    assert.equal(rows[0].provider_transaction_id, '094f4a41');
+    assert.equal(rows[0].status, 'POSTED');
+  });
+
   it('does not mint a third row when Pluggy flip-flops a mutated record back to its old content', () => {
     run([CLARO]);
     // Full recycle to a different purchase…
@@ -642,6 +681,21 @@ describe('PENDING→POSTED under a new provider ID', () => {
     assert.equal(counts.pendingPosted, 0);
     assert.equal(counts.inserted, 1);
     assert.equal(allRows().length, 2, 'two served records stay two rows');
+  });
+
+  it('promotes a PENDING whose ID was recycled onto another purchase', () => {
+    run([BASTA_PENDING]);
+    const [row] = allRows();
+    const recycled = payload({ id: BASTA_PENDING.id, amount: 42.7, date: '2026-09-05T10:00:00.000Z' });
+    run([recycled]);
+
+    const counts = run([recycled, BASTA_POSTED]);
+
+    assert.equal(counts.pendingPosted, 1);
+    assert.equal(counts.inserted, 0);
+    const rows = allRows().filter((r) => r.amount === 280.24);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, row.id);
   });
 
   it('does not promote across more than PENDING_POSTED_MAX_HOURS', () => {

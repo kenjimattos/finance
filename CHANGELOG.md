@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Não lançado]
+
+### Corrigido
+
+- **Compras do PicPay duplicadas ao passar de PENDING para POSTED quando o ID antigo foi reaproveitado.** Na fatura de setembro, quatro compras de agosto (Drogasil, duas da Shopee e Arezzo) e um pagamento de fatura apareceram duas vezes. O PicPay reaproveitou os IDs dos PENDING para compras novas de setembro, e os POSTED chegaram com ID novo e exatamente o mesmo conteúdo dos PENDING. A regra do 1.10.0 só deixa um ID novo assumir uma linha se o ID antigo parou de vir, e aqui ele continuava vindo, só que com outra compra. Agora o critério é se a *linha* ainda recebe algum payload no sync: a linha cujo ID foi reaproveitado para outra compra conta como abandonada e é assumida pelo POSTED, levando junto categoria, divisão e deslocamento. Vale também para a promoção de PENDING do Itaú. As duplicatas de setembro foram limpas à parte na produção em 25/09.
+
 ## [1.10.0] - 2026-09-19
 
 ### Adicionado
