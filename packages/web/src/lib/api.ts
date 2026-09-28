@@ -29,6 +29,22 @@ import type {
 
 const BASE = '/api';
 
+/**
+ * Which bill cycle a bill request targets: an offset from the open bill
+ * (Dashboard's ←/→ navigation), or the calendar month the bill is due in
+ * (Overview), resolved on the server's clock.
+ */
+export type BillCycle = number | { dueMonth: string };
+
+function setCycle(qs: URLSearchParams, cycle: BillCycle | undefined): void {
+  if (cycle === undefined) return;
+  if (typeof cycle === 'number') {
+    if (cycle !== 0) qs.set('offset', String(cycle));
+  } else {
+    qs.set('dueMonth', cycle.dueMonth);
+  }
+}
+
 async function request<T>(
   path: string,
   init: RequestInit = {},
@@ -105,10 +121,10 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
-  getBillBreakdown: (itemId: string, accountId?: string, offset?: number) => {
+  getBillBreakdown: (itemId: string, accountId?: string, cycle?: BillCycle) => {
     const qs = new URLSearchParams({ itemId });
     if (accountId) qs.set('accountId', accountId);
-    if (offset !== undefined && offset !== 0) qs.set('offset', String(offset));
+    setCycle(qs, cycle);
     return request<BillBreakdown>(`/bills/current/breakdown?${qs}`);
   },
 
@@ -364,17 +380,17 @@ export const api = {
       body: JSON.stringify({ transactionIds }),
     }),
 
-  getSplitSummary: (accountId: string, offset?: number) => {
+  getSplitSummary: (accountId: string, cycle?: BillCycle) => {
     const qs = new URLSearchParams({ accountId });
-    if (offset !== undefined && offset !== 0) qs.set('offset', String(offset));
+    setCycle(qs, cycle);
     return request<SplitSummary>(`/bills/current/split-summary?${qs}`);
   },
 
   listPartnerCards: () => request<PartnerCard[]>('/partner/cards'),
 
-  getPartnerCardBreakdown: (owner: string, accountId: string, offset?: number) => {
+  getPartnerCardBreakdown: (owner: string, accountId: string, cycle?: BillCycle) => {
     const qs = new URLSearchParams({ owner, accountId });
-    if (offset !== undefined && offset !== 0) qs.set('offset', String(offset));
+    setCycle(qs, cycle);
     return request<PartnerCardBreakdown>(`/partner/cards/breakdown?${qs}`);
   },
 

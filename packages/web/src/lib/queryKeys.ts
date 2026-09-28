@@ -58,28 +58,31 @@ export const keys = {
   billBreakdown: {
     all: ['billBreakdown'] as const,
     ofItem: (itemId: string) => ['billBreakdown', itemId] as const,
-    /**
-     * `offset` is nullable on purpose: Overview resolves one offset per
-     * account and leaves the query disabled when there is none, so `null`
-     * is a real key that lives in the cache.
-     */
-    at: (itemId: string, accountId: string, offset: number | null) =>
+    /** Dashboard: a cycle by offset from the open bill. */
+    at: (itemId: string, accountId: string, offset: number) =>
       ['billBreakdown', itemId, accountId, offset] as const,
+    /** Overview: the cycle due in `month` (YYYY-MM), resolved by the API. */
+    dueIn: (itemId: string, accountId: string, month: string) =>
+      ['billBreakdown', itemId, accountId, 'due', month] as const,
   },
 
   splitSummary: {
     all: ['splitSummary'] as const,
     ofAccount: (accountId: string) => ['splitSummary', accountId] as const,
-    at: (accountId: string, offset: number | null) =>
+    at: (accountId: string, offset: number) =>
       ['splitSummary', accountId, offset] as const,
+    dueIn: (accountId: string, month: string) =>
+      ['splitSummary', accountId, 'due', month] as const,
   },
 
   partnerCards: () => ['partnerCards'] as const,
 
   partnerCardBreakdown: {
     all: ['partnerCardBreakdown'] as const,
-    at: (owner: string, accountId: string, offset: number | null) =>
+    at: (owner: string, accountId: string, offset: number) =>
       ['partnerCardBreakdown', owner, accountId, offset] as const,
+    dueIn: (owner: string, accountId: string, month: string) =>
+      ['partnerCardBreakdown', owner, accountId, 'due', month] as const,
   },
 
   cashflow: {

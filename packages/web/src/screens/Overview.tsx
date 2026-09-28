@@ -10,7 +10,6 @@ import type {
   SplitSummary,
 } from '../lib/apiTypes';
 import { formatBRL, formatDelta } from '../lib/format';
-import { findOffsetForDueMonth, currentDueMonth } from '../lib/billWindow';
 import { SplitSection } from '../components/SplitSection';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useIsDemo } from '../lib/useIsDemo';
@@ -121,14 +120,12 @@ export function Overview({
     return { configured, unconfigured };
   }, [allAccounts, settingsQueries]);
 
-  // ── Target month (initialized from the first account's current due month) ──
+  // ── Target month (defaults to the current calendar month) ──
 
-  const defaultMonth = useMemo(() => {
-    // if (configured.length === 0)
-      return { year: today.getFullYear(), month: today.getMonth() + 1};
-    // const s = configured[0].settings;
-    // return currentDueMonth({ closingDay: s.closing_day, dueDay: s.due_day }, today);
-  }, [configured, today]);
+  const defaultMonth = useMemo(
+    () => ({ year: today.getFullYear(), month: today.getMonth() + 1 }),
+    [today],
+  );
 
   const year = controlledMonth?.year ?? defaultMonth.year;
   const month = controlledMonth?.month ?? defaultMonth.month;
@@ -227,26 +224,15 @@ export function Overview({
     return { expenses: Math.round((expenses - cardBills) * 100) / 100 };
   }, [prevCashflowQ.data]);
 
-  // ── Resolve offset per account and fetch breakdowns in parallel ──
-
-  const accountOffsets = useMemo(
-    () =>
-      configured.map(({ settings }) => {
-        const cs = { closingDay: settings.closing_day, dueDay: settings.due_day };
-        return findOffsetForDueMonth(cs, year, month, today);
-      }),
-    [configured, year, month, today],
-  );
+  // ── Fetch each account's bill due this month, in parallel ──
+  // The API resolves which cycle is due in `ms` on its own clock and returns
+  // that cycle's `offset`, which the drill-down into Dashboard reuses.
 
   const breakdownQueries = useQueries({
-    queries: configured.map(({ item, account }, i) => {
-      const offset = accountOffsets[i];
-      return {
-        queryKey: keys.billBreakdown.at(item.id, account.id, offset),
-        queryFn: () => api.getBillBreakdown(item.id, account.id, offset ?? 0),
-        enabled: offset !== null,
-      };
-    }),
+    queries: configured.map(({ item, account }) => ({
+      queryKey: keys.billBreakdown.dueIn(item.id, account.id, ms),
+      queryFn: () => api.getBillBreakdown(item.id, account.id, { dueMonth: ms }),
+    })),
   });
 
   // ── Partner shared cards (read-only) ──
@@ -258,24 +244,12 @@ export function Overview({
 
   const partnerCards = partnerCardsQ.data ?? [];
 
-  const partnerOffsets = useMemo(
-    () =>
-      partnerCards.map((c) => {
-        const cs = { closingDay: c.closingDay, dueDay: c.dueDay };
-        return findOffsetForDueMonth(cs, year, month, today);
-      }),
-    [partnerCards, year, month, today],
-  );
-
   const partnerBreakdownQueries = useQueries({
-    queries: partnerCards.map((c, i) => {
-      const offset = partnerOffsets[i];
-      return {
-        queryKey: keys.partnerCardBreakdown.at(c.ownerUsername, c.accountId, offset),
-        queryFn: () => api.getPartnerCardBreakdown(c.ownerUsername, c.accountId, offset ?? 0),
-        enabled: offset !== null,
-      };
-    }),
+    queries: partnerCards.map((c) => ({
+      queryKey: keys.partnerCardBreakdown.dueIn(c.ownerUsername, c.accountId, ms),
+      queryFn: () =>
+        api.getPartnerCardBreakdown(c.ownerUsername, c.accountId, { dueMonth: ms }),
+    })),
   });
 
   // Aggregate partner-card categories across every shared card, keeping the
@@ -351,14 +325,10 @@ export function Overview({
   // ── Split summaries across all configured accounts ──
 
   const splitQueries = useQueries({
-    queries: configured.map(({ account }, i) => {
-      const offset = accountOffsets[i];
-      return {
-        queryKey: keys.splitSummary.at(account.id, offset),
-        queryFn: () => api.getSplitSummary(account.id, offset ?? 0),
-        enabled: offset !== null,
-      };
-    }),
+    queries: configured.map(({ account }) => ({
+      queryKey: keys.splitSummary.dueIn(account.id, ms),
+      queryFn: () => api.getSplitSummary(account.id, { dueMonth: ms }),
+    })),
   });
 
   const aggregatedSplit = useMemo(() => {
@@ -690,7 +660,6 @@ export function Overview({
         {/* Account cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-tour="cartoes">
           {configured.map(({ item, account, settings }, i) => {
-            const offset = accountOffsets[i];
             const bq = breakdownQueries[i];
             const breakdown = bq?.data ?? null;
 
@@ -703,9 +672,7 @@ export function Overview({
                 breakdown={breakdown}
                 loading={bq?.isLoading ?? false}
                 onClick={() => {
-                  if (offset !== null) {
-                    onSelectAccount(item.id, account.id, offset);
-                  }
+                  if (breakdown) onSelectAccount(item.id, account.id, breakdown.offset);
                 }}
               />
             );
@@ -732,7 +699,6 @@ export function Overview({
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {partnerCards.map((card, i) => {
-              const offset = partnerOffsets[i];
               const bq = partnerBreakdownQueries[i];
               return (
                 <PartnerAccountCard
@@ -741,8 +707,8 @@ export function Overview({
                   breakdown={bq?.data ?? null}
                   loading={bq?.isLoading ?? false}
                   onClick={() => {
-                    if (offset !== null) {
-                      onSelectPartnerCard(card.ownerUsername, card.accountId, offset);
+                    if (bq?.data) {
+                      onSelectPartnerCard(card.ownerUsername, card.accountId, bq.data.offset);
                     }
                   }}
                 />

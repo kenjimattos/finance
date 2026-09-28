@@ -47,7 +47,17 @@ Each domain exposes `all` (the broad prefix, for invalidation) plus narrower bui
 
 The reason this is a rule and not a preference: TanStack matches keys by prefix, so a literal that drifts from the one a query registered with fails *silently*. No type error, no runtime error, no failed request — just a panel showing the previous value until something else happens to refetch it. The compiler cannot see a string; it can see a missing method.
 
-Some keys carry `null`. `billBreakdown.at` / `splitSummary.at` / `partnerCardBreakdown.at` take `offset: number | null` because Overview resolves one offset per account and leaves the query `enabled: false` when there is none — so `null` is a real key living in the cache. Do not coerce it to `0` in the factory; that would merge those entries with the genuine offset-0 ones.
+Bills have two key shapes for the same data. Dashboard navigates by cycle and keys on `offset` (`billBreakdown.at`, `splitSummary.at`, `partnerCardBreakdown.at`); Overview navigates by calendar month and keys on the due month (`.dueIn(…, 'YYYY-MM')`), letting the API pick the cycle. Both extend the same `ofItem` / `ofAccount` / `all` prefixes, so every existing invalidation reaches both — keep it that way when adding a builder.
+
+### Client or server
+
+A computation belongs in the API when any of these holds:
+
+1. **It encodes a domain rule** — what a bill payment is, which cycle is due in a month, how a balance is reached. A rule in two places drifts.
+2. **Another screen or route needs the same answer.** CashFlow and Overview each walked the balance their own way until the walk moved to `GET /cashflow`.
+3. **It depends on something the browser does not fully own** — the clock and time zone, other months' data, another user's data. Overview used to resolve a card's cycle from a due month in the browser and send the offset to a server that read it on its own clock; it now sends `dueMonth` and the server resolves both halves.
+
+The client keeps presentation: formatting, sorting and filtering what is on screen, summing figures the API already computed into one view (the Overview's cross-card totals, category and split aggregates), and optimistic updates. Performance is not a reason to compute in the browser here: every read is SQLite in the same process (thirteen months of cash flow cost under 70ms); only the Pluggy calls are expensive, and they happen only in sync.
 
 ### Transaction mutations
 
