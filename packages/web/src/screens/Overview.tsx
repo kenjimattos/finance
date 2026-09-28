@@ -8,6 +8,7 @@ import type {
   Account,
   AccountSettings,
   BillBreakdown,
+  CashFlowResponse,
   SplitSummary,
   PartnerCard,
   PartnerCardBreakdown,
@@ -168,44 +169,22 @@ export function Overview({
     queryFn: () => api.getCashFlow(nextMs),
   });
 
-  // ── Carry-forward months for projected balance ──
-  // For future months the API's `openingBalance` is the bank's *current*
-  // balance, not the projected opening for that month. To get the right saldo,
-  // we mirror CashFlow's running-balance logic: fetch every month between today
-  // and the target, then accumulate entry-by-entry sequentially.
-  const carryMonths = useMemo(() => {
-    if (!isFutureMonth) return [] as { year: number; month: number }[];
-    const result: { year: number; month: number }[] = [];
-    let cursor = { year: defaultMonth.year, month: defaultMonth.month };
-    while (cursor.year < year || (cursor.year === year && cursor.month < month)) {
-      result.push(cursor);
-      cursor = addMonth(cursor.year, cursor.month, 1);
-    }
-    return result;
-  }, [isFutureMonth, defaultMonth.year, defaultMonth.month, year, month]);
-
-  const carryQueries = useQueries({
-    queries: carryMonths.map((m) => {
-      const key = `${m.year}-${m.month < 10 ? '0' : ''}${m.month}`;
-      return {
-        queryKey: keys.cashflow.month(key),
-        queryFn: () => api.getCashFlow(key),
-      };
-    }),
-  });
+  // A card-bill outflow: a bank row tagged as a bill payment (the sync
+  // auto-tags new rows by description; the user toggles it in CashFlow), or a
+  // projected bill on its due date.
+  type CashEntry = CashFlowResponse['days'][number]['entries'][number];
+  const isCardBill = (e: CashEntry) =>
+    (e.type === 'bank_transaction' && !!e.isBillPayment) || e.type === 'credit_card_bill';
 
   const cashSummary = useMemo(() => {
     const data = cashflowQ.data;
     if (!data) return null;
 
-    const openingBalance = data.bankAccounts.reduce((s, ba) => s + (ba.openingBalance ?? 0), 0);
     let income = 0;
     let expenses = 0;
     let cardBills = 0;
-
-    // Bill payment: either manually tagged or auto-detected from description.
-    const isBillPayment = (e: typeof data.days[0]['entries'][0]) =>
-      e.isBillPayment || /fatura/i.test(e.description) || /^INT\s/i.test(e.description);
+    let realized = 0;
+    let all = 0;
 
     for (const day of data.days) {
       for (const e of day.entries) {
@@ -215,82 +194,37 @@ export function Overview({
         // them too). Summing them here double-counts the duplicates the user
         // hid on purpose.
         if (e.hidden) continue;
-        if (day.isPast) {
-          if (e.amount > 0) income += e.amount;
-          else expenses += e.amount;
-          if (e.type === 'bank_transaction' && e.amount < 0 && isBillPayment(e)) {
-            cardBills += e.amount;
-          }
-        } else {
-          // Projected: manual entries + credit card bills
-          if (e.amount > 0) income += e.amount;
-          else expenses += e.amount;
-          if (e.type === 'credit_card_bill') {
-            cardBills += e.amount;
-          }
-        }
+        if (e.amount > 0) income += e.amount;
+        else expenses += e.amount;
+        if (e.amount < 0 && isCardBill(e)) cardBills += e.amount;
+        all += e.amount;
+        if (day.isPast) realized += e.amount;
       }
     }
     // * MARK: Cálculo do saldo
-    // Past/current months: openingBalance + realized entries only.
-    // Future months: start from today's balance, then carry forward through every
-    // intermediate month's entries, then through the target month's entries.
-    let currentBalance: number;
-    if (isFutureMonth) {
-      // Today's balance = first carry month's openingBalance + its past entries.
-      // (Falls back to target's openingBalance if no carry months loaded yet.)
-      const firstCarry = carryQueries.find((q) => q.data)?.data;
-      const startOpening = firstCarry
-        ? firstCarry.bankAccounts.reduce((s, ba) => s + (ba.openingBalance ?? 0), 0)
-        : openingBalance;
-      let running = startOpening;
-      for (const q of carryQueries) {
-        if (!q.data) continue;
-        for (const day of q.data.days) {
-          for (const e of day.entries) if (!e.hidden) running += e.amount;
-        }
-      }
-      for (const day of data.days) {
-        for (const e of day.entries) if (!e.hidden) running += e.amount;
-      }
-      currentBalance = Math.round(running * 100) / 100;
-    } else {
-      let balanceSum = 0;
-      for (const day of data.days) {
-        if (!day.isPast) continue;
-        for (const e of day.entries) if (!e.hidden) balanceSum += e.amount;
-      }
-      currentBalance = Math.round((openingBalance + balanceSum) * 100) / 100;
-    }
-
+    // The API's openingBalance already carries every projection before this
+    // month. Past/current months show the balance as of the last realized
+    // day; future months, the projected balance at the end of the month.
+    const round2 = (n: number) => Math.round(n * 100) / 100;
     return {
-      openingBalance: Math.round(openingBalance * 100) / 100,
-      currentBalance,
-      income: Math.round(income * 100) / 100,
-      expenses: Math.round((expenses - cardBills) * 100) / 100,
-      cardBills: Math.round(cardBills * 100) / 100,
+      openingBalance: round2(data.openingBalance),
+      currentBalance: round2(data.openingBalance + (isFutureMonth ? all : realized)),
+      income: round2(income),
+      expenses: round2(expenses - cardBills),
+      cardBills: round2(cardBills),
     };
-  }, [cashflowQ.data, isFutureMonth, carryQueries]);
+  }, [cashflowQ.data, isFutureMonth]);
 
   const prevCashSummary = useMemo(() => {
     const data = prevCashflowQ.data;
     if (!data) return null;
-    const isBill = (e: typeof data.days[0]['entries'][0]) =>
-      e.isBillPayment || /fatura/i.test(e.description) || /^INT\s/i.test(e.description);
     let expenses = 0;
     let cardBills = 0;
     for (const day of data.days) {
       for (const e of day.entries) {
-        if (e.hidden) continue;
-        if (e.amount < 0) {
-          expenses += e.amount;
-          if (
-            (e.type === 'bank_transaction' && isBill(e)) ||
-            e.type === 'credit_card_bill'
-          ) {
-            cardBills += e.amount;
-          }
-        }
+        if (e.hidden || e.amount >= 0) continue;
+        expenses += e.amount;
+        if (isCardBill(e)) cardBills += e.amount;
       }
     }
     return { expenses: Math.round((expenses - cardBills) * 100) / 100 };

@@ -212,6 +212,8 @@ export interface CashFlowBankAccount {
 export interface CashFlowResponse {
   month: string;
   bankAccounts: CashFlowBankAccount[];
+  /** Total opening across bank accounts; after the realized boundary it includes the projections of the months in between. */
+  openingBalance: number;
   days: CashFlowDay[];
 }
 

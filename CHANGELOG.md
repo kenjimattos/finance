@@ -10,7 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - **Pagamentos de fatura marcados automaticamente no fluxo de caixa.** Até aqui, uma saída da conta corrente só aparecia como fatura no fluxo de caixa se você a marcasse à mão, enquanto a visão geral reconhecia os pagamentos por conta própria, pela descrição. Agora o sync do banco aplica essa mesma regra (saída com "fatura" na descrição, ou que comece com "INT ") a cada transação que chega pela primeira vez, e grava a mesma marcação que o botão grava. Transações que já estavam no app não são reavaliadas: o que você marcou ou desmarcou continua como está, e o histórico anterior fica sem marcação automática.
 
+### Alterado
+
+- **Visão geral: "faturas" segue a marcação do fluxo de caixa.** O valor de faturas do caixa na visão geral agora soma as saídas marcadas como fatura no fluxo de caixa (mais as faturas projetadas nos dias futuros), em vez de reconhecer pagamentos pela descrição por conta própria. As duas telas passam a concordar, e desmarcar uma linha no fluxo de caixa também corrige a visão geral. Nos meses anteriores a esta versão, "faturas" mostra só o que foi marcado à mão, e o restante passa para "saídas"; o saldo não muda.
+
 ### Corrigido
+
+- **Saldo projetado da visão geral diferente do fluxo de caixa quando o sync atrasa.** Para meses futuros, a visão geral recalculava o saldo mês a mês a partir do mês do calendário, enquanto o fluxo de caixa parte do último dia com transação do banco. Se o último sync era do mês anterior, os lançamentos manuais e faturas previstos para o fim daquele mês ficavam de fora do saldo projetado da visão geral. Agora a API devolve o saldo de abertura já com as projeções dos meses intermediários, e a visão geral usa esse valor direto, sem buscar os meses no meio.
 
 - **Compras do PicPay duplicadas ao passar de PENDING para POSTED quando o ID antigo foi reaproveitado.** Na fatura de setembro, quatro compras de agosto (Drogasil, duas da Shopee e Arezzo) e um pagamento de fatura apareceram duas vezes. O PicPay reaproveitou os IDs dos PENDING para compras novas de setembro, e os POSTED chegaram com ID novo e exatamente o mesmo conteúdo dos PENDING. A regra do 1.10.0 só deixa um ID novo assumir uma linha se o ID antigo parou de vir, e aqui ele continuava vindo, só que com outra compra. Agora o critério é se a *linha* ainda recebe algum payload no sync: a linha cujo ID foi reaproveitado para outra compra conta como abandonada e é assumida pelo POSTED, levando junto categoria, divisão e deslocamento. Vale também para a promoção de PENDING do Itaú. As duplicatas de setembro foram limpas à parte na produção em 25/09.
 
