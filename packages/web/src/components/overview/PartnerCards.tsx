@@ -1,5 +1,6 @@
 import type { PartnerCard, PartnerCardBreakdown } from '../../lib/apiTypes';
 import { formatBRL, formatDateLong } from '../../lib/format';
+import type { PartnerInstallmentItem } from '../../lib/overviewAggregates';
 
 // ─── Partner (shared) account card ──────────────────────────────────
 
@@ -68,14 +69,6 @@ export function PartnerAccountCard({
 }
 
 // ─── Partner category column (½ / dela) ────────────────────────────
-
-export interface PartnerInstallmentItem {
-  id: string;
-  description: string | null;
-  owes: number;
-  installmentNumber: number;
-  totalInstallments: number;
-}
 
 const PARTNER_INSTALLMENT_SUFFIX = /\s*PARC\d{1,2}\/\d{1,2}\s*$/i;
 
