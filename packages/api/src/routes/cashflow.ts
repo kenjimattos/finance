@@ -9,6 +9,7 @@ import {
 } from '../services/billWindow.js';
 import { pruneRealizedManualEntries } from '../services/pruneManualEntries.js';
 import { ensureYearEndAnchors } from '../services/yearEndAnchors.js';
+import { looksLikeBillPayment } from '../services/billPaymentDetect.js';
 
 export const cashflowRouter = Router();
 
@@ -614,6 +615,10 @@ cashflowRouter.post('/cashflow/sync', async (req, res, next) => {
       WHERE id = ?
     `);
 
+    const tagBillPayment = db.prepare(
+      'INSERT OR IGNORE INTO bank_bill_payment_tags (transaction_id) VALUES (?)',
+    );
+
     const findByProviderId = db.prepare(`
       SELECT id FROM bank_transactions
       WHERE provider_transaction_id = ?
@@ -633,12 +638,17 @@ cashflowRouter.post('/cashflow/sync', async (req, res, next) => {
             newPayload, existing.id,
           );
         } else {
+          const id = randomUUID();
           insertTx.run(
-            randomUUID(), t.id, accountId, itemId, newDate,
+            id, t.id, accountId, itemId, newDate,
             t.description ?? null, t.amount, t.currencyCode ?? null,
             t.category ?? null, t.categoryId ?? null, t.type ?? null, t.status ?? null,
             newPayload,
           );
+          // Auto-tag on arrival only; existing rows keep whatever the user set.
+          if (looksLikeBillPayment(t.description ?? null, t.amount)) {
+            tagBillPayment.run(id);
+          }
         }
         txCount++;
       }

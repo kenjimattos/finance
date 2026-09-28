@@ -38,7 +38,7 @@ Usernames listed in `DEMO_USERS` (default: `demo`) get a 403 `DemoRestricted` fr
 ## Sync
 
 - `POST /transactions/sync?itemId=...` — full sync: CREDIT and BANK accounts, bills (CREDIT only), and transactions (CREDIT only — BANK transactions go through `POST /cashflow/sync`), then runs `applyLearnedRules`. Upserts discovered accounts into the `accounts` table with `balance` and `subtype`, and snapshots BANK balances into `balance_snapshots`. Realigns `item_id` on existing transactions if the account moved between items (sandbox re-connection). Each CREDIT account's pages are collected first and upserted in one pass, recorded as one row in `sync_runs`, with every payload logged to `transaction_payloads`. Recycled-ID handling and PENDING→POSTED handling are described in [sync.md](sync.md).
-- `POST /cashflow/sync` — BANK-only sync (cheaper).
+- `POST /cashflow/sync` — BANK-only sync (cheaper). A bank row seen for the first time is auto-tagged as a bill payment (`bank_bill_payment_tags`, the same row the CashFlow toggle writes) when it is an outflow whose Pluggy description matches `/fatura/i` or `/^INT\s/` ([services/billPaymentDetect.ts](../packages/api/src/services/billPaymentDetect.ts)). Rows already in the table are never re-evaluated, so user toggles and older history stay as they are.
 
 ## Bills
 
