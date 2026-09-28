@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Transaction } from 'pluggy-sdk';
+import type { Database } from 'better-sqlite3';
 import { pluggy } from '../services/pluggy.js';
 import {
   computeBillWindowAtOffset,
@@ -238,306 +239,365 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
       .parse(req.query);
 
     const now = new Date();
-    const realYear = now.getFullYear();
-    const realMonth = now.getMonth() + 1;
-
     // Target month — from param or current month.
-    const year = monthParam ? Number(monthParam.split('-')[0]) : realYear;
-    const month = monthParam ? Number(monthParam.split('-')[1]) : realMonth;
-    const monthDays = daysInMonth(year, month);
+    const year = monthParam ? Number(monthParam.split('-')[0]) : now.getFullYear();
+    const month = monthParam ? Number(monthParam.split('-')[1]) : now.getMonth() + 1;
 
-    const monthStr = `${year}-${pad(month)}`;
-    const firstDay = `${monthStr}-01`;
-    const lastDay = `${monthStr}-${pad(monthDays)}`;
-
-    // ── Find ALL BANK accounts ──
-    const bankAccounts = db
-      .prepare(
-        "SELECT id, item_id, name, balance, subtype FROM accounts WHERE type = 'BANK'",
-      )
-      .all() as AccountRow[];
-
-    const bankAccountIds = bankAccounts.map((a) => a.id);
-
-    // ── Data coverage boundary ──
-    // One global cutoff: the latest date that has ANY real bank transaction,
-    // across every account and every month. Hidden rows still count — hiding
-    // is a display choice, not "data ends here". Days on or before this date
-    // are realized (show real bank transactions); days after it are
-    // projection territory (manual entries + credit card bill outflows).
-    // Deliberately NOT tied to today's date: if syncing stalls, the boundary
-    // stalls with it, instead of marking un-synced days as empty-but-realized.
-    const realizedRow = db
-      .prepare('SELECT MAX(date) AS max_date FROM bank_transactions')
-      .get() as { max_date: string | null };
-    const lastRealizedDate = realizedRow.max_date ?? '0000-00-00';
-
-    // ── Compute opening balance per bank account ──
-    // Every month's opening derives from a SINGLE anchor by walking the
-    // transaction history, so the running balance is identical no matter which
-    // months are loaded (the CashFlow ledger seeds from the first visible
-    // month's opening, so a per-month-specific anchor would make the displayed
-    // saldo drift when history is toggled open/closed).
-    //
-    // Preferred anchor: a user-confirmed `balance_anchors` row (a TRUSTED
-    // absolute balance at a known date). We deliberately do NOT anchor on
-    // balance_snapshots / the live Pluggy balance as the primary source: that
-    // field oscillates wildly for some connectors (Nubank reports values
-    // swinging between ~0 and thousands intra-day), so any single reading can be
-    // garbage. A confirmed anchor + transaction walk is immune to that. The most
-    // recent anchor is used (refreshed yearly), giving the shortest walk over
-    // current data. When no anchor exists, fall back to the live balance rolled
-    // backward — still one anchor for all months, just less trustworthy.
-    const sumBetween = (accountId: string, fromExcl: string, toExcl: string): number =>
-      (
-        db
-          .prepare(
-            // tx strictly after `fromExcl`, strictly before `toExcl`.
-            `SELECT COALESCE(SUM(t.amount), 0) AS total
-             FROM bank_transactions t
-             WHERE t.account_id = ? AND t.date > ? AND t.date < ?
-               AND ${BANK_TX_NOT_HIDDEN_SQL}`,
-          )
-          .get(accountId, fromExcl, toExcl) as { total: number }
-      ).total;
-
-    const sumRange = (accountId: string, fromIncl: string, toIncl: string): number =>
-      (
-        db
-          .prepare(
-            `SELECT COALESCE(SUM(t.amount), 0) AS total
-             FROM bank_transactions t
-             WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
-               AND ${BANK_TX_NOT_HIDDEN_SQL}`,
-          )
-          .get(accountId, fromIncl, toIncl) as { total: number }
-      ).total;
-
-    const openingBalances = new Map<string, number>();
-    for (const ba of bankAccounts) {
-      // Most recent confirmed anchor for this account, if any.
-      const anchor = db
-        .prepare(
-          `SELECT anchor_date, balance FROM balance_anchors
-           WHERE account_id = ? ORDER BY anchor_date DESC LIMIT 1`,
-        )
-        .get(ba.id) as { anchor_date: string; balance: number } | undefined;
-
-      let opening: number;
-      if (anchor) {
-        // opening(month) = balance at END of the day before firstDay.
-        // Anchor balance is as of END of anchor_date. Walk the transaction
-        // history between the anchor and firstDay (exclusive of the month's own
-        // rows): forward if the month starts after the anchor, backward if
-        // before.
-        if (anchor.anchor_date < firstDay) {
-          // Add tx strictly after the anchor day, strictly before firstDay.
-          opening = round2(anchor.balance + sumBetween(ba.id, anchor.anchor_date, firstDay));
-        } else {
-          // Anchor is on/after firstDay — remove tx from firstDay..anchor_date.
-          opening = round2(anchor.balance - sumRange(ba.id, firstDay, anchor.anchor_date));
-        }
-      } else if (ba.balance != null) {
-        // Fallback: roll the live balance backward across every not-hidden
-        // transaction from firstDay onward (none are dated in the future).
-        opening = round2(ba.balance - sumRange(ba.id, firstDay, '9999-12-31'));
-      } else {
-        // No anchor and no live balance to ground on. balance_snapshots are
-        // deliberately NOT consulted here — they are raw, untrusted per-sync
-        // readings of the same oscillating Pluggy field, kept only as a
-        // diagnostic log. Show 0 rather than anchor on an unreliable reading.
-        opening = 0;
-      }
-      openingBalances.set(ba.id, opening);
-    }
-
-    // ── Realized days: actual bank transactions (all bank accounts) ──
-    // Every bank transaction is realized by definition (its date is <=
-    // lastRealizedDate), so the whole month window is fair game — the
-    // assembly loop below places each row on its own day.
-    let pastTxRows: BankTxRow[] = [];
-    if (bankAccountIds.length > 0) {
-      const placeholders = bankAccountIds.map(() => '?').join(',');
-      pastTxRows = db
-        .prepare(
-          `SELECT t.id, t.account_id,  t.date,
-                  COALESCE(o.description, t.description) AS description,
-                  t.amount, t.type, t.sort_key,
-                  CASE WHEN bp.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_bill_tagged,
-                  CASE WHEN h.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_hidden
-           FROM bank_transactions t
-           LEFT JOIN bank_transaction_description_overrides o ON o.transaction_id = t.id
-           LEFT JOIN bank_bill_payment_tags bp ON bp.transaction_id = t.id
-           LEFT JOIN bank_transaction_hidden h ON h.transaction_id = t.id
-           WHERE t.account_id IN (${placeholders})
-             AND t.date >= ? AND t.date <= ?
-           ORDER BY t.date ASC, COALESCE(t.sort_key, 1e18) ASC, t.id ASC`,
-        )
-        .all(...bankAccountIds, firstDay, lastDay) as BankTxRow[];
-    }
-
-    // ── Future days: manual entries ──
-    const manualEntries = db
-      .prepare(
-        `SELECT id, description, amount, day_of_month, sort_key
-         FROM manual_entries
-         WHERE active = 1 AND month = ?
-         ORDER BY day_of_month ASC, COALESCE(sort_key, id * 1.0) ASC, id ASC`,
-      )
-      .all(monthStr) as ManualEntryRow[];
-
-    // ── Future days: credit card bill outflows ──
-    const creditAccounts = db
-      .prepare(
-        `SELECT a.id AS account_id, s.display_name, s.closing_day, s.due_day
-         FROM accounts a
-         INNER JOIN account_settings s ON s.account_id = a.id
-         WHERE a.type = 'CREDIT'`,
-      )
-      .all() as Array<{
-      account_id: string;
-      display_name: string | null;
-      closing_day: number;
-      due_day: number;
-    }>;
-
-    const billEntries: Array<{ day: number; entry: CashFlowEntry }> = [];
-
-    for (const acct of creditAccounts) {
-      const settings = { closingDay: acct.closing_day, dueDay: acct.due_day };
-      const offset = findOffsetForDueMonth(settings, year, month);
-      if (offset === null) continue;
-
-      const dueDay = acct.due_day;
-      // Only project the bill if its due date is still ahead of the last
-      // realized bank transaction. Once real data has moved past the due
-      // date, the actual "Pagamento de fatura" bank row represents it —
-      // projecting it again would double-count.
-      const dueDate = `${monthStr}-${pad(Math.min(dueDay, monthDays))}`;
-      if (dueDate <= lastRealizedDate) continue;
-
-      // Compute bill total using the same shift-aware logic as bills.ts.
-      const current = computeBillWindowAtOffset(settings, offset);
-      const previous = computeBillWindowAtOffset(settings, offset - 1);
-      const next = computeBillWindowAtOffset(settings, offset + 1);
-
-      const row = db
-        .prepare(
-          `SELECT COALESCE(SUM(COALESCE(t.amount_in_account_currency, t.amount)), 0) AS total
-           FROM transactions t
-           INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
-           LEFT JOIN transaction_bill_overrides bo ON bo.transaction_id = t.id
-           WHERE t.account_id = ?
-             AND (
-                  (bo.shift IS NULL AND t.date >= ? AND t.date <= ?)
-               OR (bo.shift = 1     AND t.date >= ? AND t.date <= ?)
-               OR (bo.shift = -1    AND t.date >= ? AND t.date <= ?)
-             )`,
-        )
-        .get(
-          acct.account_id,
-          current.periodStart, current.periodEnd,
-          previous.periodStart, previous.periodEnd,
-          next.periodStart, next.periodEnd,
-        ) as { total: number };
-
-      if (row.total === 0) continue;
-
-      const label = acct.display_name
-        ? `Fatura ${acct.display_name}`
-        : 'Fatura cartão';
-
-      billEntries.push({
-        day: Math.min(dueDay, monthDays),
-        entry: {
-          id: `bill-${acct.account_id}`,
-          description: label,
-          amount: round2(-row.total), // bill total is positive spend → outflow is negative
-          type: 'credit_card_bill',
-          accountId: acct.account_id,
-        },
-      });
-    }
-
-    // ── Assemble day-by-day timeline ──
-    const days: CashFlowDay[] = [];
-
-    const pushManualEntries = (d: number, entries: CashFlowEntry[]) => {
-      // Manual entries whose day_of_month matches (clamped).
-      for (const me of manualEntries) {
-        const clampedDay = Math.min(me.day_of_month, monthDays);
-        if (clampedDay === d) {
-          entries.push({
-            id: `manual-${me.id}`,
-            description: me.description,
-            amount: round2(me.amount),
-            type: 'manual_entry',
-          });
-        }
-      }
-    };
-
-    for (let d = 1; d <= monthDays; d++) {
-      const date = `${monthStr}-${pad(d)}`;
-      const isPast = date <= lastRealizedDate;
-      const entries: CashFlowEntry[] = [];
-
-      if (isPast) {
-        // Actual bank transactions for this day (all bank accounts).
-        for (const tx of pastTxRows) {
-          if (tx.date === date) {
-            const billTagged = tx.is_bill_tagged === 1;
-            entries.push({
-              id: tx.id,
-              description: tx.description ?? '',
-              amount: round2(tx.amount),
-              type: 'bank_transaction',
-              bankAccountId: tx.account_id,
-              isBillPayment: billTagged || undefined,
-              hidden: tx.is_hidden === 1 || undefined,
-            });
-          }
-        }
-
-        // The boundary day is realized but not necessarily COMPLETE: the
-        // sync reached it, yet scheduled manual entries for this day may not
-        // have hit the bank feed. Keep them visible (and summed) instead of
-        // assuming the bank data fully covers the day. Strictly-earlier days
-        // still hide manual entries — real data has moved past them.
-        if (date === lastRealizedDate) {
-          pushManualEntries(d, entries);
-        }
-      } else {
-        pushManualEntries(d, entries);
-
-        // Credit card bill outflows on their due day.
-        for (const bill of billEntries) {
-          if (bill.day === d) {
-            entries.push(bill.entry);
-          }
-        }
-      }
-
-      // Only include days that have entries (keeps the response lean).
-      if (entries.length > 0) {
-        days.push({ date, isPast, entries });
-      }
-    }
-
+    const target = buildCashFlowMonth(db, year, month);
     res.json({
-      month: monthStr,
-      bankAccounts: bankAccounts.map((ba) => ({
-        id: ba.id,
-        name: ba.name,
-        balance: ba.balance,
-        openingBalance: openingBalances.get(ba.id) ?? null,
-      })),
-      days,
+      ...target,
+      openingBalance: projectedOpeningBalance(db, target),
     });
   } catch (err) {
     next(err);
   }
 });
+
+const sumOpening = (m: CashFlowMonth): number =>
+  m.bankAccounts.reduce((s, ba) => s + (ba.openingBalance ?? 0), 0);
+
+const sumEntries = (m: CashFlowMonth): number =>
+  m.days.reduce(
+    (s, d) => s + d.entries.reduce((t, e) => (e.hidden ? t : t + e.amount), 0),
+    0,
+  );
+
+/**
+ * Total opening balance across bank accounts, projections included.
+ *
+ * The per-account `openingBalance` only walks real bank transactions, so for a
+ * month after the realized boundary it misses every projection in between:
+ * manual entries and bill outflows of the boundary month's remaining days and
+ * of each month after it. Those have no bank account, so the projected figure
+ * is a single total: the boundary month's opening plus every non-hidden entry
+ * from the boundary month up to the month before the target — the same walk
+ * the CashFlow ledger does across its visible months. For the boundary month
+ * and earlier it equals the sum of the per-account openings.
+ */
+function projectedOpeningBalance(db: Database, target: CashFlowMonth): number {
+  const lastRealized = (
+    db.prepare('SELECT MAX(date) AS max_date FROM bank_transactions').get() as {
+      max_date: string | null;
+    }
+  ).max_date;
+  const boundaryMonth = lastRealized?.slice(0, 7);
+  if (!boundaryMonth || target.month <= boundaryMonth) return round2(sumOpening(target));
+
+  let [y, m] = boundaryMonth.split('-').map(Number);
+  const boundary = buildCashFlowMonth(db, y, m);
+  let running = sumOpening(boundary) + sumEntries(boundary);
+  for (;;) {
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+    if (`${y}-${pad(m)}` >= target.month) break;
+    running += sumEntries(buildCashFlowMonth(db, y, m));
+  }
+  return round2(running);
+}
+
+interface CashFlowMonth {
+  month: string;
+  bankAccounts: Array<{
+    id: string;
+    name: string | null;
+    balance: number | null;
+    openingBalance: number | null;
+  }>;
+  days: CashFlowDay[];
+}
+
+function buildCashFlowMonth(db: Database, year: number, month: number): CashFlowMonth {
+  const monthDays = daysInMonth(year, month);
+
+  const monthStr = `${year}-${pad(month)}`;
+  const firstDay = `${monthStr}-01`;
+  const lastDay = `${monthStr}-${pad(monthDays)}`;
+
+  // ── Find ALL BANK accounts ──
+  const bankAccounts = db
+    .prepare(
+      "SELECT id, item_id, name, balance, subtype FROM accounts WHERE type = 'BANK'",
+    )
+    .all() as AccountRow[];
+
+  const bankAccountIds = bankAccounts.map((a) => a.id);
+
+  // ── Data coverage boundary ──
+  // One global cutoff: the latest date that has ANY real bank transaction,
+  // across every account and every month. Hidden rows still count — hiding
+  // is a display choice, not "data ends here". Days on or before this date
+  // are realized (show real bank transactions); days after it are
+  // projection territory (manual entries + credit card bill outflows).
+  // Deliberately NOT tied to today's date: if syncing stalls, the boundary
+  // stalls with it, instead of marking un-synced days as empty-but-realized.
+  const realizedRow = db
+    .prepare('SELECT MAX(date) AS max_date FROM bank_transactions')
+    .get() as { max_date: string | null };
+  const lastRealizedDate = realizedRow.max_date ?? '0000-00-00';
+
+  // ── Compute opening balance per bank account ──
+  // Every month's opening derives from a SINGLE anchor by walking the
+  // transaction history, so the running balance is identical no matter which
+  // months are loaded (the CashFlow ledger seeds from the first visible
+  // month's opening, so a per-month-specific anchor would make the displayed
+  // saldo drift when history is toggled open/closed).
+  //
+  // Preferred anchor: a user-confirmed `balance_anchors` row (a TRUSTED
+  // absolute balance at a known date). We deliberately do NOT anchor on
+  // balance_snapshots / the live Pluggy balance as the primary source: that
+  // field oscillates wildly for some connectors (Nubank reports values
+  // swinging between ~0 and thousands intra-day), so any single reading can be
+  // garbage. A confirmed anchor + transaction walk is immune to that. The most
+  // recent anchor is used (refreshed yearly), giving the shortest walk over
+  // current data. When no anchor exists, fall back to the live balance rolled
+  // backward — still one anchor for all months, just less trustworthy.
+  const sumBetween = (accountId: string, fromExcl: string, toExcl: string): number =>
+    (
+      db
+        .prepare(
+          // tx strictly after `fromExcl`, strictly before `toExcl`.
+          `SELECT COALESCE(SUM(t.amount), 0) AS total
+           FROM bank_transactions t
+           WHERE t.account_id = ? AND t.date > ? AND t.date < ?
+             AND ${BANK_TX_NOT_HIDDEN_SQL}`,
+        )
+        .get(accountId, fromExcl, toExcl) as { total: number }
+    ).total;
+
+  const sumRange = (accountId: string, fromIncl: string, toIncl: string): number =>
+    (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(t.amount), 0) AS total
+           FROM bank_transactions t
+           WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
+             AND ${BANK_TX_NOT_HIDDEN_SQL}`,
+        )
+        .get(accountId, fromIncl, toIncl) as { total: number }
+    ).total;
+
+  const openingBalances = new Map<string, number>();
+  for (const ba of bankAccounts) {
+    // Most recent confirmed anchor for this account, if any.
+    const anchor = db
+      .prepare(
+        `SELECT anchor_date, balance FROM balance_anchors
+         WHERE account_id = ? ORDER BY anchor_date DESC LIMIT 1`,
+      )
+      .get(ba.id) as { anchor_date: string; balance: number } | undefined;
+
+    let opening: number;
+    if (anchor) {
+      // opening(month) = balance at END of the day before firstDay.
+      // Anchor balance is as of END of anchor_date. Walk the transaction
+      // history between the anchor and firstDay (exclusive of the month's own
+      // rows): forward if the month starts after the anchor, backward if
+      // before.
+      if (anchor.anchor_date < firstDay) {
+        // Add tx strictly after the anchor day, strictly before firstDay.
+        opening = round2(anchor.balance + sumBetween(ba.id, anchor.anchor_date, firstDay));
+      } else {
+        // Anchor is on/after firstDay — remove tx from firstDay..anchor_date.
+        opening = round2(anchor.balance - sumRange(ba.id, firstDay, anchor.anchor_date));
+      }
+    } else if (ba.balance != null) {
+      // Fallback: roll the live balance backward across every not-hidden
+      // transaction from firstDay onward (none are dated in the future).
+      opening = round2(ba.balance - sumRange(ba.id, firstDay, '9999-12-31'));
+    } else {
+      // No anchor and no live balance to ground on. balance_snapshots are
+      // deliberately NOT consulted here — they are raw, untrusted per-sync
+      // readings of the same oscillating Pluggy field, kept only as a
+      // diagnostic log. Show 0 rather than anchor on an unreliable reading.
+      opening = 0;
+    }
+    openingBalances.set(ba.id, opening);
+  }
+
+  // ── Realized days: actual bank transactions (all bank accounts) ──
+  // Every bank transaction is realized by definition (its date is <=
+  // lastRealizedDate), so the whole month window is fair game — the
+  // assembly loop below places each row on its own day.
+  let pastTxRows: BankTxRow[] = [];
+  if (bankAccountIds.length > 0) {
+    const placeholders = bankAccountIds.map(() => '?').join(',');
+    pastTxRows = db
+      .prepare(
+        `SELECT t.id, t.account_id,  t.date,
+                COALESCE(o.description, t.description) AS description,
+                t.amount, t.type, t.sort_key,
+                CASE WHEN bp.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_bill_tagged,
+                CASE WHEN h.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_hidden
+         FROM bank_transactions t
+         LEFT JOIN bank_transaction_description_overrides o ON o.transaction_id = t.id
+         LEFT JOIN bank_bill_payment_tags bp ON bp.transaction_id = t.id
+         LEFT JOIN bank_transaction_hidden h ON h.transaction_id = t.id
+         WHERE t.account_id IN (${placeholders})
+           AND t.date >= ? AND t.date <= ?
+         ORDER BY t.date ASC, COALESCE(t.sort_key, 1e18) ASC, t.id ASC`,
+      )
+      .all(...bankAccountIds, firstDay, lastDay) as BankTxRow[];
+  }
+
+  // ── Future days: manual entries ──
+  const manualEntries = db
+    .prepare(
+      `SELECT id, description, amount, day_of_month, sort_key
+       FROM manual_entries
+       WHERE active = 1 AND month = ?
+       ORDER BY day_of_month ASC, COALESCE(sort_key, id * 1.0) ASC, id ASC`,
+    )
+    .all(monthStr) as ManualEntryRow[];
+
+  // ── Future days: credit card bill outflows ──
+  const creditAccounts = db
+    .prepare(
+      `SELECT a.id AS account_id, s.display_name, s.closing_day, s.due_day
+       FROM accounts a
+       INNER JOIN account_settings s ON s.account_id = a.id
+       WHERE a.type = 'CREDIT'`,
+    )
+    .all() as Array<{
+    account_id: string;
+    display_name: string | null;
+    closing_day: number;
+    due_day: number;
+  }>;
+
+  const billEntries: Array<{ day: number; entry: CashFlowEntry }> = [];
+
+  for (const acct of creditAccounts) {
+    const settings = { closingDay: acct.closing_day, dueDay: acct.due_day };
+    const offset = findOffsetForDueMonth(settings, year, month);
+    if (offset === null) continue;
+
+    const dueDay = acct.due_day;
+    // Only project the bill if its due date is still ahead of the last
+    // realized bank transaction. Once real data has moved past the due
+    // date, the actual "Pagamento de fatura" bank row represents it —
+    // projecting it again would double-count.
+    const dueDate = `${monthStr}-${pad(Math.min(dueDay, monthDays))}`;
+    if (dueDate <= lastRealizedDate) continue;
+
+    // Compute bill total using the same shift-aware logic as bills.ts.
+    const current = computeBillWindowAtOffset(settings, offset);
+    const previous = computeBillWindowAtOffset(settings, offset - 1);
+    const next = computeBillWindowAtOffset(settings, offset + 1);
+
+    const row = db
+      .prepare(
+        `SELECT COALESCE(SUM(COALESCE(t.amount_in_account_currency, t.amount)), 0) AS total
+         FROM transactions t
+         INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
+         LEFT JOIN transaction_bill_overrides bo ON bo.transaction_id = t.id
+         WHERE t.account_id = ?
+           AND (
+                (bo.shift IS NULL AND t.date >= ? AND t.date <= ?)
+             OR (bo.shift = 1     AND t.date >= ? AND t.date <= ?)
+             OR (bo.shift = -1    AND t.date >= ? AND t.date <= ?)
+           )`,
+      )
+      .get(
+        acct.account_id,
+        current.periodStart, current.periodEnd,
+        previous.periodStart, previous.periodEnd,
+        next.periodStart, next.periodEnd,
+      ) as { total: number };
+
+    if (row.total === 0) continue;
+
+    const label = acct.display_name
+      ? `Fatura ${acct.display_name}`
+      : 'Fatura cartão';
+
+    billEntries.push({
+      day: Math.min(dueDay, monthDays),
+      entry: {
+        id: `bill-${acct.account_id}`,
+        description: label,
+        amount: round2(-row.total), // bill total is positive spend → outflow is negative
+        type: 'credit_card_bill',
+        accountId: acct.account_id,
+      },
+    });
+  }
+
+  // ── Assemble day-by-day timeline ──
+  const days: CashFlowDay[] = [];
+
+  const pushManualEntries = (d: number, entries: CashFlowEntry[]) => {
+    // Manual entries whose day_of_month matches (clamped).
+    for (const me of manualEntries) {
+      const clampedDay = Math.min(me.day_of_month, monthDays);
+      if (clampedDay === d) {
+        entries.push({
+          id: `manual-${me.id}`,
+          description: me.description,
+          amount: round2(me.amount),
+          type: 'manual_entry',
+        });
+      }
+    }
+  };
+
+  for (let d = 1; d <= monthDays; d++) {
+    const date = `${monthStr}-${pad(d)}`;
+    const isPast = date <= lastRealizedDate;
+    const entries: CashFlowEntry[] = [];
+
+    if (isPast) {
+      // Actual bank transactions for this day (all bank accounts).
+      for (const tx of pastTxRows) {
+        if (tx.date === date) {
+          const billTagged = tx.is_bill_tagged === 1;
+          entries.push({
+            id: tx.id,
+            description: tx.description ?? '',
+            amount: round2(tx.amount),
+            type: 'bank_transaction',
+            bankAccountId: tx.account_id,
+            isBillPayment: billTagged || undefined,
+            hidden: tx.is_hidden === 1 || undefined,
+          });
+        }
+      }
+
+      // The boundary day is realized but not necessarily COMPLETE: the
+      // sync reached it, yet scheduled manual entries for this day may not
+      // have hit the bank feed. Keep them visible (and summed) instead of
+      // assuming the bank data fully covers the day. Strictly-earlier days
+      // still hide manual entries — real data has moved past them.
+      if (date === lastRealizedDate) {
+        pushManualEntries(d, entries);
+      }
+    } else {
+      pushManualEntries(d, entries);
+
+      // Credit card bill outflows on their due day.
+      for (const bill of billEntries) {
+        if (bill.day === d) {
+          entries.push(bill.entry);
+        }
+      }
+    }
+
+    // Only include days that have entries (keeps the response lean).
+    if (entries.length > 0) {
+      days.push({ date, isPast, entries });
+    }
+  }
+
+  return {
+    month: monthStr,
+    bankAccounts: bankAccounts.map((ba) => ({
+      id: ba.id,
+      name: ba.name,
+      balance: ba.balance,
+      openingBalance: openingBalances.get(ba.id) ?? null,
+    })),
+    days,
+  };
+}
 
 // ── Helpers for sync ──
 
