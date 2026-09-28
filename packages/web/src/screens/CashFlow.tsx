@@ -239,33 +239,17 @@ export function CashFlow({
     return map;
   }, [queries]);
 
-  // ── Running balance across all months ──
-  // Compute per-day balances across all months sequentially.
+  // ── Running balance ──
+  // The API chains every month from its projected opening and returns each
+  // day's saldo, so months load independently and never drift apart.
   const { dayBalances, monthEndBalances } = useMemo(() => {
     const balances = new Map<string, number>();
     const monthEnds = new Map<string, number>();
-
-    // Find opening balance from the first month that has data.
-    let running: number | null = null;
     for (const q of queries) {
-      if (q.data?.bankAccounts?.length) {
-        running = q.data.bankAccounts.reduce((s, ba) => s + (ba.openingBalance ?? 0), 0);
-        break;
-      }
+      if (!q.data) continue;
+      for (const day of q.data.days) balances.set(day.date, day.balance);
+      monthEnds.set(q.data.month, q.data.closingBalance);
     }
-    if (running === null) return { dayBalances: balances, monthEndBalances: monthEnds };
-
-    for (let mi = 0; mi < queries.length; mi++) {
-      const data = queries[mi].data;
-      if (!data) continue;
-      for (const day of data.days) {
-        // Hidden rows are display-only — they never move the balance.
-        for (const e of day.entries) if (!e.hidden) running += e.amount;
-        balances.set(day.date, Math.round(running * 100) / 100);
-      }
-      monthEnds.set(data.month, Math.round(running * 100) / 100);
-    }
-
     return { dayBalances: balances, monthEndBalances: monthEnds };
   }, [queries]);
 

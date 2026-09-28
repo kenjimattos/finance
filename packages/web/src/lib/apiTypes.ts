@@ -200,6 +200,8 @@ export interface CashFlowDay {
   date: string;
   isPast: boolean;
   entries: CashFlowEntry[];
+  /** Saldo at the end of the day, chained from the month's openingBalance. */
+  balance: number;
 }
 
 export interface CashFlowBankAccount {
@@ -214,6 +216,8 @@ export interface CashFlowResponse {
   bankAccounts: CashFlowBankAccount[];
   /** Total opening across bank accounts; after the realized boundary it includes the projections of the months in between. */
   openingBalance: number;
+  /** Saldo at the end of the month: openingBalance plus every non-hidden entry. */
+  closingBalance: number;
   days: CashFlowDay[];
 }
 

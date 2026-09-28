@@ -244,9 +244,23 @@ cashflowRouter.get('/cashflow', (req, res, next) => {
     const month = monthParam ? Number(monthParam.split('-')[1]) : now.getMonth() + 1;
 
     const target = buildCashFlowMonth(db, year, month);
+    const openingBalance = projectedOpeningBalance(db, target);
+
+    // Running balance: every day carries the saldo at its end, walking from
+    // the projected opening through its non-hidden entries. Because the
+    // opening already includes the months before, each month's figures chain
+    // into the next without the client stitching months together.
+    let running = openingBalance;
+    const days = target.days.map((d) => {
+      for (const e of d.entries) if (!e.hidden) running += e.amount;
+      return { ...d, balance: round2(running) };
+    });
+
     res.json({
       ...target,
-      openingBalance: projectedOpeningBalance(db, target),
+      openingBalance,
+      closingBalance: round2(running),
+      days,
     });
   } catch (err) {
     next(err);

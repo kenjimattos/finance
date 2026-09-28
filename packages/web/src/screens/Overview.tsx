@@ -183,8 +183,6 @@ export function Overview({
     let income = 0;
     let expenses = 0;
     let cardBills = 0;
-    let realized = 0;
-    let all = 0;
 
     for (const day of data.days) {
       for (const e of day.entries) {
@@ -197,18 +195,18 @@ export function Overview({
         if (e.amount > 0) income += e.amount;
         else expenses += e.amount;
         if (e.amount < 0 && isCardBill(e)) cardBills += e.amount;
-        all += e.amount;
-        if (day.isPast) realized += e.amount;
       }
     }
     // * MARK: Cálculo do saldo
-    // The API's openingBalance already carries every projection before this
-    // month. Past/current months show the balance as of the last realized
-    // day; future months, the projected balance at the end of the month.
+    // Balances come from the API. Past/current months show the saldo as of
+    // the last realized day; future months, the projected end of the month.
+    const lastRealized = data.days.filter((d) => d.isPast).at(-1);
     const round2 = (n: number) => Math.round(n * 100) / 100;
     return {
-      openingBalance: round2(data.openingBalance),
-      currentBalance: round2(data.openingBalance + (isFutureMonth ? all : realized)),
+      openingBalance: data.openingBalance,
+      currentBalance: isFutureMonth
+        ? data.closingBalance
+        : (lastRealized?.balance ?? data.openingBalance),
       income: round2(income),
       expenses: round2(expenses - cardBills),
       cardBills: round2(cardBills),
