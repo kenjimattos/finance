@@ -21,6 +21,7 @@ import { formatBRL, formatDateShort } from '../lib/format';
 import { RowActionsMenu } from '../components/RowActionsMenu';
 import { useIsDemo } from '../lib/useIsDemo';
 import { keys } from '../lib/queryKeys';
+import { addMonth, monthRange, monthStr } from '../lib/month';
 
 const isDraggable = (e: CashFlowEntry) =>
   !e.hidden && (e.type === 'bank_transaction' || e.type === 'manual_entry');
@@ -110,31 +111,6 @@ function pad(n: number): string {
 function todayYmd(): string {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function monthStr(y: number, m: number): string {
-  return `${y}-${pad(m)}`;
-}
-
-function addMonth(y: number, m: number, delta: number): { year: number; month: number } {
-  const zb = m - 1 + delta;
-  return { year: y + Math.floor(zb / 12), month: ((zb % 12) + 12) % 12 + 1 };
-}
-
-/** Generate array of {year, month} from start to end (inclusive). */
-function monthRange(
-  startY: number, startM: number,
-  endY: number, endM: number,
-): Array<{ year: number; month: number }> {
-  const result: Array<{ year: number; month: number }> = [];
-  let y = startY, m = startM;
-  while (y < endY || (y === endY && m <= endM)) {
-    result.push({ year: y, month: m });
-    const next = addMonth(y, m, 1);
-    y = next.year;
-    m = next.month;
-  }
-  return result;
 }
 
 const BANK_COLORS = [
@@ -616,7 +592,7 @@ function MonthSection({
   const [addingEntry, setAddingEntry] = useState(false);
   const nextMs = (() => {
     const n = addMonth(year, month, 1);
-    return `${n.year}-${pad(n.month)}`;
+    return monthStr(n.year, n.month);
   })();
 
   // The API always returns hidden rows (flagged) — filter them out here

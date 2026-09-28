@@ -19,6 +19,7 @@ import { SplitSection } from '../components/SplitSection';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useIsDemo } from '../lib/useIsDemo';
 import { keys } from '../lib/queryKeys';
+import { addMonth, monthStr } from '../lib/month';
 
 // ─── Month label ────────────────────────────────────────────────────
 
@@ -29,13 +30,6 @@ const MONTH_NAMES = [
 
 function monthLabel(year: number, month: number): string {
   return `${MONTH_NAMES[month - 1]} ${year}`;
-}
-
-function addMonth(year: number, month: number, delta: number): { year: number; month: number } {
-  const zeroBased = month - 1 + delta;
-  const y = year + Math.floor(zeroBased / 12);
-  const m = ((zeroBased % 12) + 12) % 12 + 1;
-  return { year: y, month: m };
 }
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -147,11 +141,11 @@ export function Overview({
 
   // ── Cash flow summary for the target month ──
 
-  const ms = `${year}-${month < 10 ? '0' : ''}${month}`;
+  const ms = monthStr(year, month);
   const prevM = addMonth(year, month, -1);
-  const prevMs = `${prevM.year}-${prevM.month < 10 ? '0' : ''}${prevM.month}`;
+  const prevMs = monthStr(prevM.year, prevM.month);
   const nextM = addMonth(year, month, 1);
-  const nextMs = `${nextM.year}-${nextM.month < 10 ? '0' : ''}${nextM.month}`;
+  const nextMs = monthStr(nextM.year, nextM.month);
 
   const cashflowQ = useQuery({
     queryKey: keys.cashflow.month(ms),
