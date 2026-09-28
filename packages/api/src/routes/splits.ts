@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { computeBillWindowAtOffset } from '../services/billWindow.js';
+import { computeBillWindowAtOffset, resolveBillOffset } from '../services/billWindow.js';
 
 export const splitsRouter = Router();
 
@@ -127,10 +127,11 @@ interface SplitSummaryRow {
 splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
   try {
     const { db } = req;
-    const { accountId, offset } = z
+    const { accountId, ...cycle } = z
       .object({
         accountId: z.string().min(1),
-        offset: z.coerce.number().int().default(0),
+        offset: z.coerce.number().int().optional(),
+        dueMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
       })
       .parse(req.query);
 
@@ -143,6 +144,11 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
     }
 
     const s = { closingDay: settings.closing_day, dueDay: settings.due_day };
+    const offset = resolveBillOffset(s, cycle);
+    if (offset === null) {
+      res.status(404).json({ error: 'BillCycleNotFound', message: 'No bill cycle has its due date in that month.' });
+      return;
+    }
     const current = computeBillWindowAtOffset(s, offset);
 
     // Shift-aware 3-window params for an arbitrary cycle, so the same

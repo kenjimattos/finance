@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Db } from '../db/index.js';
 import {
   computeBillWindowAtOffset,
+  resolveBillOffset,
   type BillWindow,
 } from '../services/billWindow.js';
 
@@ -97,11 +98,12 @@ billsRouter.get('/bills', (req, res, next) => {
 billsRouter.get('/bills/current/breakdown', (req, res, next) => {
   try {
     const { db } = req;
-    const { itemId, accountId, offset } = z
+    const { itemId, accountId, ...cycle } = z
       .object({
         itemId: z.string().min(1),
         accountId: z.string().min(1).optional(),
-        offset: z.coerce.number().int().default(0),
+        offset: z.coerce.number().int().optional(),
+        dueMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
       })
       .parse(req.query);
 
@@ -142,6 +144,11 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
     }
 
     const settingsT = { closingDay, dueDay };
+    const offset = resolveBillOffset(settingsT, cycle);
+    if (offset === null) {
+      res.status(404).json({ error: 'BillCycleNotFound', message: 'No bill cycle has its due date in that month.' });
+      return;
+    }
     const current = computeBillWindowAtOffset(settingsT, offset);
     const previous = computeBillWindowAtOffset(settingsT, offset - 1);
     const next = computeBillWindowAtOffset(settingsT, offset + 1);

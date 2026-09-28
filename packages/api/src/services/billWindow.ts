@@ -240,3 +240,28 @@ export function findOffsetForDueMonth(
 
   return null;
 }
+
+/**
+ * Resolve which cycle a bill request targets: an explicit `offset`, or the
+ * cycle whose due date falls in `dueMonth` (`YYYY-MM`). `dueMonth` wins when
+ * both are given.
+ *
+ * Screens that navigate by calendar month (Overview) send `dueMonth` so the
+ * month→offset conversion runs on this server's clock, the same one that
+ * then computes the window at that offset. Resolving it in the browser
+ * instead mixed two clocks: near a closing day, a browser still on the
+ * previous date could ask for an offset the server reads one cycle apart.
+ *
+ * Returns `null` when no cycle within `findOffsetForDueMonth`'s bound matches.
+ */
+export function resolveBillOffset(
+  settings: CardSettings,
+  query: { offset?: number; dueMonth?: string },
+  today: Date = new Date(),
+): number | null {
+  if (query.dueMonth) {
+    const [y, m] = query.dueMonth.split('-').map(Number);
+    return findOffsetForDueMonth(settings, y, m, today);
+  }
+  return query.offset ?? 0;
+}

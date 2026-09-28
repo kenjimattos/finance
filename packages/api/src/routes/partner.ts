@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { partners, users } from '../config.js';
 import { getDb, type Db } from '../db/index.js';
-import { computeBillWindowAtOffset } from '../services/billWindow.js';
+import { computeBillWindowAtOffset, resolveBillOffset } from '../services/billWindow.js';
 
 export const partnerRouter = Router();
 
@@ -97,13 +97,14 @@ partnerRouter.get('/partner/cards', (req, res) => {
 const breakdownSchema = z.object({
   owner: z.string().min(1),
   accountId: z.string().min(1),
-  offset: z.coerce.number().int().default(0),
+  offset: z.coerce.number().int().optional(),
+  dueMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
 });
 
 partnerRouter.get('/partner/cards/breakdown', (req, res, next) => {
   try {
     const viewer = req.username;
-    const { owner, accountId, offset } = breakdownSchema.parse(req.query);
+    const { owner, accountId, ...cycle } = breakdownSchema.parse(req.query);
 
     // Only allow reading from owners that have explicitly declared the viewer
     // as their partner. Anything else is a forbidden cross-tenant read.
@@ -139,6 +140,11 @@ partnerRouter.get('/partner/cards/breakdown', (req, res, next) => {
       .get(account.item_id) as { connector_name: string | null } | undefined;
 
     const s = { closingDay: settings.closing_day, dueDay: settings.due_day };
+    const offset = resolveBillOffset(s, cycle);
+    if (offset === null) {
+      res.status(404).json({ error: 'BillCycleNotFound', message: 'No bill cycle has its due date in that month.' });
+      return;
+    }
     const current = computeBillWindowAtOffset(s, offset);
     const previous = computeBillWindowAtOffset(s, offset - 1);
     const next = computeBillWindowAtOffset(s, offset + 1);

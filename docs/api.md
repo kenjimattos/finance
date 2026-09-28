@@ -43,8 +43,8 @@ Usernames listed in `DEMO_USERS` (default: `demo`) get a 403 `DemoRestricted` fr
 ## Bills
 
 - `GET /bills?itemId=...` — the raw `bills` cache for an item (Pluggy's **closed** bills only), newest due date first. Diagnostic; no screen consumes it.
-- `GET /bills/current/breakdown?itemId=...&accountId=...&offset=N` — one response with the bill window dates, neighbor windows, and account-level aggregates: `total`, `previousTotal`, `delta`, sorted `categories[]`, and `installments[]`. `offset` (default 0) selects the cycle: 0 = currently open, -N = N cycles in the past. The Overview fetches this in parallel for every account, resolving each account's offset via `findOffsetForDueMonth`.
-- `GET /bills/current/split-summary?accountId=...&offset=N` — split transactions in the bill window with partner debt total, half/theirs/mine breakdowns, category totals, installments (each carrying its category so the UI can list the parcelas by category), and individual owes. Explicit split rows contribute to half/theirs; categorized rows without a split row contribute to mine.
+- `GET /bills/current/breakdown?itemId=...&accountId=...&offset=N` — one response with the bill window dates, neighbor windows, and account-level aggregates: `total`, `previousTotal`, `delta`, sorted `categories[]`, and `installments[]`. `offset` (default 0) selects the cycle: 0 = currently open, -N = N cycles in the past. Alternatively `dueMonth=YYYY-MM` selects the cycle whose due date falls in that month, resolved on the server's clock by `resolveBillOffset` (404 `BillCycleNotFound` if none); the response's `offset` says which cycle that was. The Overview fetches this in parallel for every account by `dueMonth`, and uses the returned `offset` to drill into the Dashboard.
+- `GET /bills/current/split-summary?accountId=...&offset=N` (or `&dueMonth=YYYY-MM`, as above) — split transactions in the bill window with partner debt total, half/theirs/mine breakdowns, category totals, installments (each carrying its category so the UI can list the parcelas by category), and individual owes. Explicit split rows contribute to half/theirs; categorized rows without a split row contribute to mine.
 
 ## Transactions (credit)
 
@@ -70,7 +70,7 @@ All three require `OPENAI_API_KEY` (plus `OPENAI_MODEL`); without it they return
 Requires `USER_<NAME>_PARTNER` on both sides; the API verifies the partnership is mutual before reading the partner's SQLite file.
 
 - `GET /partner/cards` — the partner's credit accounts the viewer may see.
-- `GET /partner/cards/breakdown?owner=…&accountId=…&offset=N` — the same shape as `/bills/current/breakdown`, computed against the partner's database. Read-only: there is no write path into another user's file.
+- `GET /partner/cards/breakdown?owner=…&accountId=…&offset=N` (or `&dueMonth=YYYY-MM`) — the same shape as `/bills/current/breakdown`, computed against the partner's database. Read-only: there is no write path into another user's file.
 
 ## Admin
 

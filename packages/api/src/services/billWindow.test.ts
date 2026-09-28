@@ -8,6 +8,7 @@ import {
   findOffsetForDueMonth,
   findOffsetForDate,
   recomputeShiftForDateChange,
+  resolveBillOffset,
 } from './billWindow.js';
 
 /** Helper: create a Date from yyyy-mm-dd without timezone surprises. */
@@ -376,5 +377,36 @@ describe('recomputeShiftForDateChange', () => {
 
   it('returns null when a date is beyond the search bound', () => {
     assert.equal(recomputeShiftForDateChange(settings, '2026-07-10', '2029-01-01', -1, today), null);
+  });
+});
+
+// ─── resolveBillOffset ───────────────────────────────────────────────
+
+describe('resolveBillOffset', () => {
+  const settings = { closingDay: 7, dueDay: 15 };
+  const today = date('2026-04-05');
+
+  it('defaults to the open bill when neither field is given', () => {
+    assert.equal(resolveBillOffset(settings, {}, today), 0);
+  });
+
+  it('passes an explicit offset through', () => {
+    assert.equal(resolveBillOffset(settings, { offset: -3 }, today), -3);
+  });
+
+  it('resolves dueMonth to the cycle due in that month', () => {
+    assert.equal(resolveBillOffset(settings, { dueMonth: '2026-06' }, today), 2);
+    assert.equal(resolveBillOffset(settings, { dueMonth: '2026-02' }, today), -2);
+  });
+
+  it('prefers dueMonth over offset when both are given', () => {
+    assert.equal(resolveBillOffset(settings, { offset: 5, dueMonth: '2026-04' }, today), 0);
+  });
+
+  it('reads the month on its own clock: the same dueMonth maps to a different offset once the bill closes', () => {
+    // Before closing (Apr 5) the open bill is due Apr 15; after closing
+    // (Apr 8) the open bill is due May 15, so April becomes offset -1.
+    assert.equal(resolveBillOffset(settings, { dueMonth: '2026-04' }, date('2026-04-05')), 0);
+    assert.equal(resolveBillOffset(settings, { dueMonth: '2026-04' }, date('2026-04-08')), -1);
   });
 });
