@@ -16,8 +16,8 @@ import { keys } from './queryKeys';
  * - GET /bills/current/split-summary, which reads only categorized rows
  *   and honors each row's `bill_shift`.
  *
- * That third one is the subtle one. Because it joins on categories and
- * resolves the bill window through the shift override, *categorizing* a row
+ * That third one is the subtle one. Because it reads only categorized rows and
+ * resolves the bill window through the row's shift, *categorizing* a row
  * or *shifting* it changes the split summary — not just splitting it. The
  * old hand-written invalidations missed both cases, leaving the split
  * columns stale after a categorize or a shift.
@@ -124,6 +124,27 @@ export function useBillMutations({
     onSuccess: invalidateBill,
   });
 
+  /**
+   * Moving a bill's closing redraws two windows (this cycle and the next),
+   * so every view of this account's bills changes — including the CashFlow,
+   * which projects the bill on its due date.
+   */
+  const setCycleOverride = useMutation({
+    mutationFn: ({
+      cycleMonth,
+      closingDate,
+      dueDate,
+    }: {
+      cycleMonth: string;
+      closingDate: string | null;
+      dueDate: string | null;
+    }) => api.setCycleOverride(accountId, cycleMonth, { closingDate, dueDate }),
+    onSuccess: () => {
+      invalidateBill();
+      queryClient.invalidateQueries({ queryKey: keys.cashflow.all });
+    },
+  });
+
   return {
     assign,
     clear,
@@ -137,5 +158,6 @@ export function useBillMutations({
     createManual,
     updateManual,
     deleteManual,
+    setCycleOverride,
   };
 }

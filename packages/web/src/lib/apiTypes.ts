@@ -158,6 +158,11 @@ export interface BillBreakdown {
   periodEnd: string;
   closingDate: string;
   dueDate: string;
+  /** `YYYY-MM` naming this cycle; the key of a per-cycle date override. */
+  cycleMonth: string;
+  /** True when this bill's closing / due date was set by hand for this cycle only. */
+  closingOverridden: boolean;
+  dueOverridden: boolean;
   /** Adjacent windows — needed so callers can ask /transactions for a shift-aware list. */
   previousPeriodStart: string;
   previousPeriodEnd: string;
@@ -171,6 +176,19 @@ export interface BillBreakdown {
   /** True when the immediately following bill window has any transactions
    *  (shift-aware). Drives whether the "→" arrow is enabled. */
   hasNextBillTransactions: boolean;
+}
+
+/** PUT /account-settings/:accountId/cycles/:cycleMonth */
+export interface CycleOverrideResult {
+  cycleMonth: string;
+  closingDate: string;
+  dueDate: string;
+  closingOverridden: boolean;
+  dueOverridden: boolean;
+  /** Where the edited cycle sits now — moving a closing past today can change it. */
+  offset: number;
+  /** Shifted rows whose shift changed so they stay on the same bill. */
+  realignedShifts: number;
 }
 
 // ── Types: cash flow ──

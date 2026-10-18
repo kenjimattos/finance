@@ -135,6 +135,17 @@ function openCycle(settings: CardSettings, today: Date): { year: number; month1:
   return c;
 }
 
+/** Offset (relative to the open bill) of the cycle named `YYYY-MM`. */
+export function offsetOfCycle(
+  settings: CardSettings,
+  cycleMonth: string,
+  today: Date = new Date(),
+): number {
+  const open = openCycle(settings, today);
+  const [y, m] = cycleMonth.split('-').map(Number);
+  return (y - open.year) * 12 + (m - open.month1);
+}
+
 /**
  * Compute a bill window shifted by `offset` cycles from the currently open bill.
  * offset =  0 → currently open bill (same as computeOpenBillWindow)
@@ -241,6 +252,96 @@ export function recomputeShiftForDateChange(
   const newNatural = findOffsetForDate(settings, newDate, today);
   if (oldNatural === null || newNatural === null) return null;
   return oldNatural + oldShift - newNatural;
+}
+
+export type CycleOverrideInput = { closingDate: string | null; dueDate: string | null };
+
+export type ResolvedCycleOverride =
+  | { ok: true; closingDate: string | null; dueDate: string | null }
+  | { ok: false; error: 'ClosingOutOfRange' | 'DueOutOfRange'; message: string };
+
+/** How far after the closing a due date may fall. */
+const MAX_DUE_AFTER_CLOSING_DAYS = 45;
+
+/**
+ * Validate an override for one cycle and normalize it for storage: a date
+ * equal to the cycle's default becomes null, so only real exceptions are
+ * stored and "both null" means "remove the override".
+ *
+ * The closing must stay strictly between the neighboring cycles' closings
+ * (their overrides included), so cycles never overlap or swap order. The due
+ * date must come after the effective closing, within 45 days.
+ */
+export function resolveCycleOverride(
+  settings: CardSettings,
+  year: number,
+  month1: number,
+  input: CycleOverrideInput,
+): ResolvedCycleOverride {
+  const defaults = computeBillWindowForCycle(
+    { closingDay: settings.closingDay, dueDay: settings.dueDay },
+    year,
+    month1,
+  );
+  const closingDate = input.closingDate === defaults.periodEnd ? null : input.closingDate;
+  const dueDate = input.dueDate === defaults.nextDueDate ? null : input.dueDate;
+
+  const prev = addMonths(year, month1, -1);
+  const next = addMonths(year, month1, 1);
+  const prevClosing = closingDateFor(settings, prev.year, prev.month1);
+  const nextClosing = closingDateFor(settings, next.year, next.month1);
+  const closing = closingDate ?? defaults.periodEnd;
+  if (!(prevClosing < closing && closing < nextClosing)) {
+    return {
+      ok: false,
+      error: 'ClosingOutOfRange',
+      message: `O fechamento precisa ficar depois de ${prevClosing} e antes de ${nextClosing}.`,
+    };
+  }
+
+  const due = dueDate ?? defaults.nextDueDate;
+  if (!(due > closing && due <= addDays(closing, MAX_DUE_AFTER_CLOSING_DAYS))) {
+    return {
+      ok: false,
+      error: 'DueOutOfRange',
+      message: `O vencimento precisa ficar depois do fechamento e até ${MAX_DUE_AFTER_CLOSING_DAYS} dias depois dele.`,
+    };
+  }
+  return { ok: true, closingDate, dueDate };
+}
+
+/**
+ * Recompute bill shifts after the cycle boundaries change (a per-cycle
+ * closing override was set or cleared).
+ *
+ * Same idea as recomputeShiftForDateChange, with the date fixed and the
+ * windows moving: a row whose natural cycle changes keeps showing on the
+ * bill the user placed it on (`target = naturalBefore + shift`). Rows
+ * without a shift are not passed in — they follow the new boundary, which is
+ * the point of moving it.
+ *
+ * Returns only the rows whose shift changes: `shift: null` removes the shift
+ * (the row now lands on its target naturally, or the target is out of the
+ * ±1 reach — then its natural cycle is the least wrong place, as in the sync).
+ * Rows outside findOffsetForDate's bound are left alone.
+ */
+export function realignShiftsForSettingsChange(
+  before: CardSettings,
+  after: CardSettings,
+  rows: ReadonlyArray<{ id: string; date: string; shift: number }>,
+  today: Date = new Date(),
+): Array<{ id: string; shift: number | null }> {
+  const changes: Array<{ id: string; shift: number | null }> = [];
+  for (const r of rows) {
+    const naturalBefore = findOffsetForDate(before, r.date, today);
+    const naturalAfter = findOffsetForDate(after, r.date, today);
+    if (naturalBefore === null || naturalAfter === null) continue;
+    if (naturalBefore === naturalAfter) continue;
+    const next = naturalBefore + r.shift - naturalAfter;
+    const shift = next === 0 || Math.abs(next) > 1 ? null : next;
+    if (shift !== r.shift) changes.push({ id: r.id, shift });
+  }
+  return changes;
 }
 
 /**

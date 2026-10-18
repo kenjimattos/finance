@@ -29,9 +29,9 @@ Two tables anchor the CashFlow running balance, and the distinction matters:
 
 ### 3. User configuration
 
-Tables: `account_settings`, `card_groups`, `card_group_members`.
+Tables: `account_settings`, `bill_cycle_overrides`, `card_groups`, `card_group_members`.
 
-Per-account closing/due days (Pluggy does not expose these), plus the user's optional grouping of physical cards by `card_last4` scoped per account. Card groups are used only to filter the transaction list (chips above the inbox); they no longer drive per-card bill totals. One card belongs to at most one group — composite primary key on `card_group_members (account_id, card_last4)` enforces exclusivity.
+Per-account closing/due days (Pluggy does not expose these), with `bill_cycle_overrides (account_id, cycle_month)` holding a different closing and/or due date for a single cycle (NULL = the default; see [sync.md](sync.md#per-cycle-closing-and-due-dates)), plus the user's optional grouping of physical cards by `card_last4` scoped per account. Card groups are used only to filter the transaction list (chips above the inbox); they no longer drive per-card bill totals. One card belongs to at most one group — composite primary key on `card_group_members (account_id, card_last4)` enforces exclusivity.
 
 ### 4. User work
 

@@ -16,6 +16,7 @@ import type {
   CashFlowResponse,
   Category,
   CommitFaturaRow,
+  CycleOverrideResult,
   ExtractedFaturaRow,
   Item,
   ManualEntry,
@@ -98,6 +99,16 @@ export const api = {
     body: { displayName?: string; closingDay: number; dueDay: number },
   ) =>
     request<AccountSettings>(`/account-settings/${accountId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  /** Override one bill's closing and/or due date; null = the account default. */
+  setCycleOverride: (
+    accountId: string,
+    cycleMonth: string,
+    body: { closingDate: string | null; dueDate: string | null },
+  ) =>
+    request<CycleOverrideResult>(`/account-settings/${accountId}/cycles/${cycleMonth}`, {
       method: 'PUT',
       body: JSON.stringify(body),
     }),

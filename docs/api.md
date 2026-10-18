@@ -24,6 +24,7 @@ Usernames listed in `DEMO_USERS` (default: `demo`) get a 403 `DemoRestricted` fr
 - `GET /accounts?itemId=...` — list accounts for the item. Frontend uses CREDIT accounts for billing and BANK accounts for cash flow.
 - `GET /account-settings/:accountId` → 404 triggers the per-account setup form. In the Overview, unconfigured accounts render as "Configurar" cards.
 - `PUT /account-settings/:accountId { closingDay, dueDay, displayName? }` — one-time config per account.
+- `PUT /account-settings/:accountId/cycles/:cycleMonth { closingDate, dueDate }` — override one bill's closing and/or due date (`yyyy-mm-dd`, or `null` for the default; both null removes the override). 400 `ClosingOutOfRange` / `DueOutOfRange` with a Portuguese `message`. Realigns affected bill shifts in the same transaction. Returns the cycle's effective `closingDate` / `dueDate`, the override flags, its current `offset` (an earlier closing can close the open bill) and `realignedShifts`.
 
 ## Cards
 
@@ -42,7 +43,7 @@ Usernames listed in `DEMO_USERS` (default: `demo`) get a 403 `DemoRestricted` fr
 ## Bills
 
 - `GET /bills?itemId=...` — the raw `bills` cache for an item (Pluggy's **closed** bills only), newest due date first. Diagnostic; no screen consumes it.
-- `GET /bills/current/breakdown?itemId=...&accountId=...&offset=N` (`accountId` required) — one response with the bill window dates, neighbor windows, and account-level aggregates: `total`, `previousTotal`, `delta`, sorted `categories[]`, and `installments[]`. `offset` (default 0) selects the cycle: 0 = currently open, -N = N cycles in the past. Alternatively `dueMonth=YYYY-MM` selects the cycle whose due date falls in that month, resolved on the server's clock by `resolveBillOffset` (404 `BillCycleNotFound` if none); the response's `offset` says which cycle that was. The Overview fetches this in parallel for every account by `dueMonth`, and uses the returned `offset` to drill into the Dashboard.
+- `GET /bills/current/breakdown?itemId=...&accountId=...&offset=N` (`accountId` required) — one response with the bill window dates, neighbor windows, and account-level aggregates: `total`, `previousTotal`, `delta`, sorted `categories[]`, and `installments[]`, plus `cycleMonth`, `closingOverridden` and `dueOverridden` for the per-cycle date editor. `offset` (default 0) selects the cycle: 0 = currently open, -N = N cycles in the past. Alternatively `dueMonth=YYYY-MM` selects the cycle whose due date falls in that month, resolved on the server's clock by `resolveBillOffset` (404 `BillCycleNotFound` if none); the response's `offset` says which cycle that was. The Overview fetches this in parallel for every account by `dueMonth`, and uses the returned `offset` to drill into the Dashboard.
 - `GET /bills/current/split-summary?accountId=...&offset=N` (or `&dueMonth=YYYY-MM`, as above) — split transactions in the bill window with partner debt total, half/theirs/mine breakdowns, category totals, installments (each carrying its category so the UI can list the parcelas by category), and individual owes. Explicit split rows contribute to half/theirs; categorized rows without a split row contribute to mine.
 
 ## Transactions (credit)

@@ -8,6 +8,8 @@ import {
   findOffsetForDueMonth,
   findOffsetForDate,
   recomputeShiftForDateChange,
+  realignShiftsForSettingsChange,
+  resolveCycleOverride,
   resolveBillOffset,
   type CardSettings,
   type CycleOverride,
@@ -522,5 +524,141 @@ describe('per-cycle overrides', () => {
     const off = findOffsetForDueMonth(s, 2026, 8, today);
     assert.ok(off !== null);
     assert.equal(computeBillWindowAtOffset(s, off!, today).nextDueDate.slice(0, 7), '2026-08');
+  });
+});
+
+// ─── realignShiftsForSettingsChange ──────────────────────────────────
+
+describe('realignShiftsForSettingsChange', () => {
+  const before = { closingDay: 16, dueDay: 25 };
+  const later = { ...before, overrides: new Map([['2026-06', { closingDate: '2026-06-18' }]]) };
+  const earlier = { ...before, overrides: new Map([['2026-06', { closingDate: '2026-06-13' }]]) };
+  const today = date('2026-06-10');
+
+  it('a row pulled back into June by -1 needs no shift once June closes later', () => {
+    // 17/06 is naturally July; the user shifted it -1 onto June. With June
+    // closing on the 18th it lands on June by itself.
+    const changes = realignShiftsForSettingsChange(before, later, [{ id: 'a', date: '2026-06-17', shift: -1 }], today);
+    assert.deepEqual(changes, [{ id: 'a', shift: null }]);
+  });
+
+  it('a row pushed to July by +1 needs no shift once June closes earlier', () => {
+    const changes = realignShiftsForSettingsChange(before, earlier, [{ id: 'a', date: '2026-06-15', shift: 1 }], today);
+    assert.deepEqual(changes, [{ id: 'a', shift: null }]);
+  });
+
+  it('keeps a row on its target when the boundary moves past it', () => {
+    // 15/06 shifted -1 onto May. June now closes on the 13th, so 15/06 is
+    // naturally July: reaching May would take -2, out of reach → cleared.
+    // 14/06 shifted +1 onto July: also July naturally now → cleared.
+    // 17/06 (July) shifted +1 onto August: unaffected, July stays July.
+    const changes = realignShiftsForSettingsChange(
+      before,
+      earlier,
+      [
+        { id: 'back', date: '2026-06-15', shift: -1 },
+        { id: 'fwd', date: '2026-06-14', shift: 1 },
+        { id: 'far', date: '2026-06-17', shift: 1 },
+      ],
+      today,
+    );
+    assert.deepEqual(changes, [
+      { id: 'back', shift: null },
+      { id: 'fwd', shift: null },
+    ]);
+  });
+
+  it('with ±1 shifts a single moved boundary either clears the shift or leaves it', () => {
+    // 17/06 is July and shifted +1 onto August… a later June closing makes it
+    // June, so August is two cycles away → cleared to its natural cycle.
+    // 18/06 in July shifted -1 onto June: June closing on the 18th → natural.
+    const changes = realignShiftsForSettingsChange(
+      before,
+      later,
+      [
+        { id: 'a', date: '2026-06-17', shift: 1 },
+        { id: 'b', date: '2026-06-18', shift: -1 },
+      ],
+      today,
+    );
+    assert.deepEqual(changes, [
+      { id: 'a', shift: null },
+      { id: 'b', shift: null },
+    ]);
+  });
+
+  it('removing an override undoes the realignment', () => {
+    const changes = realignShiftsForSettingsChange(later, before, [{ id: 'a', date: '2026-06-17', shift: 1 }], today);
+    // Under `later` 17/06 is June, +1 → July. Back to default it is July
+    // naturally, so the shift goes.
+    assert.deepEqual(changes, [{ id: 'a', shift: null }]);
+  });
+
+  it('keeps a larger import shift on its target', () => {
+    // The fatura import can store shifts beyond ±1 (an installment re-dated
+    // far from its bill). 17/06 shifted -2 targets May; once it is June
+    // naturally, -1 still reaches May.
+    const changes = realignShiftsForSettingsChange(before, later, [{ id: 'a', date: '2026-06-17', shift: -2 }], today);
+    assert.deepEqual(changes, [{ id: 'a', shift: -1 }]);
+  });
+
+  it('rows away from the moved boundary are untouched', () => {
+    const changes = realignShiftsForSettingsChange(
+      before,
+      later,
+      [
+        { id: 'a', date: '2026-05-20', shift: 1 },
+        { id: 'b', date: '2026-07-10', shift: -1 },
+      ],
+      today,
+    );
+    assert.deepEqual(changes, []);
+  });
+});
+
+// ─── resolveCycleOverride ────────────────────────────────────────────
+
+describe('resolveCycleOverride', () => {
+  const s = { closingDay: 16, dueDay: 25 };
+
+  it('stores a real exception as given', () => {
+    assert.deepEqual(resolveCycleOverride(s, 2026, 6, { closingDate: '2026-06-18', dueDate: null }), {
+      ok: true,
+      closingDate: '2026-06-18',
+      dueDate: null,
+    });
+  });
+
+  it('normalizes dates equal to the default to null', () => {
+    assert.deepEqual(
+      resolveCycleOverride(s, 2026, 6, { closingDate: '2026-06-16', dueDate: '2026-06-25' }),
+      { ok: true, closingDate: null, dueDate: null },
+    );
+  });
+
+  it('rejects a closing that reaches a neighboring closing', () => {
+    const r1 = resolveCycleOverride(s, 2026, 6, { closingDate: '2026-05-16', dueDate: null });
+    const r2 = resolveCycleOverride(s, 2026, 6, { closingDate: '2026-07-16', dueDate: null });
+    assert.equal(r1.ok, false);
+    assert.equal(r2.ok, false);
+    assert.equal(resolveCycleOverride(s, 2026, 6, { closingDate: '2026-05-17', dueDate: '2026-05-30' }).ok, true);
+  });
+
+  it("honors the neighbors' own overrides", () => {
+    const withJuly = { ...s, overrides: new Map([['2026-07', { closingDate: '2026-07-02' }]]) };
+    assert.equal(resolveCycleOverride(withJuly, 2026, 6, { closingDate: '2026-07-03', dueDate: '2026-07-10' }).ok, false);
+  });
+
+  it('rejects a due date not after the closing, or too far from it', () => {
+    const early = resolveCycleOverride(s, 2026, 6, { closingDate: null, dueDate: '2026-06-16' });
+    const late = resolveCycleOverride(s, 2026, 6, { closingDate: null, dueDate: '2026-08-01' });
+    assert.deepEqual([early.ok, late.ok], [false, false]);
+    assert.equal(early.ok === false && early.error, 'DueOutOfRange');
+  });
+
+  it('checks the default due date against a moved closing', () => {
+    // Closing moved to the 26th: the default due date (25th) would come first.
+    const r = resolveCycleOverride(s, 2026, 6, { closingDate: '2026-06-26', dueDate: null });
+    assert.equal(r.ok === false && r.error, 'DueOutOfRange');
   });
 });

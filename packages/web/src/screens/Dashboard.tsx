@@ -200,6 +200,7 @@ function AccountDashboard({
       <BillHeader
         breakdown={breakdownQ.data}
         itemId={itemId}
+        accountId={accountId}
         offset={billOffset}
         onChangeOffset={(next) => {
           // Left arrow is unbounded back into history.
