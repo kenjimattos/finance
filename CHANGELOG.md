@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Corrigido
 
+- **Salvar de novo uma conexão de banco podia apagar as contas dela.** O cadastro de uma conexão usava `INSERT OR REPLACE`, que no SQLite apaga a linha antes de inserir. A exclusão em cascata levava junto as contas da conexão e tudo que depende delas: dias de fechamento e vencimento, transações da conta corrente e saldos confirmados. Hoje isso não acontecia, porque cada conexão nova recebe um ID novo do Pluggy. Mas aconteceria no primeiro uso da reautenticação do Pluggy, que mantém o mesmo ID. Agora o cadastro só atualiza o nome do conector. Para começar do zero, continua sendo preciso remover o banco.
+
 - **Transações agendadas da conta corrente tratadas como se já tivessem acontecido.** O Itaú passou a mandar, pelo Pluggy, PIX agendados com data futura (parcelas de 16/11 e 16/12, como PENDING). O fluxo de caixa considerava realizado tudo até a transação de banco mais recente, então uma única linha agendada empurrava essa fronteira para dezembro: o fluxo abria em dezembro, os lançamentos manuais e as faturas previstas até lá sumiam da projeção, e o sync apagava os lançamentos manuais de todos os meses anteriores ao da linha agendada (a limpeza que roda ao fim do sync usa a mesma fronteira). Agora só conta como realizado o que tem data até hoje, no horário de Brasília. As linhas com data futura aparecem nos dias de projeção marcadas como "agendado" e entram no saldo previsto como um lançamento manual; se já houver um lançamento manual para a mesma conta, oculte uma das duas. O fechamento de ano do saldo também passa a ignorar essas linhas, para não congelar um ano que ainda não terminou.
 
 ## [1.11.0] - 2026-09-28

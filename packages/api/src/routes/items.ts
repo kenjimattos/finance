@@ -21,8 +21,12 @@ itemsRouter.post('/items', async (req, res, next) => {
     const item = await pluggy.fetchItem(itemId);
     console.log('[items] POST /items — itemId:', item.id, 'connector:', item.connector?.name, 'status:', item.status);
 
+    // Upsert, never INSERT OR REPLACE: REPLACE deletes the row first, and the
+    // ON DELETE CASCADE from accounts would wipe every account of the item
+    // (settings, bank rows, balance anchors) when an item id is saved again.
     req.db.prepare(
-      'INSERT OR REPLACE INTO items (id, connector_name) VALUES (?, ?)',
+      `INSERT INTO items (id, connector_name) VALUES (?, ?)
+       ON CONFLICT(id) DO UPDATE SET connector_name = excluded.connector_name`,
     ).run(item.id, item.connector?.name ?? null);
 
     res.status(201).json({ id: item.id, connectorName: item.connector?.name });
