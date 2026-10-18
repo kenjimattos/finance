@@ -130,4 +130,29 @@ describe('pruneRealizedManualEntries', () => {
     assert.equal(deleted, 1);
     assert.deepEqual(remainingMonths(), ['2026-04']);
   });
+
+  it('ignores scheduled rows dated after today when finding the boundary', () => {
+    // Itaú serves future PIX installments as PENDING rows months ahead. They
+    // must not drag the boundary forward and wipe the months in between.
+    addBankTx('2026-10-17'); // last real row → boundary month = 2026-10
+    addBankTx('2026-12-16'); // scheduled
+    addEntry('2026-09'); // before boundary — removed
+    addEntry('2026-10');
+    addEntry('2026-11');
+
+    const deleted = pruneRealizedManualEntries(db, '2026-10-18');
+
+    assert.equal(deleted, 1);
+    assert.deepEqual(remainingMonths(), ['2026-10', '2026-11']);
+  });
+
+  it('is a no-op when every bank row is scheduled in the future', () => {
+    addBankTx('2026-12-16');
+    addEntry('2026-11');
+
+    const deleted = pruneRealizedManualEntries(db, '2026-10-18');
+
+    assert.equal(deleted, 0);
+    assert.deepEqual(remainingMonths(), ['2026-11']);
+  });
 });

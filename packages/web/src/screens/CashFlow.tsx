@@ -984,6 +984,14 @@ function RowBody({
                       ? (bankNames?.get(entry.bankAccountId) ?? '')
                       : ''}
                 </span>
+                {entry.scheduled && (
+                  <span
+                    className="shrink-0 font-body text-[9px] uppercase tracking-[0.14em] text-[color:var(--color-ink-faint)]"
+                    title="Agendado no banco — ainda não debitado"
+                  >
+                    agendado
+                  </span>
+                )}
               </div>
             )}
 

@@ -194,6 +194,8 @@ export interface CashFlowEntry {
   bankAccountId?: string;
   isBillPayment?: boolean;
   hidden?: boolean;
+  /** Bank row dated after the realized boundary (e.g. a scheduled PIX). */
+  scheduled?: boolean;
 }
 
 export interface CashFlowDay {

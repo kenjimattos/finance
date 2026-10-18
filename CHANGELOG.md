@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Não lançado]
+
+### Corrigido
+
+- **Transações agendadas da conta corrente tratadas como se já tivessem acontecido.** O Itaú passou a mandar, pelo Pluggy, PIX agendados com data futura (parcelas de 16/11 e 16/12, como PENDING). O fluxo de caixa considerava realizado tudo até a transação de banco mais recente, então uma única linha agendada empurrava essa fronteira para dezembro: o fluxo abria em dezembro, os lançamentos manuais e as faturas previstas até lá sumiam da projeção, e o sync apagava os lançamentos manuais de todos os meses anteriores ao da linha agendada (a limpeza que roda ao fim do sync usa a mesma fronteira). Agora só conta como realizado o que tem data até hoje, no horário de Brasília. As linhas com data futura aparecem nos dias de projeção marcadas como "agendado" e entram no saldo previsto como um lançamento manual; se já houver um lançamento manual para a mesma conta, oculte uma das duas. O fechamento de ano do saldo também passa a ignorar essas linhas, para não congelar um ano que ainda não terminou.
+
 ## [1.11.0] - 2026-09-28
 
 ### Adicionado

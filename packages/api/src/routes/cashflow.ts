@@ -11,31 +11,34 @@ import {
 import { pruneRealizedManualEntries } from '../services/pruneManualEntries.js';
 import { ensureYearEndAnchors } from '../services/yearEndAnchors.js';
 import { looksLikeBillPayment } from '../services/billPaymentDetect.js';
+import { lastRealizedBankDate } from '../services/realizedBoundary.js';
 
 export const cashflowRouter = Router();
 
 /**
- * GET /cashflow/range — returns the first and last month that have BANK
- * transactions, so the frontend knows which months to render.
+ * GET /cashflow/range — returns the first month with BANK transactions and
+ * the realized boundary's month, so the frontend knows which months to render.
+ * `lastMonth` is the month the CashFlow opens on; scheduled rows dated after
+ * today don't move it (they show up in the projection months instead).
  */
 cashflowRouter.get('/cashflow/range', (req, res) => {
   const { db } = req;
-  const row = db
-    .prepare(
-      `SELECT MIN(date) AS first_date, MAX(date) AS last_date
-       FROM bank_transactions`,
-    )
-    .get() as { first_date: string | null; last_date: string | null };
+  const first = (
+    db.prepare('SELECT MIN(date) AS first_date FROM bank_transactions').get() as {
+      first_date: string | null;
+    }
+  ).first_date;
+  const last = lastRealizedBankDate(db);
 
-  if (!row?.first_date || !row?.last_date) {
+  if (!first || !last) {
     res.json({ firstMonth: null, lastMonth: null });
     return;
   }
 
   // Extract YYYY-MM from the date strings.
   res.json({
-    firstMonth: row.first_date.slice(0, 7),
-    lastMonth: row.last_date.slice(0, 7),
+    firstMonth: first.slice(0, 7),
+    lastMonth: last.slice(0, 7),
   });
 });
 
@@ -186,6 +189,8 @@ interface CashFlowEntry {
   bankAccountId?: string;
   isBillPayment?: boolean;
   hidden?: boolean;
+  /** Bank row dated after the realized boundary (e.g. a scheduled PIX). */
+  scheduled?: boolean;
 }
 
 interface CashFlowDay {
@@ -289,11 +294,7 @@ const sumEntries = (m: CashFlowMonth): number =>
  * and earlier it equals the sum of the per-account openings.
  */
 function projectedOpeningBalance(db: Database, target: CashFlowMonth): number {
-  const lastRealized = (
-    db.prepare('SELECT MAX(date) AS max_date FROM bank_transactions').get() as {
-      max_date: string | null;
-    }
-  ).max_date;
+  const lastRealized = lastRealizedBankDate(db);
   const boundaryMonth = lastRealized?.slice(0, 7);
   if (!boundaryMonth || target.month <= boundaryMonth) return round2(sumOpening(target));
 
@@ -337,17 +338,16 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
   const bankAccountIds = bankAccounts.map((a) => a.id);
 
   // ── Data coverage boundary ──
-  // One global cutoff: the latest date that has ANY real bank transaction,
-  // across every account and every month. Hidden rows still count — hiding
-  // is a display choice, not "data ends here". Days on or before this date
-  // are realized (show real bank transactions); days after it are
-  // projection territory (manual entries + credit card bill outflows).
-  // Deliberately NOT tied to today's date: if syncing stalls, the boundary
-  // stalls with it, instead of marking un-synced days as empty-but-realized.
-  const realizedRow = db
-    .prepare('SELECT MAX(date) AS max_date FROM bank_transactions')
-    .get() as { max_date: string | null };
-  const lastRealizedDate = realizedRow.max_date ?? '0000-00-00';
+  // One global cutoff: the latest date on or before today that has ANY real
+  // bank transaction, across every account and every month. Hidden rows
+  // still count — hiding is a display choice, not "data ends here". Days on
+  // or before this date are realized (show real bank transactions); days
+  // after it are projection territory (manual entries + credit card bill
+  // outflows + scheduled bank rows Pluggy serves with a future date).
+  // Capped at today but otherwise data-driven: if syncing stalls, the
+  // boundary stalls with it, instead of marking un-synced days as
+  // empty-but-realized.
+  const lastRealizedDate = lastRealizedBankDate(db) ?? '0000-00-00';
 
   // ── Compute opening balance per bank account ──
   // Every month's opening derives from a SINGLE anchor by walking the
@@ -365,6 +365,10 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
   // recent anchor is used (refreshed yearly), giving the shortest walk over
   // current data. When no anchor exists, fall back to the live balance rolled
   // backward — still one anchor for all months, just less trustworthy.
+  //
+  // Both walks stop at the realized boundary: scheduled rows haven't moved
+  // the real balance (nor the live Pluggy one). They enter the projection as
+  // day entries instead, like manual entries.
   const sumBetween = (accountId: string, fromExcl: string, toExcl: string): number =>
     (
       db
@@ -372,10 +376,10 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
           // tx strictly after `fromExcl`, strictly before `toExcl`.
           `SELECT COALESCE(SUM(t.amount), 0) AS total
            FROM bank_transactions t
-           WHERE t.account_id = ? AND t.date > ? AND t.date < ?
+           WHERE t.account_id = ? AND t.date > ? AND t.date < ? AND t.date <= ?
              AND ${BANK_TX_NOT_HIDDEN_SQL}`,
         )
-        .get(accountId, fromExcl, toExcl) as { total: number }
+        .get(accountId, fromExcl, toExcl, lastRealizedDate) as { total: number }
     ).total;
 
   const sumRange = (accountId: string, fromIncl: string, toIncl: string): number =>
@@ -384,10 +388,10 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
         .prepare(
           `SELECT COALESCE(SUM(t.amount), 0) AS total
            FROM bank_transactions t
-           WHERE t.account_id = ? AND t.date >= ? AND t.date <= ?
+           WHERE t.account_id = ? AND t.date >= ? AND t.date <= ? AND t.date <= ?
              AND ${BANK_TX_NOT_HIDDEN_SQL}`,
         )
-        .get(accountId, fromIncl, toIncl) as { total: number }
+        .get(accountId, fromIncl, toIncl, lastRealizedDate) as { total: number }
     ).total;
 
   const openingBalances = new Map<string, number>();
@@ -416,7 +420,7 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
       }
     } else if (ba.balance != null) {
       // Fallback: roll the live balance backward across every not-hidden
-      // transaction from firstDay onward (none are dated in the future).
+      // realized transaction from firstDay onward.
       opening = round2(ba.balance - sumRange(ba.id, firstDay, '9999-12-31'));
     } else {
       // No anchor and no live balance to ground on. balance_snapshots are
@@ -428,14 +432,14 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
     openingBalances.set(ba.id, opening);
   }
 
-  // ── Realized days: actual bank transactions (all bank accounts) ──
-  // Every bank transaction is realized by definition (its date is <=
-  // lastRealizedDate), so the whole month window is fair game — the
-  // assembly loop below places each row on its own day.
-  let pastTxRows: BankTxRow[] = [];
+  // ── Bank transactions in the month (all bank accounts) ──
+  // Realized rows (date <= lastRealizedDate) and scheduled ones (after it)
+  // come from the same query; the assembly loop places each row on its own
+  // day and flags the scheduled ones.
+  let bankTxRows: BankTxRow[] = [];
   if (bankAccountIds.length > 0) {
     const placeholders = bankAccountIds.map(() => '?').join(',');
-    pastTxRows = db
+    bankTxRows = db
       .prepare(
         `SELECT t.id, t.account_id,  t.date,
                 COALESCE(o.description, t.description) AS description,
@@ -539,6 +543,22 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
   // ── Assemble day-by-day timeline ──
   const days: CashFlowDay[] = [];
 
+  const pushBankRows = (date: string, entries: CashFlowEntry[], scheduled: boolean) => {
+    for (const tx of bankTxRows) {
+      if (tx.date !== date) continue;
+      entries.push({
+        id: tx.id,
+        description: tx.description ?? '',
+        amount: round2(tx.amount),
+        type: 'bank_transaction',
+        bankAccountId: tx.account_id,
+        isBillPayment: tx.is_bill_tagged === 1 || undefined,
+        hidden: tx.is_hidden === 1 || undefined,
+        scheduled: scheduled || undefined,
+      });
+    }
+  };
+
   const pushManualEntries = (d: number, entries: CashFlowEntry[]) => {
     // Manual entries whose day_of_month matches (clamped).
     for (const me of manualEntries) {
@@ -561,20 +581,7 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
 
     if (isPast) {
       // Actual bank transactions for this day (all bank accounts).
-      for (const tx of pastTxRows) {
-        if (tx.date === date) {
-          const billTagged = tx.is_bill_tagged === 1;
-          entries.push({
-            id: tx.id,
-            description: tx.description ?? '',
-            amount: round2(tx.amount),
-            type: 'bank_transaction',
-            bankAccountId: tx.account_id,
-            isBillPayment: billTagged || undefined,
-            hidden: tx.is_hidden === 1 || undefined,
-          });
-        }
-      }
+      pushBankRows(date, entries, false);
 
       // The boundary day is realized but not necessarily COMPLETE: the
       // sync reached it, yet scheduled manual entries for this day may not
@@ -585,6 +592,10 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
         pushManualEntries(d, entries);
       }
     } else {
+      // Scheduled bank rows: real commitments the bank already knows about
+      // (Itaú's future PIX installments), summed into the projection like a
+      // manual entry. Hide one if a manual entry already covers it.
+      pushBankRows(date, entries, true);
       pushManualEntries(d, entries);
 
       // Credit card bill outflows on their due day.

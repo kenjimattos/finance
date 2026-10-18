@@ -1,11 +1,13 @@
 import type { Database } from 'better-sqlite3';
+import { lastRealizedBankDate } from './realizedBoundary.js';
 
 /**
  * Drop `manual_entries` that real bank data has made obsolete.
  *
  * Manual entries are CashFlow projections for *future* days. The CashFlow
  * render already hides any entry whose date is at or before the realized
- * boundary (`MAX(bank_transactions.date)`), so once real bank data fully
+ * boundary (`lastRealizedBankDate` — scheduled rows dated after today don't
+ * count), so once real bank data fully
  * covers a month, that month's entries are dead rows that only accumulate.
  *
  * Called at the end of a bank sync, this removes:
@@ -23,14 +25,11 @@ import type { Database } from 'better-sqlite3';
  *
  * @returns the number of manual entries deleted.
  */
-export function pruneRealizedManualEntries(db: Database): number {
-  const realizedRow = db
-    .prepare('SELECT MAX(date) AS max_date FROM bank_transactions')
-    .get() as { max_date: string | null };
+export function pruneRealizedManualEntries(db: Database, today?: string): number {
+  const lastRealized = lastRealizedBankDate(db, today);
+  if (!lastRealized) return 0;
 
-  if (!realizedRow.max_date) return 0;
-
-  const realizedMonth = realizedRow.max_date.slice(0, 7); // YYYY-MM
+  const realizedMonth = lastRealized.slice(0, 7); // YYYY-MM
   const result = db
     .prepare(
       `DELETE FROM manual_entries

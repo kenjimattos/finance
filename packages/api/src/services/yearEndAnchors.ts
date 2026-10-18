@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3';
+import { lastRealizedBankDate } from './realizedBoundary.js';
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -39,12 +40,11 @@ const NOT_HIDDEN_SQL =
  *
  * @returns the number of year-end anchors created.
  */
-export function ensureYearEndAnchors(db: Database): number {
-  const lastRow = db
-    .prepare('SELECT MAX(date) AS d FROM bank_transactions')
-    .get() as { d: string | null };
-  if (!lastRow.d) return 0;
-  const lastRealized = lastRow.d;
+export function ensureYearEndAnchors(db: Database, today?: string): number {
+  // Scheduled rows dated after today don't count as realized: one dated next
+  // February would otherwise freeze the current year before it has happened.
+  const lastRealized = lastRealizedBankDate(db, today);
+  if (!lastRealized) return 0;
 
   const accounts = db
     .prepare("SELECT id FROM accounts WHERE type = 'BANK'")

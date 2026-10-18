@@ -12,6 +12,11 @@ import { ensureYearEndAnchors } from './yearEndAnchors.js';
  * In-memory SQLite with the minimal schema the function touches.
  */
 
+// These fixtures span 2025–2028; pin "today" past all of them so the
+// realized boundary is just the latest row. Scheduled-row behavior has its
+// own test with a real cutoff.
+const NO_CUTOFF = '9999-12-31';
+
 let db: DB;
 
 function createSchema(d: DB): void {
@@ -82,7 +87,7 @@ describe('ensureYearEndAnchors', () => {
     addTx('a', '2026-08-01', -20); // -20  → 2026 net +30
     addTx('a', '2027-02-01', 5); // realized into 2027 → 2026 is settled
 
-    const created = ensureYearEndAnchors(db);
+    const created = ensureYearEndAnchors(db, NO_CUTOFF);
 
     assert.equal(created, 1);
     assert.deepEqual(anchors('a'), [
@@ -97,7 +102,7 @@ describe('ensureYearEndAnchors', () => {
     addTx('a', '2026-12-30', 50);
     addTx('a', '2027-01-10', 5); // before 2027-01-15 → 2026 not settled yet
 
-    const created = ensureYearEndAnchors(db);
+    const created = ensureYearEndAnchors(db, NO_CUTOFF);
 
     assert.equal(created, 0);
     assert.deepEqual(anchors('a'), [
@@ -112,7 +117,7 @@ describe('ensureYearEndAnchors', () => {
     addTx('a', '2027-06-01', 40); // 2027 net +40  → anchor 140
     addTx('a', '2028-02-01', 1); // realized into 2028 → 2026 & 2027 settled
 
-    const created = ensureYearEndAnchors(db);
+    const created = ensureYearEndAnchors(db, NO_CUTOFF);
 
     assert.equal(created, 2);
     assert.deepEqual(anchors('a'), [
@@ -130,7 +135,7 @@ describe('ensureYearEndAnchors', () => {
     db.prepare('INSERT INTO bank_transaction_hidden (transaction_id) VALUES (?)').run(hidden);
     addTx('a', '2027-02-01', 0);
 
-    const created = ensureYearEndAnchors(db);
+    const created = ensureYearEndAnchors(db, NO_CUTOFF);
 
     assert.equal(created, 1);
     assert.equal(anchors('a')[1].balance, 150); // 100 + 50, hidden 999 ignored
@@ -144,7 +149,7 @@ describe('ensureYearEndAnchors', () => {
     addTx('a', '2027-06-01', 25); // 2027 net +25 → off the manual 200 → 225
     addTx('a', '2028-02-01', 0); // 2026 & 2027 settled
 
-    const created = ensureYearEndAnchors(db);
+    const created = ensureYearEndAnchors(db, NO_CUTOFF);
 
     assert.equal(created, 1); // only 2027 created; 2026 left as the manual row
     assert.deepEqual(anchors('a'), [
@@ -159,7 +164,7 @@ describe('ensureYearEndAnchors', () => {
     addTx('a', '2026-06-01', 100);
     addTx('a', '2027-02-01', 5);
 
-    const created = ensureYearEndAnchors(db);
+    const created = ensureYearEndAnchors(db, NO_CUTOFF);
 
     assert.equal(created, 0);
     assert.deepEqual(anchors('a'), []);
@@ -171,14 +176,28 @@ describe('ensureYearEndAnchors', () => {
     addTx('a', '2026-03-01', 50);
     addTx('a', '2027-02-01', 0);
 
-    assert.equal(ensureYearEndAnchors(db), 1);
-    assert.equal(ensureYearEndAnchors(db), 0);
+    assert.equal(ensureYearEndAnchors(db, NO_CUTOFF), 1);
+    assert.equal(ensureYearEndAnchors(db, NO_CUTOFF), 0);
+  });
+
+  it('does not freeze a year on the strength of a scheduled future row', () => {
+    addAccount('a');
+    addAnchor('a', '2025-12-31', 100);
+    addTx('a', '2026-10-17', 50); // last real row
+    addTx('a', '2027-02-16', -10); // scheduled PIX, served by Pluggy as PENDING
+
+    const created = ensureYearEndAnchors(db, '2026-10-18');
+
+    assert.equal(created, 0);
+    assert.deepEqual(anchors('a'), [
+      { anchor_date: '2025-12-31', balance: 100, source: 'manual' },
+    ]);
   });
 
   it('is a no-op when there are no bank transactions', () => {
     addAccount('a');
     addAnchor('a', '2025-12-31', 100);
 
-    assert.equal(ensureYearEndAnchors(db), 0);
+    assert.equal(ensureYearEndAnchors(db, NO_CUTOFF), 0);
   });
 });
