@@ -9,6 +9,8 @@ import {
   findOffsetForDate,
   recomputeShiftForDateChange,
   resolveBillOffset,
+  type CardSettings,
+  type CycleOverride,
 } from './billWindow.js';
 
 /** Helper: create a Date from yyyy-mm-dd without timezone surprises. */
@@ -408,5 +410,117 @@ describe('resolveBillOffset', () => {
     // (Apr 8) the open bill is due May 15, so April becomes offset -1.
     assert.equal(resolveBillOffset(settings, { dueMonth: '2026-04' }, date('2026-04-05')), 0);
     assert.equal(resolveBillOffset(settings, { dueMonth: '2026-04' }, date('2026-04-08')), -1);
+  });
+});
+
+// ─── per-cycle overrides ─────────────────────────────────────────────
+
+describe('per-cycle overrides', () => {
+  // Closes on the 16th, due on the 25th (same month).
+  const base = { closingDay: 16, dueDay: 25 };
+  const withOverrides = (o: Record<string, CycleOverride>): CardSettings => ({
+    ...base,
+    overrides: new Map(Object.entries(o)),
+  });
+
+  it('no overrides: windows carry their cycle month and no override flags', () => {
+    const w = computeOpenBillWindow(base, date('2026-06-10'));
+    assert.equal(w.cycleMonth, '2026-06');
+    assert.equal(w.closingOverridden, false);
+    assert.equal(w.dueOverridden, false);
+  });
+
+  it('a later closing extends that cycle and shortens the next one', () => {
+    const s = withOverrides({ '2026-06': { closingDate: '2026-06-18' } });
+    const today = date('2026-06-10');
+    const june = computeBillWindowAtOffset(s, 0, today);
+    const july = computeBillWindowAtOffset(s, 1, today);
+    assert.equal(june.periodStart, '2026-05-17');
+    assert.equal(june.periodEnd, '2026-06-18');
+    assert.equal(june.closingOverridden, true);
+    assert.equal(july.periodStart, '2026-06-19');
+    assert.equal(july.periodEnd, '2026-07-16');
+    assert.equal(july.closingOverridden, false);
+  });
+
+  it('cycles before and after the overridden pair keep their dates', () => {
+    const s = withOverrides({ '2026-06': { closingDate: '2026-06-13' } });
+    const today = date('2026-06-10');
+    const may = computeBillWindowAtOffset(s, -1, today);
+    const aug = computeBillWindowAtOffset(s, 2, today);
+    assert.deepEqual([may.periodStart, may.periodEnd], ['2026-04-17', '2026-05-16']);
+    assert.deepEqual([aug.periodStart, aug.periodEnd], ['2026-07-17', '2026-08-16']);
+  });
+
+  it('a closing override does not move the due date', () => {
+    const s = withOverrides({ '2026-06': { closingDate: '2026-06-13' } });
+    assert.equal(computeOpenBillWindow(s, date('2026-06-10')).nextDueDate, '2026-06-25');
+  });
+
+  it('a due override changes only that cycle', () => {
+    const s = withOverrides({ '2026-06': { dueDate: '2026-06-26' } });
+    const today = date('2026-06-10');
+    const june = computeBillWindowAtOffset(s, 0, today);
+    assert.equal(june.nextDueDate, '2026-06-26');
+    assert.equal(june.dueOverridden, true);
+    assert.equal(june.closingOverridden, false);
+    assert.equal(june.periodEnd, '2026-06-16');
+    assert.equal(computeBillWindowAtOffset(s, 1, today).nextDueDate, '2026-07-25');
+  });
+
+  it('the open bill follows an earlier closing: the cycle already closed', () => {
+    // June would close on the 16th, but this June closed on the 12th. On the
+    // 14th the open bill is already July's.
+    const s = withOverrides({ '2026-06': { closingDate: '2026-06-12' } });
+    const w = computeOpenBillWindow(s, date('2026-06-14'));
+    assert.equal(w.cycleMonth, '2026-07');
+    assert.equal(w.periodStart, '2026-06-13');
+  });
+
+  it('the open bill follows a later closing: the cycle is still open', () => {
+    const s = withOverrides({ '2026-06': { closingDate: '2026-06-18' } });
+    assert.equal(computeOpenBillWindow(s, date('2026-06-17')).cycleMonth, '2026-06');
+    assert.equal(computeOpenBillWindow(s, date('2026-06-19')).cycleMonth, '2026-07');
+  });
+
+  it("an override pushing last month's closing into this month keeps it open", () => {
+    // December closes on Jan 2 instead of Dec 16; on Jan 1 December is still open.
+    const s = withOverrides({ '2025-12': { closingDate: '2026-01-02' } });
+    const w = computeOpenBillWindow(s, date('2026-01-01'));
+    assert.equal(w.cycleMonth, '2025-12');
+    assert.equal(w.periodEnd, '2026-01-02');
+    assert.equal(computeBillWindowAtOffset(s, 1, date('2026-01-01')).periodStart, '2026-01-03');
+  });
+
+  it('consecutive offsets stay contiguous with overrides', () => {
+    const s = withOverrides({
+      '2026-05': { closingDate: '2026-05-19' },
+      '2026-06': { closingDate: '2026-06-14' },
+    });
+    const today = date('2026-06-10');
+    for (let off = -3; off < 3; off++) {
+      const a = computeBillWindowAtOffset(s, off, today);
+      const b = computeBillWindowAtOffset(s, off + 1, today);
+      const [y, m, d] = a.periodEnd.split('-').map(Number);
+      const dayAfter = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+      assert.equal(b.periodStart, dayAfter, `offset ${off}→${off + 1}`);
+    }
+  });
+
+  it('findOffsetForDate places a date by the overridden boundary', () => {
+    const s = withOverrides({ '2026-06': { closingDate: '2026-06-18' } });
+    const today = date('2026-06-10');
+    assert.equal(findOffsetForDate(base, '2026-06-17', today), 1);
+    assert.equal(findOffsetForDate(s, '2026-06-17', today), 0);
+    assert.equal(findOffsetForDate(s, '2026-06-19', today), 1);
+  });
+
+  it('findOffsetForDueMonth honors a due override that changes the month', () => {
+    // July's bill normally due 2026-07-25, moved to 2026-08-01.
+    const s = withOverrides({ '2026-07': { dueDate: '2026-08-01' } });
+    const today = date('2026-06-10');
+    const off = findOffsetForDueMonth(s, 2026, 8, today);
+    assert.ok(off !== null);
+    assert.equal(computeBillWindowAtOffset(s, off!, today).nextDueDate.slice(0, 7), '2026-08');
   });
 });

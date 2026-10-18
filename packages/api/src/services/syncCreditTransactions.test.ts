@@ -108,6 +108,14 @@ function createSchema(d: DB): void {
       closing_day  INTEGER NOT NULL,
       due_day      INTEGER NOT NULL
     );
+
+    CREATE TABLE bill_cycle_overrides (
+      account_id   TEXT NOT NULL,
+      cycle_month  TEXT NOT NULL,
+      closing_date TEXT,
+      due_date     TEXT,
+      PRIMARY KEY (account_id, cycle_month)
+    );
   `);
 }
 

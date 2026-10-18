@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Db } from '../db/index.js';
+import { loadAccountCardSettings } from '../db/cardSettings.js';
 import {
   computeBillWindowAtOffset,
   resolveBillOffset,
@@ -9,23 +10,8 @@ import {
 
 export const billsRouter = Router();
 
-interface AccountSettingsRow {
-  account_id: string;
-  display_name: string | null;
-  closing_day: number;
-  due_day: number;
-}
-
 interface SumRow {
   total: number | null;
-}
-
-function requireAccountSettings(db: Db, accountId: string): AccountSettingsRow | null {
-  return (
-    (db
-      .prepare('SELECT * FROM account_settings WHERE account_id = ?')
-      .get(accountId) as AccountSettingsRow | undefined) ?? null
-  );
 }
 
 // GET /bills?itemId=... — list CLOSED bills cached from Pluggy
@@ -78,8 +64,8 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
       })
       .parse(req.query);
 
-    const as = requireAccountSettings(db, accountId);
-    if (!as) {
+    const settingsT = loadAccountCardSettings(db, accountId);
+    if (!settingsT) {
       res.status(412).json({
         error: 'AccountSettingsMissing',
         message:
@@ -87,9 +73,8 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
       });
       return;
     }
-    const displayName = as.display_name;
+    const displayName = settingsT.displayName;
 
-    const settingsT = { closingDay: as.closing_day, dueDay: as.due_day };
     const offset = resolveBillOffset(settingsT, cycle);
     if (offset === null) {
       res.status(404).json({ error: 'BillCycleNotFound', message: 'No bill cycle has its due date in that month.' });
@@ -139,6 +124,9 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
       periodEnd: current.periodEnd,
       closingDate: current.nextClosingDate,
       dueDate: current.nextDueDate,
+      cycleMonth: current.cycleMonth,
+      closingOverridden: current.closingOverridden,
+      dueOverridden: current.dueOverridden,
       previousPeriodStart: previous.periodStart,
       previousPeriodEnd: previous.periodEnd,
       nextPeriodStart: next.periodStart,

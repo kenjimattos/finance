@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { partners, users } from '../config.js';
 import { getDb, type Db } from '../db/index.js';
 import { computeBillWindowAtOffset, resolveBillOffset } from '../services/billWindow.js';
+import { loadAccountCardSettings } from '../db/cardSettings.js';
 
 export const partnerRouter = Router();
 
@@ -115,14 +116,7 @@ partnerRouter.get('/partner/cards/breakdown', (req, res, next) => {
 
     const db = getDb(owner);
 
-    const settings = db
-      .prepare(
-        `SELECT closing_day, due_day, display_name
-         FROM account_settings WHERE account_id = ?`,
-      )
-      .get(accountId) as
-      | { closing_day: number; due_day: number; display_name: string | null }
-      | undefined;
+    const settings = loadAccountCardSettings(db, accountId);
     if (!settings) {
       res.status(404).json({ error: 'AccountNotFound' });
       return;
@@ -139,7 +133,7 @@ partnerRouter.get('/partner/cards/breakdown', (req, res, next) => {
       .prepare('SELECT connector_name FROM items WHERE id = ?')
       .get(account.item_id) as { connector_name: string | null } | undefined;
 
-    const s = { closingDay: settings.closing_day, dueDay: settings.due_day };
+    const s = settings;
     const offset = resolveBillOffset(s, cycle);
     if (offset === null) {
       res.status(404).json({ error: 'BillCycleNotFound', message: 'No bill cycle has its due date in that month.' });
@@ -236,9 +230,9 @@ partnerRouter.get('/partner/cards/breakdown', (req, res, next) => {
       itemId: account.item_id,
       accountName: account.name,
       connectorName: item?.connector_name ?? null,
-      displayName: settings.display_name,
-      closingDay: settings.closing_day,
-      dueDay: settings.due_day,
+      displayName: settings.displayName,
+      closingDay: settings.closingDay,
+      dueDay: settings.dueDay,
       offset,
       periodStart: current.periodStart,
       periodEnd: current.periodEnd,

@@ -7,21 +7,32 @@
  * configured closing_day + due_day (captured once per account in account_settings).
  *
  * The rules we follow:
- *  - The open bill window is (last closing_day, today], exclusive/inclusive.
- *  - If today's day-of-month is <= closing_day, last closing was this month;
- *    otherwise it was last month.
- *  - The open bill's due_date is the *next* occurrence of due_day that falls
- *    at least 1 day after the next closing_day. Usually that's the same month
- *    as the next closing (if due_day > closing_day) or the month after.
+ *  - Each cycle is named by its *cycle month*: the month its closing_day
+ *    falls in by default. Cycle M runs from the day after M−1's closing
+ *    through M's closing.
+ *  - The user can override the closing and/or due date of a single cycle
+ *    (bill_cycle_overrides). Moving cycle M's closing moves only the boundary
+ *    between M and M+1; every other cycle keeps its dates.
+ *  - The open bill is the first cycle whose closing is today or later.
+ *  - Without an override, the due date is due_day in the cycle month when
+ *    due_day > closing_day, otherwise in the month after. A closing override
+ *    does not move the due month.
  *
  * Everything is computed in the America/Sao_Paulo timezone intent, but we
  * use UTC-safe date math (treat dates as yyyy-mm-dd strings, no times) to
  * avoid DST gotchas.
  */
 
+export interface CycleOverride {
+  closingDate?: string | null; // yyyy-mm-dd
+  dueDate?: string | null; // yyyy-mm-dd
+}
+
 export interface CardSettings {
   closingDay: number; // 1..28 — we clamp anything above to keep month math safe
   dueDay: number;
+  /** Per-cycle overrides keyed by cycle month (`YYYY-MM`). */
+  overrides?: ReadonlyMap<string, CycleOverride>;
 }
 
 export interface BillWindow {
@@ -33,6 +44,10 @@ export interface BillWindow {
   nextClosingDate: string;
   /** When this bill will be due for payment. */
   nextDueDate: string;
+  /** `YYYY-MM` of the default closing — the key of bill_cycle_overrides. */
+  cycleMonth: string;
+  closingOverridden: boolean;
+  dueOverridden: boolean;
 }
 
 function clampDay(day: number): number {
@@ -66,6 +81,60 @@ function addDays(isoDate: string, days: number): string {
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
 }
 
+export function cycleKey(year: number, month1: number): string {
+  return `${year}-${pad(month1)}`;
+}
+
+/** The closing date of a cycle: its override, or closing_day in the cycle month. */
+export function closingDateFor(settings: CardSettings, year: number, month1: number): string {
+  return (
+    settings.overrides?.get(cycleKey(year, month1))?.closingDate ??
+    ymd(year, month1, clampDay(settings.closingDay))
+  );
+}
+
+/** The window of the cycle whose default closing falls in year/month1. */
+export function computeBillWindowForCycle(
+  settings: CardSettings,
+  year: number,
+  month1: number,
+): BillWindow {
+  const prev = addMonths(year, month1, -1);
+  const periodStart = addDays(closingDateFor(settings, prev.year, prev.month1), 1);
+  const periodEnd = closingDateFor(settings, year, month1);
+
+  const override = settings.overrides?.get(cycleKey(year, month1));
+
+  // Due date: due_day in the cycle month when it comes after closing_day,
+  // otherwise in the month after. Computed from the default days, so a
+  // closing override never moves the due month.
+  const dueDay = clampDay(settings.dueDay);
+  const dueMonthOffset = dueDay > clampDay(settings.closingDay) ? 0 : 1;
+  const dueMonth = addMonths(year, month1, dueMonthOffset);
+  const nextDueDate = override?.dueDate ?? ymd(dueMonth.year, dueMonth.month1, dueDay);
+
+  return {
+    periodStart,
+    periodEnd,
+    nextClosingDate: periodEnd,
+    nextDueDate,
+    cycleMonth: cycleKey(year, month1),
+    closingOverridden: !!override?.closingDate,
+    dueOverridden: !!override?.dueDate,
+  };
+}
+
+/** Cycle month of the currently open bill: the first cycle closing today or later. */
+function openCycle(settings: CardSettings, today: Date): { year: number; month1: number } {
+  const todayYmd = ymd(today.getFullYear(), today.getMonth() + 1, today.getDate());
+  // Start one month back: an override can push last month's closing past today.
+  let c = addMonths(today.getFullYear(), today.getMonth() + 1, -1);
+  while (closingDateFor(settings, c.year, c.month1) < todayYmd) {
+    c = addMonths(c.year, c.month1, 1);
+  }
+  return c;
+}
+
 /**
  * Compute a bill window shifted by `offset` cycles from the currently open bill.
  * offset =  0 → currently open bill (same as computeOpenBillWindow)
@@ -80,39 +149,9 @@ export function computeBillWindowAtOffset(
   offset: number,
   today: Date = new Date(),
 ): BillWindow {
-  const closingDay = clampDay(settings.closingDay);
-  const dueDay = clampDay(settings.dueDay);
-
-  const year = today.getFullYear();
-  const month1 = today.getMonth() + 1;
-  const day = today.getDate();
-
-  // "Last closing" for the currently open bill — the day AFTER which offset=0 starts.
-  let lastClosing: { year: number; month1: number };
-  if (day <= closingDay) {
-    lastClosing = addMonths(year, month1, -1);
-  } else {
-    lastClosing = { year, month1 };
-  }
-
-  // Shift the anchor by `offset` months to target a past/future cycle.
-  const anchor = addMonths(lastClosing.year, lastClosing.month1, offset);
-
-  const anchorClosingDate = ymd(anchor.year, anchor.month1, closingDay);
-  const periodStart = addDays(anchorClosingDate, 1);
-
-  const nextClosing = addMonths(anchor.year, anchor.month1, 1);
-  const nextClosingDate = ymd(nextClosing.year, nextClosing.month1, closingDay);
-  const periodEnd = nextClosingDate;
-
-  // Due date: next occurrence of due_day that comes AFTER the next closing.
-  // If due_day > closing_day, it's in the same month as the next closing.
-  // If due_day <= closing_day, it's in the month after.
-  const dueMonthOffset = dueDay > closingDay ? 0 : 1;
-  const dueMonth = addMonths(nextClosing.year, nextClosing.month1, dueMonthOffset);
-  const nextDueDate = ymd(dueMonth.year, dueMonth.month1, dueDay);
-
-  return { periodStart, periodEnd, nextClosingDate, nextDueDate };
+  const open = openCycle(settings, today);
+  const c = addMonths(open.year, open.month1, offset);
+  return computeBillWindowForCycle(settings, c.year, c.month1);
 }
 
 /**

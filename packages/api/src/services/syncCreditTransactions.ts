@@ -2,6 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import type { Database } from 'better-sqlite3';
 import { extractMerchantSlug } from './merchantSlug.js';
 import { recomputeShiftForDateChange } from './billWindow.js';
+import { loadAccountCardSettings } from '../db/cardSettings.js';
 
 /**
  * The credit-card transaction upsert engine — the most dangerous decision
@@ -217,9 +218,6 @@ export function upsertCreditTransactions(
   );
   const setShiftOverride = db.prepare(`UPDATE transactions SET bill_shift = ? WHERE id = ?`);
   const deleteShiftOverride = db.prepare(`UPDATE transactions SET bill_shift = NULL WHERE id = ?`);
-  const getAccountSettings = db.prepare(
-    `SELECT closing_day, due_day FROM account_settings WHERE account_id = ?`,
-  );
 
   // Pass-2 candidates for a POSTED payload under a new ID: this account's
   // PENDING rows with the same amount. Slug, orphan status and time window
@@ -286,12 +284,10 @@ export function upsertCreditTransactions(
     if (oldDate === newDate) return;
     const override = getShiftOverride.get(rowId) as { shift: number } | undefined;
     if (!override || override.shift === 0) return;
-    const settings = getAccountSettings.get(accountId) as
-      | { closing_day: number; due_day: number }
-      | undefined;
+    const settings = loadAccountCardSettings(db, accountId);
     if (!settings) return;
     const newShift = recomputeShiftForDateChange(
-      { closingDay: settings.closing_day, dueDay: settings.due_day },
+      settings,
       oldDate,
       newDate,
       override.shift,

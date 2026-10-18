@@ -8,6 +8,7 @@ import {
   computeBillWindowAtOffset,
   findOffsetForDueMonth,
 } from '../services/billWindow.js';
+import { loadAccountCardSettings } from '../db/cardSettings.js';
 import { pruneRealizedManualEntries } from '../services/pruneManualEntries.js';
 import { ensureYearEndAnchors } from '../services/yearEndAnchors.js';
 import { looksLikeBillPayment } from '../services/billPaymentDetect.js';
@@ -467,35 +468,32 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
   // ── Future days: credit card bill outflows ──
   const creditAccounts = db
     .prepare(
-      `SELECT a.id AS account_id, s.display_name, s.closing_day, s.due_day
+      `SELECT a.id AS account_id
        FROM accounts a
        INNER JOIN account_settings s ON s.account_id = a.id
        WHERE a.type = 'CREDIT'`,
     )
-    .all() as Array<{
-    account_id: string;
-    display_name: string | null;
-    closing_day: number;
-    due_day: number;
-  }>;
+    .all() as Array<{ account_id: string }>;
 
   const billEntries: Array<{ day: number; entry: CashFlowEntry }> = [];
 
   for (const acct of creditAccounts) {
-    const settings = { closingDay: acct.closing_day, dueDay: acct.due_day };
+    const settings = loadAccountCardSettings(db, acct.account_id);
+    if (!settings) continue;
     const offset = findOffsetForDueMonth(settings, year, month);
     if (offset === null) continue;
 
-    const dueDay = acct.due_day;
+    // The window's due date already honors a per-cycle override, and
+    // findOffsetForDueMonth guarantees it falls in this month.
+    const current = computeBillWindowAtOffset(settings, offset);
+    const dueDate = current.nextDueDate;
     // Only project the bill if its due date is still ahead of the last
     // realized bank transaction. Once real data has moved past the due
     // date, the actual "Pagamento de fatura" bank row represents it —
     // projecting it again would double-count.
-    const dueDate = `${monthStr}-${pad(Math.min(dueDay, monthDays))}`;
     if (dueDate <= lastRealizedDate) continue;
 
     // Compute bill total using the same shift-aware logic as bills.ts.
-    const current = computeBillWindowAtOffset(settings, offset);
     const previous = computeBillWindowAtOffset(settings, offset - 1);
     const next = computeBillWindowAtOffset(settings, offset + 1);
 
@@ -520,12 +518,12 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
 
     if (row.total === 0) continue;
 
-    const label = acct.display_name
-      ? `Fatura ${acct.display_name}`
+    const label = settings.displayName
+      ? `Fatura ${settings.displayName}`
       : 'Fatura cartão';
 
     billEntries.push({
-      day: Math.min(dueDay, monthDays),
+      day: Number(dueDate.slice(8, 10)),
       entry: {
         id: `bill-${acct.account_id}`,
         description: label,

@@ -348,6 +348,23 @@ function runSchema(db: Db): void {
   CREATE INDEX IF NOT EXISTS idx_bank_tx_date     ON bank_transactions(date);
   CREATE INDEX IF NOT EXISTS idx_bank_tx_provider ON bank_transactions(provider_transaction_id);
 
+  -- Per-cycle exceptions to account_settings: the issuer moved one bill's
+  -- closing (weekend, holiday) or due date. cycle_month is the month the
+  -- default closing falls in, the stable name of a cycle (offsets are relative
+  -- to today). NULL in either date means "use the default". Moving cycle M's
+  -- closing moves only the boundary between M and M+1, so past bills keep
+  -- their dates — which is why this is per cycle instead of an edit to
+  -- closing_day. See services/billWindow.ts.
+  CREATE TABLE IF NOT EXISTS bill_cycle_overrides (
+    account_id   TEXT NOT NULL,
+    cycle_month  TEXT NOT NULL,
+    closing_date TEXT,
+    due_date     TEXT,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (account_id, cycle_month),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+  );
+
 `);
 }
 

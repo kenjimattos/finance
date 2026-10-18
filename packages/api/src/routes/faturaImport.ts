@@ -5,7 +5,12 @@ import {
   isImportEnabled,
   type FaturaImage,
 } from '../services/extractFatura.js';
-import { computeBillWindowAtOffset, findOffsetForDate } from '../services/billWindow.js';
+import {
+  computeBillWindowAtOffset,
+  findOffsetForDate,
+  type CardSettings,
+} from '../services/billWindow.js';
+import { loadAccountCardSettings } from '../db/cardSettings.js';
 import {
   buildReport,
   isPaymentLine,
@@ -37,27 +42,21 @@ const extractSchema = z.object({
   images: z.array(imageSchema).min(1).max(20),
 });
 
-interface AccountSettingsRow {
+interface ImportAccount {
   item_id: string;
   name: string | null;
-  closing_day: number;
-  due_day: number;
+  settings: CardSettings;
 }
 
-function loadAccount(db: Db, accountId: string): AccountSettingsRow | null {
+/** The account plus its bill-window settings; null when either is missing. */
+function loadAccount(db: Db, accountId: string): ImportAccount | null {
   const row = db
-    .prepare(
-      `SELECT a.item_id AS item_id, a.name AS name, s.closing_day AS closing_day, s.due_day AS due_day
-       FROM accounts a
-       LEFT JOIN account_settings s ON s.account_id = a.id
-       WHERE a.id = ?`,
-    )
-    .get(accountId) as
-    | { item_id: string; name: string | null; closing_day: number | null; due_day: number | null }
-    | undefined;
+    .prepare('SELECT item_id, name FROM accounts WHERE id = ?')
+    .get(accountId) as { item_id: string; name: string | null } | undefined;
   if (!row) return null;
-  if (row.closing_day == null || row.due_day == null) return null;
-  return { item_id: row.item_id, name: row.name, closing_day: row.closing_day, due_day: row.due_day };
+  const settings = loadAccountCardSettings(db, accountId);
+  if (!settings) return null;
+  return { item_id: row.item_id, name: row.name, settings };
 }
 
 function todayYmd(): string {
@@ -84,7 +83,7 @@ faturaImportRouter.post('/transactions/import-fatura/extract', async (req, res, 
       return;
     }
 
-    const settings = { closingDay: account.closing_day, dueDay: account.due_day };
+    const { settings } = account;
     const win = computeBillWindowAtOffset(settings, body.billOffset);
 
     const images: FaturaImage[] = body.images.map((i) => ({ data: i.data, mediaType: i.mediaType }));
@@ -267,7 +266,7 @@ faturaImportRouter.post('/transactions/import-fatura/reconcile', async (req, res
       return;
     }
 
-    const settings = { closingDay: account.closing_day, dueDay: account.due_day };
+    const { settings } = account;
     const win = computeBillWindowAtOffset(settings, body.billOffset);
     const prev = computeBillWindowAtOffset(settings, body.billOffset - 1);
     const nxt = computeBillWindowAtOffset(settings, body.billOffset + 1);
