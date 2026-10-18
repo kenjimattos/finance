@@ -45,7 +45,11 @@ categorizeRouter.delete('/transactions/:id/category', (req, res) => {
   // wants to correct a learned guess, they should re-assign, not just clear.
   const { db } = req;
   const info = db
-    .prepare('DELETE FROM transaction_categories WHERE transaction_id = ?')
+    .prepare(
+      `UPDATE transactions
+       SET category_id = NULL, category_assigned_by = NULL, category_assigned_at = NULL
+       WHERE id = ? AND category_id IS NOT NULL`,
+    )
     .run(req.params.id);
   if (info.changes === 0) {
     res.status(404).json({ error: 'NotAssigned' });
@@ -208,9 +212,9 @@ function assignCategoryInTransaction(
   // different category, this counts as an override — bump the rule.
   const previous = db
     .prepare(
-      `SELECT user_category_id, assigned_by
-       FROM transaction_categories
-       WHERE transaction_id = ?`,
+      `SELECT category_id AS user_category_id, category_assigned_by AS assigned_by
+       FROM transactions
+       WHERE id = ? AND category_id IS NOT NULL`,
     )
     .get(transactionId) as
     | { user_category_id: number; assigned_by: string }
@@ -237,15 +241,12 @@ function assignCategoryInTransaction(
     ).run(slug, previous.user_category_id);
   }
 
-  // Upsert the assignment (REPLACE lets the user switch categories freely)
+  // Set the assignment (overwriting lets the user switch categories freely)
   db.prepare(
-    `INSERT INTO transaction_categories (transaction_id, user_category_id, assigned_by)
-     VALUES (?, ?, ?)
-     ON CONFLICT(transaction_id) DO UPDATE SET
-       user_category_id = excluded.user_category_id,
-       assigned_by      = excluded.assigned_by,
-       assigned_at      = datetime('now')`,
-  ).run(transactionId, categoryId, assignedBy);
+    `UPDATE transactions
+     SET category_id = ?, category_assigned_by = ?, category_assigned_at = datetime('now')
+     WHERE id = ?`,
+  ).run(categoryId, assignedBy, transactionId);
 
   // Bump the category's usage count (used for ordering the picker)
   db.prepare(

@@ -69,9 +69,9 @@ interface TransactionRow {
  *   &uncategorized=true      (optional: only rows without a user category)
  *   &refresh=true            (optional: re-sync from Pluggy before reading)
  *
- * Reads come from the local cache. A LEFT JOIN surfaces the user's
- * category (if any) alongside each transaction so the frontend gets
- * everything it needs in one round trip.
+ * Reads come from the local cache. A LEFT JOIN on user_categories surfaces
+ * the user's category (if any) alongside each transaction so the frontend
+ * gets everything it needs in one round trip.
  */
 transactionsRouter.get('/transactions', async (req, res, next) => {
   try {
@@ -107,9 +107,9 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
 
     const dateClause = shiftAware
       ? `AND (
-             (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
-          OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
-          OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+             (t.bill_shift IS NULL AND t.date >= ? AND t.date <= ?)
+          OR (t.bill_shift = 1  AND t.date >= ? AND t.date <= ?)
+          OR (t.bill_shift = -1 AND t.date >= ? AND t.date <= ?)
         )`
       : `AND (? IS NULL OR t.date >= ?)
          AND (? IS NULL OR t.date <= ?)`;
@@ -132,21 +132,17 @@ transactionsRouter.get('/transactions', async (req, res, next) => {
                 uc.id    AS user_category_id,
                 uc.name  AS user_category_name,
                 uc.color AS user_category_color,
-                tc.assigned_by,
-                o.shift  AS bill_shift,
-                sp.split_type,
-                (h.transaction_id IS NOT NULL) AS hidden
+                t.category_assigned_by AS assigned_by,
+                t.bill_shift,
+                t.split_type,
+                (t.hidden_at IS NOT NULL) AS hidden
          FROM transactions t
-         LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
-         LEFT JOIN user_categories       uc ON uc.id = tc.user_category_id
-         LEFT JOIN card_group_members    m  ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
-         LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-         LEFT JOIN transaction_splits    sp ON sp.transaction_id = t.id
-         LEFT JOIN transaction_hidden    h  ON h.transaction_id = t.id
+         LEFT JOIN user_categories    uc ON uc.id = t.category_id
+         LEFT JOIN card_group_members m  ON m.item_id = t.item_id AND m.card_last4 = t.card_last4
          WHERE t.item_id = ?
            AND (? = 0 OR t.account_id = ?)
            ${dateClause}
-           AND (? = 0 OR tc.transaction_id IS NULL)
+           AND (? = 0 OR t.category_id IS NULL)
            AND (
              ? = 'any'
              OR (? = 'none' AND m.card_group_id IS NULL)
@@ -192,19 +188,10 @@ transactionsRouter.put('/transactions/:id/bill-shift', (req, res, next) => {
       return;
     }
 
-    if (shift === 0) {
-      db.prepare(
-        'DELETE FROM transaction_bill_overrides WHERE transaction_id = ?',
-      ).run(transactionId);
-    } else {
-      db.prepare(
-        `INSERT INTO transaction_bill_overrides (transaction_id, shift)
-         VALUES (?, ?)
-         ON CONFLICT(transaction_id) DO UPDATE SET
-           shift = excluded.shift,
-           created_at = datetime('now')`,
-      ).run(transactionId, shift);
-    }
+    db.prepare('UPDATE transactions SET bill_shift = ? WHERE id = ?').run(
+      shift === 0 ? null : shift,
+      transactionId,
+    );
 
     res.json({ ok: true, transactionId, shift });
   } catch (err) {
@@ -234,16 +221,13 @@ transactionsRouter.put('/transactions/:id/hidden', (req, res, next) => {
       return;
     }
 
-    if (hidden) {
-      db.prepare(
-        `INSERT INTO transaction_hidden (transaction_id) VALUES (?)
-         ON CONFLICT(transaction_id) DO NOTHING`,
-      ).run(transactionId);
-    } else {
-      db.prepare(
-        'DELETE FROM transaction_hidden WHERE transaction_id = ?',
-      ).run(transactionId);
-    }
+    // COALESCE keeps the original hidden_at when an already-hidden row is
+    // hidden again.
+    db.prepare(
+      `UPDATE transactions
+       SET hidden_at = CASE WHEN ? THEN COALESCE(hidden_at, datetime('now')) ELSE NULL END
+       WHERE id = ?`,
+    ).run(hidden ? 1 : 0, transactionId);
 
     res.json({ ok: true, transactionId, hidden });
   } catch (err) {

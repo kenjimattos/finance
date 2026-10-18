@@ -16,29 +16,8 @@ interface AccountSettingsRow {
   due_day: number;
 }
 
-interface CardSettingsRow {
-  item_id: string;
-  display_name: string | null;
-  closing_day: number;
-  due_day: number;
-}
-
 interface SumRow {
   total: number | null;
-}
-
-/**
- * Scope filter for SQL queries — either by account_id (phase 2) or item_id (legacy).
- * All SQL helpers use this to pick the right WHERE clause.
- */
-type Scope =
-  | { kind: 'account'; accountId: string }
-  | { kind: 'item'; itemId: string };
-
-function scopeClause(s: Scope): { column: string; value: string } {
-  return s.kind === 'account'
-    ? { column: 't.account_id', value: s.accountId }
-    : { column: 't.item_id', value: s.itemId };
 }
 
 function requireAccountSettings(db: Db, accountId: string): AccountSettingsRow | null {
@@ -46,14 +25,6 @@ function requireAccountSettings(db: Db, accountId: string): AccountSettingsRow |
     (db
       .prepare('SELECT * FROM account_settings WHERE account_id = ?')
       .get(accountId) as AccountSettingsRow | undefined) ?? null
-  );
-}
-
-function requireCardSettings(db: Db, itemId: string): CardSettingsRow | null {
-  return (
-    (db
-      .prepare('SELECT * FROM card_settings WHERE item_id = ?')
-      .get(itemId) as CardSettingsRow | undefined) ?? null
   );
 }
 
@@ -101,49 +72,24 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
     const { itemId, accountId, ...cycle } = z
       .object({
         itemId: z.string().min(1),
-        accountId: z.string().min(1).optional(),
+        accountId: z.string().min(1),
         offset: z.coerce.number().int().optional(),
         dueMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
       })
       .parse(req.query);
 
-    // Determine scope and settings: prefer account-level, fall back to item-level.
-    let scope: Scope;
-    let displayName: string | null;
-    let closingDay: number;
-    let dueDay: number;
-
-    if (accountId) {
-      const as = requireAccountSettings(db, accountId);
-      if (!as) {
-        res.status(412).json({
-          error: 'AccountSettingsMissing',
-          message:
-            'Configure closing_day and due_day for this account via PUT /account-settings/:accountId before querying the open bill.',
-        });
-        return;
-      }
-      scope = { kind: 'account', accountId };
-      displayName = as.display_name;
-      closingDay = as.closing_day;
-      dueDay = as.due_day;
-    } else {
-      const cs = requireCardSettings(db, itemId);
-      if (!cs) {
-        res.status(412).json({
-          error: 'CardSettingsMissing',
-          message:
-            'Configure closing_day and due_day for this card via PUT /card-settings/:itemId before querying the open bill.',
-        });
-        return;
-      }
-      scope = { kind: 'item', itemId };
-      displayName = cs.display_name;
-      closingDay = cs.closing_day;
-      dueDay = cs.due_day;
+    const as = requireAccountSettings(db, accountId);
+    if (!as) {
+      res.status(412).json({
+        error: 'AccountSettingsMissing',
+        message:
+          'Configure closing_day and due_day for this account via PUT /account-settings/:accountId before querying the open bill.',
+      });
+      return;
     }
+    const displayName = as.display_name;
 
-    const settingsT = { closingDay, dueDay };
+    const settingsT = { closingDay: as.closing_day, dueDay: as.due_day };
     const offset = resolveBillOffset(settingsT, cycle);
     if (offset === null) {
       res.status(404).json({ error: 'BillCycleNotFound', message: 'No bill cycle has its due date in that month.' });
@@ -158,27 +104,27 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
     // using the same three-window shift-aware pattern.
     const nextNext = computeBillWindowAtOffset(settingsT, offset + 2);
 
-    const total = round2(sumBillTotalWithShifts(db, scope, current, previous, next));
+    const total = round2(sumBillTotalWithShifts(db, accountId, current, previous, next));
     const previousTotal = round2(
-      sumBillTotalWithShifts(db, scope, previous, prevPrev, current),
+      sumBillTotalWithShifts(db, accountId, previous, prevPrev, current),
     );
     // Previous cycle's per-category totals ride along as previousTotal so
     // the UI can show a month-over-month variation next to each category.
-    const prevCategories = categoryBreakdownWithShifts(db, scope, previous, prevPrev, current);
+    const prevCategories = categoryBreakdownWithShifts(db, accountId, previous, prevPrev, current);
     const prevByCategory = new Map(prevCategories.map((c) => [c.id, c.total]));
-    const categories = categoryBreakdownWithShifts(db, scope, current, previous, next).map(
+    const categories = categoryBreakdownWithShifts(db, accountId, current, previous, next).map(
       (c) => ({ ...c, previousTotal: prevByCategory.get(c.id) ?? 0 }),
     );
     const installments = installmentBreakdownWithShifts(
       db,
-      scope,
+      accountId,
       current,
       previous,
       next,
     );
     const hasNextBillTransactions = countTransactionsWithShifts(
       db,
-      scope,
+      accountId,
       next,
       current,
       nextNext,
@@ -186,7 +132,7 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
 
     res.json({
       itemId,
-      accountId: accountId ?? null,
+      accountId,
       displayName,
       offset,
       periodStart: current.periodStart,
@@ -226,29 +172,26 @@ billsRouter.get('/bills/current/breakdown', (req, res, next) => {
  */
 function sumBillTotalWithShifts(
   db: Db,
-  scope: Scope,
+  accountId: string,
   current: BillWindow,
   previous: BillWindow,
   next: BillWindow,
 ): number {
-  const { column, value } = scopeClause(scope);
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(COALESCE(t.amount_in_account_currency, t.amount)), 0) AS total
        FROM transactions t
-       INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
-       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
-       WHERE ${column} = ?
-         AND h.transaction_id IS NULL
+       WHERE t.account_id = ?
+         AND t.category_id IS NOT NULL
+         AND t.hidden_at IS NULL
          AND (
-              (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+              (t.bill_shift IS NULL AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = 1  AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = -1 AND t.date >= ? AND t.date <= ?)
          )`,
     )
     .get(
-      value,
+      accountId,
       current.periodStart, current.periodEnd,
       previous.periodStart, previous.periodEnd,
       next.periodStart, next.periodEnd,
@@ -268,7 +211,7 @@ function sumBillTotalWithShifts(
  */
 function installmentBreakdownWithShifts(
   db: Db,
-  scope: Scope,
+  accountId: string,
   current: BillWindow,
   previous: BillWindow,
   next: BillWindow,
@@ -280,7 +223,6 @@ function installmentBreakdownWithShifts(
   installmentNumber: number;
   totalInstallments: number;
 }> {
-  const { column, value } = scopeClause(scope);
   const rows = db
     .prepare(
       `SELECT t.id                  AS id,
@@ -290,21 +232,19 @@ function installmentBreakdownWithShifts(
               t.installment_number  AS installmentNumber,
               t.total_installments  AS totalInstallments
        FROM transactions t
-       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
-       WHERE ${column} = ?
-         AND h.transaction_id IS NULL
+       WHERE t.account_id = ?
+         AND t.hidden_at IS NULL
          AND t.installment_number IS NOT NULL
          AND t.total_installments IS NOT NULL
          AND (
-              (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+              (t.bill_shift IS NULL AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = 1  AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = -1 AND t.date >= ? AND t.date <= ?)
          )
        ORDER BY t.date DESC, t.id DESC`,
     )
     .all(
-      value,
+      accountId,
       current.periodStart, current.periodEnd,
       previous.periodStart, previous.periodEnd,
       next.periodStart, next.periodEnd,
@@ -325,12 +265,11 @@ function installmentBreakdownWithShifts(
  */
 function categoryBreakdownWithShifts(
   db: Db,
-  scope: Scope,
+  accountId: string,
   current: BillWindow,
   previous: BillWindow,
   next: BillWindow,
 ): Array<{ id: number; name: string; color: string; total: number }> {
-  const { column, value } = scopeClause(scope);
   const rows = db
     .prepare(
       `SELECT uc.id        AS id,
@@ -338,22 +277,19 @@ function categoryBreakdownWithShifts(
               uc.color     AS color,
               SUM(COALESCE(t.amount_in_account_currency, t.amount)) AS total
        FROM transactions t
-       INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
-       INNER JOIN user_categories uc        ON uc.id = tc.user_category_id
-       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
-       WHERE ${column} = ?
-         AND h.transaction_id IS NULL
+       INNER JOIN user_categories uc ON uc.id = t.category_id
+       WHERE t.account_id = ?
+         AND t.hidden_at IS NULL
          AND (
-              (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+              (t.bill_shift IS NULL AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = 1  AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = -1 AND t.date >= ? AND t.date <= ?)
          )
        GROUP BY uc.id
        ORDER BY total DESC`,
     )
     .all(
-      value,
+      accountId,
       current.periodStart, current.periodEnd,
       previous.periodStart, previous.periodEnd,
       next.periodStart, next.periodEnd,
@@ -370,28 +306,25 @@ function categoryBreakdownWithShifts(
  */
 function countTransactionsWithShifts(
   db: Db,
-  scope: Scope,
+  accountId: string,
   current: BillWindow,
   previous: BillWindow,
   next: BillWindow,
 ): number {
-  const { column, value } = scopeClause(scope);
   const row = db
     .prepare(
       `SELECT COUNT(*) AS total
        FROM transactions t
-       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
-       WHERE ${column} = ?
-         AND h.transaction_id IS NULL
+       WHERE t.account_id = ?
+         AND t.hidden_at IS NULL
          AND (
-              (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+              (t.bill_shift IS NULL AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = 1  AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = -1 AND t.date >= ? AND t.date <= ?)
          )`,
     )
     .get(
-      value,
+      accountId,
       current.periodStart, current.periodEnd,
       previous.periodStart, previous.periodEnd,
       next.periodStart, next.periodEnd,

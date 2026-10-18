@@ -13,8 +13,8 @@ import { keys } from './queryKeys';
  *
  * - the transaction list itself;
  * - GET /bills/current/breakdown, which sums only categorized rows;
- * - GET /bills/current/split-summary, which INNER JOINs
- *   `transaction_categories` and honors `transaction_bill_overrides`.
+ * - GET /bills/current/split-summary, which reads only categorized rows
+ *   and honors each row's `bill_shift`.
  *
  * That third one is the subtle one. Because it joins on categories and
  * resolves the bill window through the shift override, *categorizing* a row

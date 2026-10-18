@@ -70,12 +70,19 @@ categoriesRouter.put('/categories/:id', (req, res, next) => {
   }
 });
 
-// DELETE /categories/:id — cascades to transaction_categories and category_rules
+// DELETE /categories/:id — uncategorizes its transactions; category_rules cascade
 categoriesRouter.delete('/categories/:id', (req, res) => {
   const { db } = req;
-  const info = db
-    .prepare('DELETE FROM user_categories WHERE id = ?')
-    .run(req.params.id);
+  // The FK's ON DELETE SET NULL only clears category_id; clear the assignment
+  // metadata in the same step so no row is left half-categorized.
+  const info = db.transaction(() => {
+    db.prepare(
+      `UPDATE transactions
+       SET category_id = NULL, category_assigned_by = NULL, category_assigned_at = NULL
+       WHERE category_id = ?`,
+    ).run(req.params.id);
+    return db.prepare('DELETE FROM user_categories WHERE id = ?').run(req.params.id);
+  })();
   if (info.changes === 0) {
     res.status(404).json({ error: 'NotFound' });
     return;

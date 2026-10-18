@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Não lançado]
 
+### Alterado
+
+- **O trabalho do usuário em cada transação passou a ficar na própria transação.** Categoria, deslocamento de fatura, divisão, "ocultar" e descrição editada ficavam cada um numa tabela separada, ligada à transação, e toda soma de fatura juntava essas tabelas. O mesmo valia para as transações da conta corrente (descrição, marcação de fatura e "ocultar"). Agora cada uma dessas informações é uma coluna da transação. A separação existia para que o sync não apagasse o trabalho do usuário, mas o sync nunca apaga nem substitui linhas: ele só atualiza os campos que vêm do Pluggy. Essa garantia agora é coberta por testes que passam cada caso do sync (atualização, repostagem, troca de ID, PENDING virando POSTED e ID reaproveitado) por uma transação com todo tipo de trabalho do usuário. A migração roda sozinha na primeira abertura de cada banco e não muda nenhum número: numa cópia da base real, faturas, divisão, transações e fluxo de caixa de junho a dezembro saíram idênticos antes e depois. Ela descarta 19 marcações de abril e maio que apontavam para transações que já não existiam e que o app já não mostrava. Saem também duas tabelas antigas que nada lia, as configurações de cartão por conexão e as marcações de fatura do lado do cartão, junto com as rotas `/card-settings`. A consulta da fatura passa a exigir a conta.
+
 ### Corrigido
 
 - **Salvar de novo uma conexão de banco podia apagar as contas dela.** O cadastro de uma conexão usava `INSERT OR REPLACE`, que no SQLite apaga a linha antes de inserir. A exclusão em cascata levava junto as contas da conexão e tudo que depende delas: dias de fechamento e vencimento, transações da conta corrente e saldos confirmados. Hoje isso não acontecia, porque cada conexão nova recebe um ID novo do Pluggy. Mas aconteceria no primeiro uso da reautenticação do Pluggy, que mantém o mesmo ID. Agora o cadastro só atualiza o nome do conector. Para começar do zero, continua sendo preciso remover o banco.

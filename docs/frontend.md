@@ -79,14 +79,13 @@ Three server-side views derive from the same rows and must refetch together:
 The third one is the trap, and it caused a real bug. Its SQL ([routes/splits.ts](../packages/api/src/routes/splits.ts)) does:
 
 ```sql
-INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
-LEFT  JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-WHERE  (o.shift IS NULL AND t.date BETWEEN ? AND ?)
-    OR (o.shift = 1     AND t.date BETWEEN ? AND ?)
-    OR (o.shift = -1    AND t.date BETWEEN ? AND ?)
+INNER JOIN user_categories uc ON uc.id = t.category_id
+WHERE  (t.bill_shift IS NULL AND t.date BETWEEN ? AND ?)
+    OR (t.bill_shift = 1     AND t.date BETWEEN ? AND ?)
+    OR (t.bill_shift = -1    AND t.date BETWEEN ? AND ?)
 ```
 
-Because it joins on categories and resolves its window through the shift override, **categorizing a row or shifting it into a neighbor cycle changes the split totals** — it is not only the split mutations that dirty this cache. When the twelve mutations each carried their own hand-written invalidation, only split and hide invalidated it, so the ½ / dela / meu columns kept showing stale numbers after a categorize or a shift.
+Because it reads only categorized rows and resolves its window through the shift, **categorizing a row or shifting it into a neighbor cycle changes the split totals** — it is not only the split mutations that dirty this cache. When the twelve mutations each carried their own hand-written invalidation, only split and hide invalidated it, so the ½ / dela / meu columns kept showing stale numbers after a categorize or a shift.
 
 A fourth cache is conditional: `GET /categories` orders by `usage_count`, so anything that assigns or clears a category also reorders the picker. Hence the hook's two shapes — `invalidateBill()` and `invalidateBillAndCategories()`.
 

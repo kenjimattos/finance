@@ -53,35 +53,20 @@ function createSchema(d: DB): void {
       first_seen_at              TEXT NOT NULL DEFAULT (datetime('now')),
       last_seen_at               TEXT NOT NULL DEFAULT (datetime('now')),
       raw_json                   TEXT NOT NULL,
-      synced_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+      synced_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+      category_id                INTEGER REFERENCES user_categories(id) ON DELETE SET NULL,
+      category_assigned_by       TEXT,
+      category_assigned_at       TEXT,
+      bill_shift                 INTEGER,
+      split_type                 TEXT,
+      hidden_at                  TEXT,
+      description_override       TEXT
     );
 
     CREATE TABLE user_categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE COLLATE NOCASE,
       color TEXT NOT NULL DEFAULT '#000'
-    );
-
-    CREATE TABLE transaction_categories (
-      transaction_id TEXT PRIMARY KEY,
-      user_category_id INTEGER NOT NULL,
-      assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
-      assigned_by TEXT NOT NULL,
-      FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE transaction_bill_overrides (
-      transaction_id TEXT PRIMARY KEY,
-      shift INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE transaction_splits (
-      transaction_id TEXT PRIMARY KEY,
-      split_type TEXT NOT NULL CHECK(split_type IN ('half', 'theirs')),
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
     );
 
     CREATE TABLE transaction_sync_conflicts (
@@ -203,8 +188,7 @@ describe('upsertCreditTransactions', () => {
     // Simulate user work on the row.
     db.prepare(`INSERT INTO user_categories (name) VALUES ('Assinaturas')`).run();
     db.prepare(
-      `INSERT INTO transaction_categories (transaction_id, user_category_id, assigned_by)
-       VALUES (?, 1, 'manual')`,
+      `UPDATE transactions SET category_id = 1, category_assigned_by = 'manual' WHERE id = ?`,
     ).run(row.id);
 
     const counts = run([{ ...CLARO, status: 'POSTED' }]);
@@ -214,10 +198,7 @@ describe('upsertCreditTransactions', () => {
     assert.equal(rows.length, 1); // no duplicate
     assert.equal(rows[0].id, row.id); // same local UUID
     assert.equal(rows[0].status, 'POSTED');
-    const cat = db
-      .prepare(`SELECT * FROM transaction_categories WHERE transaction_id = ?`)
-      .get(row.id);
-    assert.ok(cat, 'category assignment must survive the update');
+    assert.equal(rows[0].category_id, 1, 'category assignment must survive the update');
   });
 
   it('treats a NULL stored identity hash as a match (pre-migration rows)', () => {
@@ -267,16 +248,11 @@ describe('upsertCreditTransactions', () => {
     });
     run([pending]);
     const [row] = allRows();
-    db.prepare(
-      `INSERT INTO transaction_bill_overrides (transaction_id, shift) VALUES (?, -1)`,
-    ).run(row.id);
+    db.prepare(`UPDATE transactions SET bill_shift = -1 WHERE id = ?`).run(row.id);
 
     run([{ ...pending, date: '2026-05-10T03:00:00.001Z', status: 'POSTED' }]);
 
-    const override = db
-      .prepare(`SELECT shift FROM transaction_bill_overrides WHERE transaction_id = ?`)
-      .get(row.id);
-    assert.equal(override, undefined, 'stale shift must be removed');
+    assert.equal(allRows()[0].bill_shift, null, 'stale shift must be removed');
     assert.equal(allRows()[0].date, '2026-05-10');
   });
 
@@ -556,8 +532,7 @@ describe('sync guards', () => {
     const [row] = allRows();
     db.prepare(`INSERT INTO user_categories (name) VALUES ('Farmácia')`).run();
     db.prepare(
-      `INSERT INTO transaction_categories (transaction_id, user_category_id, assigned_by)
-       VALUES (?, 1, 'manual')`,
+      `UPDATE transactions SET category_id = 1, category_assigned_by = 'manual' WHERE id = ?`,
     ).run(row.id);
 
     const carrefour = payload({
@@ -630,8 +605,7 @@ describe('PENDING→POSTED under a new provider ID', () => {
     const [row] = allRows();
     db.prepare(`INSERT INTO user_categories (name) VALUES ('Alimentação')`).run();
     db.prepare(
-      `INSERT INTO transaction_categories (transaction_id, user_category_id, assigned_by)
-       VALUES (?, 1, 'manual')`,
+      `UPDATE transactions SET category_id = 1, category_assigned_by = 'manual' WHERE id = ?`,
     ).run(row.id);
 
     run([UNRELATED]); // 20/08 on: the PENDING is no longer served
@@ -649,10 +623,7 @@ describe('PENDING→POSTED under a new provider ID', () => {
       rows[0].identity_hash,
       computeIdentityHash('2026-08-08T01:12:23.000Z', 280.24, 'BASTASANTO ANDREBRA'),
     );
-    assert.ok(
-      db.prepare(`SELECT 1 FROM transaction_categories WHERE transaction_id = ?`).get(row.id),
-      'category stays on the row',
-    );
+    assert.equal(rows[0].category_id, 1, 'category stays on the row');
 
     // Next sync serves the POSTED again: plain pass-1 update.
     const again = run([UNRELATED, BASTA_POSTED]);
@@ -737,15 +708,106 @@ describe('PENDING→POSTED under a new provider ID', () => {
     const pending = { ...BASTA_PENDING, date: '2026-09-02T01:00:00.000Z' };
     run([pending]);
     const [row] = allRows();
-    db.prepare(`INSERT INTO transaction_bill_overrides (transaction_id, shift) VALUES (?, -1)`).run(row.id);
+    db.prepare(`UPDATE transactions SET bill_shift = -1 WHERE id = ?`).run(row.id);
 
     run([{ ...BASTA_POSTED, date: '2026-08-31T22:00:00.000Z' }]);
 
     assert.equal(allRows()[0].date, '2026-08-31');
-    assert.equal(
-      db.prepare(`SELECT shift FROM transaction_bill_overrides WHERE transaction_id = ?`).get(row.id),
-      undefined,
-    );
+    assert.equal(allRows()[0].bill_shift, null);
+  });
+});
+
+// The sync engine never writes user-owned columns: user work lives on the
+// transactions row itself, so this is the guarantee that a re-sync keeps it.
+// Every outcome that lands a payload on an existing row is exercised; the
+// recycled-ID outcome must leave the new row clean and the old one intact.
+describe('user work columns', () => {
+  const USER_COLS = [
+    'category_id',
+    'category_assigned_by',
+    'category_assigned_at',
+    'bill_shift',
+    'split_type',
+    'hidden_at',
+    'description_override',
+  ] as const;
+
+  const WORK = {
+    category_id: 1,
+    category_assigned_by: 'manual',
+    category_assigned_at: '2026-01-01 10:00:00',
+    bill_shift: 1,
+    split_type: 'half',
+    hidden_at: '2026-01-02 10:00:00',
+    description_override: 'Conta de celular',
+  };
+
+  function setWork(id: unknown): void {
+    db.prepare(`INSERT OR IGNORE INTO user_categories (id, name) VALUES (1, 'Casa')`).run();
+    db.prepare(
+      `UPDATE transactions SET
+         category_id = @category_id, category_assigned_by = @category_assigned_by,
+         category_assigned_at = @category_assigned_at, bill_shift = @bill_shift,
+         split_type = @split_type, hidden_at = @hidden_at,
+         description_override = @description_override
+       WHERE id = @id`,
+    ).run({ ...WORK, id });
+  }
+
+  function workOf(row: Record<string, unknown>) {
+    return Object.fromEntries(USER_COLS.map((c) => [c, row[c]]));
+  }
+
+  const NO_WORK = Object.fromEntries(USER_COLS.map((c) => [c, null]));
+
+  it('survives an in-place update (outcome 1)', () => {
+    run([CLARO]);
+    setWork(allRows()[0].id);
+    assert.equal(run([{ ...CLARO, status: 'POSTED' }]).updated, 1);
+    assert.deepEqual(workOf(allRows()[0]), WORK);
+  });
+
+  it('survives a repost that moves the date (outcome 3)', () => {
+    run([CLARO]);
+    setWork(allRows()[0].id);
+    assert.equal(run([{ ...CLARO, date: '2026-04-25T03:00:00.001Z', status: 'POSTED' }]).reposts, 1);
+    assert.deepEqual(workOf(allRows()[0]), WORK);
+  });
+
+  it('survives adoption of a new provider ID (outcome 5)', () => {
+    run([CLARO]);
+    setWork(allRows()[0].id);
+    run([{ ...CLARO, id: 'new-provider-id' }]);
+    const rows = allRows();
+    assert.equal(rows.length, 1);
+    assert.deepEqual(workOf(rows[0]), WORK);
+  });
+
+  it('survives a PENDING promoted to POSTED under a new ID (outcome 6)', () => {
+    const pending = payload({
+      id: 'pending-id',
+      description: 'PADARIA REAL            .SAO PAULO  BRA',
+      amount: 77.7,
+      date: '2026-08-08T04:12:23.000Z',
+    });
+    run([pending]);
+    setWork(allRows()[0].id);
+    const counts = run([{ ...pending, id: 'posted-id', status: 'POSTED', date: '2026-08-08T01:12:23.000Z' }]);
+    assert.equal(counts.pendingPosted, 1);
+    const rows = allRows();
+    assert.equal(rows.length, 1);
+    assert.deepEqual(workOf(rows[0]), WORK);
+  });
+
+  it('a recycled ID mints a clean row and leaves the old one untouched (outcome 4)', () => {
+    run([CLARO]);
+    const [old] = allRows();
+    setWork(old.id);
+    run([payload({ id: CLARO.id, description: 'OBA HORTIFRUTI SAO BER   .SAO BERNAR BRA', amount: 59.1 })]);
+    const rows = allRows();
+    assert.equal(rows.length, 2);
+    assert.deepEqual(workOf(rows.find((r) => r.id === old.id)!), WORK);
+    assert.deepEqual(workOf(rows.find((r) => r.id !== old.id)!), NO_WORK);
   });
 });
 

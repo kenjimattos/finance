@@ -221,7 +221,7 @@ function loadWindowLines(
     .prepare(
       `SELECT t.id                 AS id,
               t.date               AS date,
-              COALESCE(d.description, t.description, '') AS description,
+              COALESCE(t.description_override, t.description, '') AS description,
               COALESCE(t.amount_in_account_currency, t.amount) AS amount,
               t.card_last4         AS cardLast4,
               t.installment_number AS installmentNumber,
@@ -229,17 +229,13 @@ function loadWindowLines(
               t.source             AS source,
               uc.name              AS category
        FROM transactions t
-       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
-       LEFT JOIN user_categories uc ON uc.id = tc.user_category_id
-       LEFT JOIN transaction_description_overrides d ON d.transaction_id = t.id
-       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
+       LEFT JOIN user_categories uc ON uc.id = t.category_id
        WHERE t.account_id = ?
-         AND h.transaction_id IS NULL
+         AND t.hidden_at IS NULL
          AND (
-              (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+              (t.bill_shift IS NULL AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = 1  AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = -1 AND t.date >= ? AND t.date <= ?)
          )`,
     )
     .all(

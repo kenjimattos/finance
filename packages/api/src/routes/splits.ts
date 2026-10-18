@@ -21,11 +21,7 @@ splitsRouter.put('/transactions/:id/split', (req, res, next) => {
       return;
     }
 
-    db.prepare(
-      `INSERT INTO transaction_splits (transaction_id, split_type)
-       VALUES (?, ?)
-       ON CONFLICT(transaction_id) DO UPDATE SET split_type = excluded.split_type`,
-    ).run(txId, splitType);
+    db.prepare('UPDATE transactions SET split_type = ? WHERE id = ?').run(splitType, txId);
 
     res.json({ transactionId: txId, splitType });
   } catch (err) {
@@ -37,7 +33,7 @@ splitsRouter.put('/transactions/:id/split', (req, res, next) => {
 splitsRouter.delete('/transactions/:id/split', (req, res) => {
   const { db } = req;
   const info = db
-    .prepare('DELETE FROM transaction_splits WHERE transaction_id = ?')
+    .prepare('UPDATE transactions SET split_type = NULL WHERE id = ? AND split_type IS NOT NULL')
     .run(req.params.id);
   if (info.changes === 0) {
     res.status(404).json({ error: 'NotSplit' });
@@ -59,14 +55,9 @@ splitsRouter.post('/transactions/bulk-split', (req, res, next) => {
 
     let applied = 0;
     db.transaction(() => {
-      const stmt = db.prepare(
-        `INSERT INTO transaction_splits (transaction_id, split_type)
-         VALUES (?, ?)
-         ON CONFLICT(transaction_id) DO UPDATE SET split_type = excluded.split_type`,
-      );
+      const stmt = db.prepare('UPDATE transactions SET split_type = ? WHERE id = ?');
       for (const txId of transactionIds) {
-        stmt.run(txId, splitType);
-        applied++;
+        applied += stmt.run(splitType, txId).changes;
       }
     })();
 
@@ -89,7 +80,7 @@ splitsRouter.post('/transactions/bulk-unsplit', (req, res, next) => {
     let removed = 0;
     db.transaction(() => {
       const stmt = db.prepare(
-        'DELETE FROM transaction_splits WHERE transaction_id = ?',
+        'UPDATE transactions SET split_type = NULL WHERE id = ? AND split_type IS NOT NULL',
       );
       for (const txId of transactionIds) {
         const info = stmt.run(txId);
@@ -170,33 +161,30 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
 
     const windowClause = `
       t.account_id = ?
-      AND h.transaction_id IS NULL
+      AND t.hidden_at IS NULL
       AND (
-           (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
-        OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
-        OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+           (t.bill_shift IS NULL AND t.date >= ? AND t.date <= ?)
+        OR (t.bill_shift = 1  AND t.date >= ? AND t.date <= ?)
+        OR (t.bill_shift = -1 AND t.date >= ? AND t.date <= ?)
       )`;
 
     // Split-marked transactions (half / theirs)
     const splitStmt = db.prepare(
       `SELECT t.id, t.date, t.description,
               COALESCE(t.amount_in_account_currency, t.amount) AS amount,
-              sp.split_type,
+              t.split_type,
               t.installment_number, t.total_installments,
               uc.id    AS user_category_id,
               uc.name  AS user_category_name,
               uc.color AS user_category_color
        FROM transactions t
-       INNER JOIN transaction_splits sp ON sp.transaction_id = t.id
-       INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
-       INNER JOIN user_categories       uc ON uc.id = tc.user_category_id
-       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
+       INNER JOIN user_categories uc ON uc.id = t.category_id
        WHERE ${windowClause}
+         AND t.split_type IS NOT NULL
        ORDER BY t.date ASC, t.id ASC`,
     );
 
-    // "Mine" = categorized transactions WITHOUT a split row
+    // "Mine" = categorized transactions without a split_type
     const mineStmt = db.prepare(
       `SELECT t.id, t.date, t.description,
               COALESCE(t.amount_in_account_currency, t.amount) AS amount,
@@ -205,13 +193,9 @@ splitsRouter.get('/bills/current/split-summary', (req, res, next) => {
               uc.name  AS user_category_name,
               uc.color AS user_category_color
        FROM transactions t
-       INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
-       INNER JOIN user_categories       uc ON uc.id = tc.user_category_id
-       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       LEFT JOIN transaction_splits     sp ON sp.transaction_id = t.id
-       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
+       INNER JOIN user_categories uc ON uc.id = t.category_id
        WHERE ${windowClause}
-         AND sp.transaction_id IS NULL
+         AND t.split_type IS NULL
        ORDER BY t.date ASC, t.id ASC`,
     );
 

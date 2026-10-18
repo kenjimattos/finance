@@ -10,19 +10,18 @@ import { extractMerchantSlug, extractLegacySlug } from './merchantSlug.js';
  *
  * Two independent safeguards enforce this:
  *
- *   1. The candidates query filters with `LEFT JOIN transaction_categories
- *      ... WHERE tc.transaction_id IS NULL`, so only transactions that have
- *      no row in `transaction_categories` enter the loop.
+ *   1. The candidates query filters with `WHERE t.category_id IS NULL`, so
+ *      only transactions without a category enter the loop.
  *
- *   2. The insert uses `INSERT OR IGNORE`. Even if a candidate somehow
- *      slipped through (e.g. a race with a concurrent manual assignment),
- *      the conflict on the `transaction_id` primary key would cause the
- *      insert to be silently dropped instead of replacing the existing row.
+ *   2. The assignment UPDATE repeats `AND category_id IS NULL`. Even if a
+ *      candidate somehow slipped through (e.g. a race with a concurrent
+ *      manual assignment), the update matches no row instead of replacing
+ *      the existing category.
  *
  * Both layers exist on purpose. The filter is the fast path (zero writes
- * for already-categorized rows); the `OR IGNORE` is the safety net. Do NOT
- * change the insert to `INSERT OR REPLACE` or remove the filter — the
- * applyLearnedRules.test.ts suite locks both behaviors and would fail.
+ * for already-categorized rows); the guarded UPDATE is the safety net. Do
+ * NOT drop either — the applyLearnedRules.test.ts suite locks both
+ * behaviors and would fail.
  *
  * The reason this matters: the user manually corrects merchant categories
  * that the slug heuristic gets wrong (e.g. the same supermarket can be
@@ -48,10 +47,8 @@ export function applyLearnedRules(db: Database, itemId: string): void {
     .prepare(
       `SELECT t.id, t.description
        FROM transactions t
-       LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
-       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
-       WHERE t.item_id = ? AND tc.transaction_id IS NULL
-         AND h.transaction_id IS NULL
+       WHERE t.item_id = ? AND t.category_id IS NULL
+         AND t.hidden_at IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM transaction_sync_conflicts c
            WHERE c.new_transaction_id = t.id
@@ -85,9 +82,9 @@ export function applyLearnedRules(db: Database, itemId: string): void {
   if (ruleBySlug.size === 0) return;
 
   const assign = db.prepare(
-    `INSERT OR IGNORE INTO transaction_categories
-       (transaction_id, user_category_id, assigned_by)
-     VALUES (?, ?, 'learned')`,
+    `UPDATE transactions
+     SET category_id = ?, category_assigned_by = 'learned', category_assigned_at = datetime('now')
+     WHERE id = ? AND category_id IS NULL`,
   );
   const bumpRule = db.prepare(
     `UPDATE category_rules SET hit_count = hit_count + 1
@@ -102,7 +99,9 @@ export function applyLearnedRules(db: Database, itemId: string): void {
         ?? (legacySlug && ruleBySlug.has(legacySlug) ? legacySlug : null);
       if (!matchedSlug) continue;
       const categoryId = ruleBySlug.get(matchedSlug)!;
-      assign.run(tx.id, categoryId);
+      // A row categorized since the candidates query matches nothing here, and
+      // must not count as a rule hit either.
+      if (assign.run(categoryId, tx.id).changes === 0) continue;
       bumpRule.run(matchedSlug, categoryId);
     }
   })();

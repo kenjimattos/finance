@@ -279,23 +279,20 @@ function readSplitRows(
     .prepare(
       `SELECT t.id, t.date, t.description,
               COALESCE(t.amount_in_account_currency, t.amount) AS amount,
-              sp.split_type,
+              t.split_type,
               t.installment_number, t.total_installments,
               uc.id    AS user_category_id,
               uc.name  AS user_category_name,
               uc.color AS user_category_color
        FROM transactions t
-       INNER JOIN transaction_splits sp ON sp.transaction_id = t.id
-       LEFT JOIN transaction_bill_overrides o ON o.transaction_id = t.id
-       LEFT JOIN transaction_categories tc ON tc.transaction_id = t.id
-       LEFT JOIN user_categories       uc ON uc.id = tc.user_category_id
-       LEFT JOIN transaction_hidden h ON h.transaction_id = t.id
+       LEFT JOIN user_categories uc ON uc.id = t.category_id
        WHERE t.account_id = ?
-         AND h.transaction_id IS NULL
+         AND t.split_type IS NOT NULL
+         AND t.hidden_at IS NULL
          AND (
-              (o.shift IS NULL AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = 1     AND t.date >= ? AND t.date <= ?)
-           OR (o.shift = -1    AND t.date >= ? AND t.date <= ?)
+              (t.bill_shift IS NULL AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = 1  AND t.date >= ? AND t.date <= ?)
+           OR (t.bill_shift = -1 AND t.date >= ? AND t.date <= ?)
          )
        ORDER BY t.date DESC, t.id DESC`,
     )

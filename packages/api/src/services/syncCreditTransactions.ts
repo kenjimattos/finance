@@ -213,14 +213,10 @@ export function upsertCreditTransactions(
   // the date invalidates the stored shift (it would drag the row to a
   // neighboring bill). These support recomputing it against the new date.
   const getShiftOverride = db.prepare(
-    `SELECT shift FROM transaction_bill_overrides WHERE transaction_id = ?`,
+    `SELECT bill_shift AS shift FROM transactions WHERE id = ? AND bill_shift IS NOT NULL`,
   );
-  const setShiftOverride = db.prepare(
-    `UPDATE transaction_bill_overrides SET shift = ? WHERE transaction_id = ?`,
-  );
-  const deleteShiftOverride = db.prepare(
-    `DELETE FROM transaction_bill_overrides WHERE transaction_id = ?`,
-  );
+  const setShiftOverride = db.prepare(`UPDATE transactions SET bill_shift = ? WHERE id = ?`);
+  const deleteShiftOverride = db.prepare(`UPDATE transactions SET bill_shift = NULL WHERE id = ?`);
   const getAccountSettings = db.prepare(
     `SELECT closing_day, due_day FROM account_settings WHERE account_id = ?`,
   );

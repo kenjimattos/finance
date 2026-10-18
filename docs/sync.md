@@ -18,7 +18,7 @@ Why the orphan rule instead of a separate timestamp check: the time-of-day alone
 
 Stored hashes are recomputed from `date` + the time-of-day in `raw_json` by a one-time migration (`PRAGMA user_version` 1). Rows whose `raw_json` holds a foreign payload from a suppressed mutation (date no longer matching the row) hash at midnight UTC of their own date, so the migration never rewrites a row's identity from a mutated payload.
 
-Five FK tables reference `transactions.id` (local UUID), all `ON DELETE CASCADE`: `transaction_categories`, `transaction_bill_overrides`, `transaction_description_overrides`, `transaction_splits`, `transaction_hidden`. A sixth, `bill_payment_tags`, still has the constraint but was drained by a migration into `bank_bill_payment_tags` and is no longer read. Manual transactions have `provider_transaction_id = NULL`.
+User work (category, bill shift, split, hidden flag, description override) is a set of columns on the `transactions` row itself, keyed by nothing but the local UUID. None of the outcomes above writes them: an update, repost, adoption or promotion changes Pluggy-owned fields only, so the work stays on the row; a recycled ID mints a new row that starts clean. The "user work columns" tests in [syncCreditTransactions.test.ts](../packages/api/src/services/syncCreditTransactions.test.ts) run each outcome over a row carrying all of them. Manual transactions have `provider_transaction_id = NULL`.
 
 None of this runs for `bank_transactions`. `POST /cashflow/sync` is deliberately naive: a known provider ID overwrites the row's mutable fields, an unknown one inserts a row — no identity hash, no recycled-ID or PENDING→POSTED handling, and no payload log.
 
@@ -34,7 +34,7 @@ The dashboard supports navigating between bill cycles via ←/→ arrows. `GET /
 
 ## Bill-cycle shifts
 
-Merchants sometimes submit transactions days after the purchase date, so a purchase made before the closing day can actually land on the next bill. The user fixes this per-transaction via `transaction_bill_overrides (transaction_id, shift)` where `shift ∈ {-1, 0, +1}`. The SQL for any bill window sums:
+Merchants sometimes submit transactions days after the purchase date, so a purchase made before the closing day can actually land on the next bill. The user fixes this per-transaction via `transactions.bill_shift ∈ {-1, +1}` (NULL = no shift). The SQL for any bill window sums:
 
 - unshifted rows whose date lies in `current`, **plus**
 - rows with `shift = +1` whose date lies in `previous` (pushed forward into current), **plus**
@@ -50,7 +50,7 @@ A shifted row disappears from the current-bill list and appears in the neighbori
 
 The previous-period delta is also categorized-vs-categorized for consistency.
 
-**Hidden transactions are excluded outright.** `transaction_hidden` (toggled via `PUT /transactions/:id/hidden`, "ocultar da fatura" in the row menu) marks a row as *not real* — phantom rows minted from corrupted Pluggy payloads, connector duplicates. Hidden rows are excluded from every bill computation (totals, category/installment breakdowns, split summaries, partner view, PDF reconciliation) but stay flagged in `GET /transactions` so the inbox lists them in a collapsed "Ocultas" section, reversibly. Hiding differs from un-categorizing in one crucial way: `applyLearnedRules` skips hidden rows, so a learned rule can never re-categorize a phantom back into the totals on the next sync (and phantoms never bump `hit_count`). Un-categorizing alone is NOT a stable exclusion for any merchant that has a learned rule.
+**Hidden transactions are excluded outright.** `transactions.hidden_at` (toggled via `PUT /transactions/:id/hidden`, "ocultar da fatura" in the row menu) marks a row as *not real* — phantom rows minted from corrupted Pluggy payloads, connector duplicates. Hidden rows are excluded from every bill computation (totals, category/installment breakdowns, split summaries, partner view, PDF reconciliation) but stay flagged in `GET /transactions` so the inbox lists them in a collapsed "Ocultas" section, reversibly. Hiding differs from un-categorizing in one crucial way: `applyLearnedRules` skips hidden rows, so a learned rule can never re-categorize a phantom back into the totals on the next sync (and phantoms never bump `hit_count`). Un-categorizing alone is NOT a stable exclusion for any merchant that has a learned rule.
 
 ## The learning loop
 

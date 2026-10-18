@@ -25,11 +25,13 @@ export function getDb(username: string): Db {
   return handle;
 }
 
-function initDb(filePath: string): Db {
+// Exported for the migration test; app code goes through getDb.
+export function initDb(filePath: string): Db {
   const db = new Database(filePath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   runSchema(db);
+  if ((db.pragma('user_version', { simple: true }) as number) < 2) runLegacySchema(db);
   runMigrations(db);
   return db;
 }
@@ -41,18 +43,6 @@ function runSchema(db: Db): void {
     id TEXT PRIMARY KEY,
     connector_name TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  -- Per-card settings the user must fill in manually. Pluggy does not expose
-  -- closing/due days, so we derive the "currently open bill" window from these.
-  CREATE TABLE IF NOT EXISTS card_settings (
-    item_id TEXT PRIMARY KEY,
-    display_name TEXT,
-    closing_day INTEGER NOT NULL,   -- day of month the bill closes (e.g. 16)
-    due_day INTEGER NOT NULL,       -- day of month the bill is due   (e.g. 25)
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
   );
 
   -- Credit (and eventually bank) accounts discovered from Pluggy. Each item
@@ -114,7 +104,17 @@ function runSchema(db: Db): void {
     first_seen_at              TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen_at               TEXT NOT NULL DEFAULT (datetime('now')),
     raw_json                   TEXT NOT NULL,
-    synced_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+    synced_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+    -- User work. The sync never writes these columns (syncCreditTransactions
+    -- updates only status, bill_id, identity_hash, raw_json, dates and IDs),
+    -- so they survive every re-sync. Never INSERT OR REPLACE this table.
+    category_id                INTEGER REFERENCES user_categories(id) ON DELETE SET NULL,
+    category_assigned_by       TEXT,     -- 'manual' | 'bulk' | 'learned'
+    category_assigned_at       TEXT,
+    bill_shift                 INTEGER,  -- ±1: show on a neighboring bill; NULL = natural cycle
+    split_type                 TEXT,     -- 'half' | 'theirs'; NULL = mine
+    hidden_at                  TEXT,     -- not a real transaction; excluded from every sum
+    description_override       TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id);
@@ -147,19 +147,6 @@ function runSchema(db: Db): void {
     usage_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
-
-  -- Join table: transaction → user category. Separate from transactions so
-  -- that re-syncing from Pluggy never wipes the user's work.
-  CREATE TABLE IF NOT EXISTS transaction_categories (
-    transaction_id TEXT PRIMARY KEY,
-    user_category_id INTEGER NOT NULL,
-    assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
-    assigned_by TEXT NOT NULL,       -- 'manual' | 'bulk' | 'learned'
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_category_id) REFERENCES user_categories(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_tc_category ON transaction_categories(user_category_id);
 
   -- Auto-learned rules. Each row says "when a new transaction's merchant slug
   -- matches X, auto-apply category Y". hit_count lets us rank by confidence;
@@ -209,30 +196,6 @@ function runSchema(db: Db): void {
 
   CREATE INDEX IF NOT EXISTS idx_cgm_group ON card_group_members(card_group_id);
 
-  -- Manual bill-cycle shifts. A row here says "pretend this transaction
-  -- belongs to a neighboring cycle instead of the one its date would
-  -- naturally place it in". Used to fix cases where Pluggy reports a
-  -- transaction with its purchase date, but the charge actually lands on
-  -- a different bill (common for merchants that batch-submit days later).
-  --
-  -- shift values:
-  --    -1  → one cycle EARLIER  ("this belongs to last month's bill")
-  --    +1  → one cycle LATER    ("this belongs to next month's bill")
-  --
-  -- Higher magnitudes (±2, ±3) are allowed by the schema but the UI
-  -- only exposes ±1 for now. A row with shift=0 is nonsensical and
-  -- forbidden by the CHECK constraint.
-  --
-  -- Lives in its own table (not as a column on transactions) so that a
-  -- re-sync from Pluggy never wipes the user's manual corrections. Same
-  -- rationale as transaction_categories.
-  CREATE TABLE IF NOT EXISTS transaction_bill_overrides (
-    transaction_id TEXT PRIMARY KEY,
-    shift INTEGER NOT NULL CHECK (shift <> 0),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
-  );
-
   -- Manual recurring entries for cash-flow projection. Each row represents
   -- a monthly event (salary, rent, etc.) that lands on a fixed day. The
   -- cash-flow screen places these on future days of the current month.
@@ -243,16 +206,6 @@ function runSchema(db: Db): void {
     day_of_month INTEGER NOT NULL,  -- 1-31; clamped to actual month length at query time
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  -- User overrides for transaction descriptions. Allows renaming bank
-  -- transactions (e.g. "PIX RECEBIDO CP 123" → "Salário") without
-  -- mutating the Pluggy cache. Same join-table pattern as other overrides.
-  CREATE TABLE IF NOT EXISTS transaction_description_overrides (
-    transaction_id TEXT PRIMARY KEY,
-    description TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
   );
 
   -- Balance snapshots: a raw, write-only DIAGNOSTIC log of the Pluggy-reported
@@ -288,38 +241,6 @@ function runSchema(db: Db): void {
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (account_id, anchor_date),
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-  );
-
-  -- Manual tag: marks a BANK transaction as a credit card bill payment.
-  -- Used by the Overview to compute the faturas total when the auto-detection
-  -- (matching "FATURA"/"INT" in description) doesn't catch a payment.
-  CREATE TABLE IF NOT EXISTS bill_payment_tags (
-    transaction_id TEXT PRIMARY KEY,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
-  );
-
-  -- Bill-splitting: marks a transaction as shared with a partner.
-  -- 'half' = 50/50 split (partner owes half), 'theirs' = partner owes 100%.
-  -- Categorized transactions WITHOUT a split row are implicitly "mine".
-  CREATE TABLE IF NOT EXISTS transaction_splits (
-    transaction_id TEXT PRIMARY KEY,
-    split_type TEXT NOT NULL CHECK(split_type IN ('half', 'theirs')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
-  );
-
-  -- Hide-from-bill: the user marks a transaction as "not real" (phantom rows
-  -- minted from corrupted Pluggy payloads, connector duplicates). Hidden rows
-  -- are excluded from every bill total / breakdown / split / reconcile query
-  -- but still returned (flagged) by GET /transactions so the action is
-  -- visible and reversible in the inbox. Unlike removing the category, hiding
-  -- is stable across re-syncs: applyLearnedRules skips hidden rows, so a
-  -- learned rule can never pull a hidden transaction back into the totals.
-  CREATE TABLE IF NOT EXISTS transaction_hidden (
-    transaction_id TEXT PRIMARY KEY,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
   );
 
   -- Audit log for anomalous Pluggy payloads detected during sync.
@@ -414,6 +335,11 @@ function runSchema(db: Db): void {
     first_seen_at           TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen_at            TEXT NOT NULL DEFAULT (datetime('now')),
     synced_at               TEXT NOT NULL DEFAULT (datetime('now')),
+    -- User work; the cashflow sync never writes these columns.
+    sort_key                REAL,
+    description_override    TEXT,
+    bill_payment_tagged_at  TEXT,
+    hidden_at               TEXT,
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
   );
 
@@ -421,6 +347,107 @@ function runSchema(db: Db): void {
   CREATE INDEX IF NOT EXISTS idx_bank_tx_item     ON bank_transactions(item_id);
   CREATE INDEX IF NOT EXISTS idx_bank_tx_date     ON bank_transactions(date);
   CREATE INDEX IF NOT EXISTS idx_bank_tx_provider ON bank_transactions(provider_transaction_id);
+
+`);
+}
+
+// Tables the user_version 2 migration folds into columns of `transactions` /
+// `bank_transactions` (and the unread card_settings / bill_payment_tags), then
+// drops. They are created only on databases that haven't reached version 2,
+// so every migration before it still finds the tables it was written against;
+// a brand-new database passes through them empty and ends in the final shape.
+export function runLegacySchema(db: Db): void {
+  db.exec(`
+  -- Per-card settings the user must fill in manually. Pluggy does not expose
+  -- closing/due days, so we derive the "currently open bill" window from these.
+  CREATE TABLE IF NOT EXISTS card_settings (
+    item_id TEXT PRIMARY KEY,
+    display_name TEXT,
+    closing_day INTEGER NOT NULL,   -- day of month the bill closes (e.g. 16)
+    due_day INTEGER NOT NULL,       -- day of month the bill is due   (e.g. 25)
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+  );
+
+  -- Join table: transaction → user category. Separate from transactions so
+  -- that re-syncing from Pluggy never wipes the user's work.
+  CREATE TABLE IF NOT EXISTS transaction_categories (
+    transaction_id TEXT PRIMARY KEY,
+    user_category_id INTEGER NOT NULL,
+    assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+    assigned_by TEXT NOT NULL,       -- 'manual' | 'bulk' | 'learned'
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_category_id) REFERENCES user_categories(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tc_category ON transaction_categories(user_category_id);
+
+  -- Manual bill-cycle shifts. A row here says "pretend this transaction
+  -- belongs to a neighboring cycle instead of the one its date would
+  -- naturally place it in". Used to fix cases where Pluggy reports a
+  -- transaction with its purchase date, but the charge actually lands on
+  -- a different bill (common for merchants that batch-submit days later).
+  --
+  -- shift values:
+  --    -1  → one cycle EARLIER  ("this belongs to last month's bill")
+  --    +1  → one cycle LATER    ("this belongs to next month's bill")
+  --
+  -- Higher magnitudes (±2, ±3) are allowed by the schema but the UI
+  -- only exposes ±1 for now. A row with shift=0 is nonsensical and
+  -- forbidden by the CHECK constraint.
+  --
+  -- Lives in its own table (not as a column on transactions) so that a
+  -- re-sync from Pluggy never wipes the user's manual corrections. Same
+  -- rationale as transaction_categories.
+  CREATE TABLE IF NOT EXISTS transaction_bill_overrides (
+    transaction_id TEXT PRIMARY KEY,
+    shift INTEGER NOT NULL CHECK (shift <> 0),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
+
+  -- User overrides for transaction descriptions. Allows renaming bank
+  -- transactions (e.g. "PIX RECEBIDO CP 123" → "Salário") without
+  -- mutating the Pluggy cache. Same join-table pattern as other overrides.
+  CREATE TABLE IF NOT EXISTS transaction_description_overrides (
+    transaction_id TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
+
+  -- Manual tag: marks a BANK transaction as a credit card bill payment.
+  -- Used by the Overview to compute the faturas total when the auto-detection
+  -- (matching "FATURA"/"INT" in description) doesn't catch a payment.
+  CREATE TABLE IF NOT EXISTS bill_payment_tags (
+    transaction_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
+
+  -- Bill-splitting: marks a transaction as shared with a partner.
+  -- 'half' = 50/50 split (partner owes half), 'theirs' = partner owes 100%.
+  -- Categorized transactions WITHOUT a split row are implicitly "mine".
+  CREATE TABLE IF NOT EXISTS transaction_splits (
+    transaction_id TEXT PRIMARY KEY,
+    split_type TEXT NOT NULL CHECK(split_type IN ('half', 'theirs')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
+
+  -- Hide-from-bill: the user marks a transaction as "not real" (phantom rows
+  -- minted from corrupted Pluggy payloads, connector duplicates). Hidden rows
+  -- are excluded from every bill total / breakdown / split / reconcile query
+  -- but still returned (flagged) by GET /transactions so the action is
+  -- visible and reversible in the inbox. Unlike removing the category, hiding
+  -- is stable across re-syncs: applyLearnedRules skips hidden rows, so a
+  -- learned rule can never pull a hidden transaction back into the totals.
+  CREATE TABLE IF NOT EXISTS transaction_hidden (
+    transaction_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+  );
 
   -- Sister tables for user work attached to BANK rows.
   CREATE TABLE IF NOT EXISTS bank_transaction_description_overrides (
@@ -447,6 +474,10 @@ function runSchema(db: Db): void {
     FOREIGN KEY (transaction_id) REFERENCES bank_transactions(id) ON DELETE CASCADE
   );
 `);
+}
+
+function tableExists(db: Db, name: string): boolean {
+  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 }
 
 function runMigrations(db: Db): void {
@@ -542,7 +573,7 @@ db.exec(`
 // For each card_settings row, copy closing/due day to every CREDIT account
 // under that item. Only runs when account_settings is empty and accounts
 // have been synced. Idempotent — safe to re-run.
-{
+if (tableExists(db, 'card_settings')) {
   const hasAccountSettings = db
     .prepare('SELECT COUNT(*) AS n FROM account_settings')
     .get() as { n: number };
@@ -812,7 +843,9 @@ db.exec(
     )
     .get() as { n: number };
 
-  if (bankInOld.n > 0) {
+  // The sister tables it fills are gone after user_version 2; a database
+  // that old never reaches this point with BANK rows still in `transactions`.
+  if (bankInOld.n > 0 && tableExists(db, 'bill_payment_tags')) {
     db.pragma('foreign_keys = OFF');
     try {
       db.transaction(() => {
@@ -949,6 +982,72 @@ db.exec(
     if (rows.length > 0) {
       console.log(`[migration] identity_hash recomputed with full instant for ${rows.length} row(s).`);
     }
+  }
+}
+
+// Migration (user_version 2): user work moves from 1:1 join tables into
+// columns. The join tables were meant to keep re-syncs from wiping user work,
+// but the sync never deletes or replaces rows — it UPDATEs a fixed list of
+// Pluggy-owned columns — so a column survives just as well, without a JOIN in
+// every bill query. The real guarantee is "the sync never writes user
+// columns", locked by syncCreditTransactions.test.ts. card_settings and
+// bill_payment_tags had no readers left and are dropped with them.
+addColumnIfMissing(db, 'transactions', 'category_id', 'INTEGER REFERENCES user_categories(id) ON DELETE SET NULL');
+addColumnIfMissing(db, 'transactions', 'category_assigned_by', 'TEXT');
+addColumnIfMissing(db, 'transactions', 'category_assigned_at', 'TEXT');
+addColumnIfMissing(db, 'transactions', 'bill_shift', 'INTEGER');
+addColumnIfMissing(db, 'transactions', 'split_type', 'TEXT');
+addColumnIfMissing(db, 'transactions', 'hidden_at', 'TEXT');
+addColumnIfMissing(db, 'transactions', 'description_override', 'TEXT');
+addColumnIfMissing(db, 'bank_transactions', 'description_override', 'TEXT');
+addColumnIfMissing(db, 'bank_transactions', 'bill_payment_tagged_at', 'TEXT');
+addColumnIfMissing(db, 'bank_transactions', 'hidden_at', 'TEXT');
+db.exec('CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category_id)');
+{
+  const version = db.pragma('user_version', { simple: true }) as number;
+  if (version < 2) {
+    db.transaction(() => {
+      db.exec(`
+        UPDATE transactions SET
+          category_id          = j.user_category_id,
+          category_assigned_by = j.assigned_by,
+          category_assigned_at = j.assigned_at
+        FROM transaction_categories j WHERE j.transaction_id = transactions.id;
+
+        UPDATE transactions SET bill_shift = j.shift
+        FROM transaction_bill_overrides j WHERE j.transaction_id = transactions.id;
+
+        UPDATE transactions SET split_type = j.split_type
+        FROM transaction_splits j WHERE j.transaction_id = transactions.id;
+
+        UPDATE transactions SET hidden_at = j.created_at
+        FROM transaction_hidden j WHERE j.transaction_id = transactions.id;
+
+        UPDATE transactions SET description_override = j.description
+        FROM transaction_description_overrides j WHERE j.transaction_id = transactions.id;
+
+        UPDATE bank_transactions SET description_override = j.description
+        FROM bank_transaction_description_overrides j WHERE j.transaction_id = bank_transactions.id;
+
+        UPDATE bank_transactions SET bill_payment_tagged_at = j.created_at
+        FROM bank_bill_payment_tags j WHERE j.transaction_id = bank_transactions.id;
+
+        UPDATE bank_transactions SET hidden_at = j.created_at
+        FROM bank_transaction_hidden j WHERE j.transaction_id = bank_transactions.id;
+
+        DROP TABLE transaction_categories;
+        DROP TABLE transaction_bill_overrides;
+        DROP TABLE transaction_splits;
+        DROP TABLE transaction_hidden;
+        DROP TABLE transaction_description_overrides;
+        DROP TABLE bank_transaction_description_overrides;
+        DROP TABLE bank_bill_payment_tags;
+        DROP TABLE bank_transaction_hidden;
+        DROP TABLE bill_payment_tags;
+        DROP TABLE card_settings;
+      `);
+      db.pragma('user_version = 2');
+    })();
   }
 }
 

@@ -286,11 +286,11 @@ const seed = db.transaction(() => {
      VALUES (?, ?, ?, ?, ?, ?, ?, 'BRL', ?, 'POSTED', ?, ?, ?, 'pluggy', ?, '{}')`,
   );
   const insTxCategory = db.prepare(
-    'INSERT INTO transaction_categories (transaction_id, user_category_id, assigned_by) VALUES (?, ?, ?)',
+    `UPDATE transactions
+     SET category_id = ?, category_assigned_by = ?, category_assigned_at = datetime('now')
+     WHERE id = ?`,
   );
-  const insSplit = db.prepare(
-    'INSERT INTO transaction_splits (transaction_id, split_type) VALUES (?, ?)',
-  );
+  const insSplit = db.prepare('UPDATE transactions SET split_type = ? WHERE id = ?');
 
   const ruleStats = new Map<string, { cat: CategoryName; hits: number }>();
 
@@ -313,14 +313,14 @@ const seed = db.transaction(() => {
       hash,
     );
     if (t.cat) {
-      insTxCategory.run(id, categoryIds.get(t.cat), t.assignedBy ?? 'learned');
+      insTxCategory.run(categoryIds.get(t.cat), t.assignedBy ?? 'learned', id);
       if (slug) {
         const stat = ruleStats.get(slug);
         if (stat) stat.hits += 1;
         else ruleStats.set(slug, { cat: t.cat, hits: 1 });
       }
     }
-    if (t.split) insSplit.run(id, t.split);
+    if (t.split) insSplit.run(t.split, id);
   }
 
   const creditAccount = (which: 'nu' | 'itau') =>
@@ -419,7 +419,7 @@ const seed = db.transaction(() => {
   }
   db.prepare(
     `UPDATE user_categories SET usage_count =
-       (SELECT COUNT(*) FROM transaction_categories tc WHERE tc.user_category_id = user_categories.id)`,
+       (SELECT COUNT(*) FROM transactions t WHERE t.category_id = user_categories.id)`,
   ).run();
 
   // Bank account: checking history ----------------------------------------
@@ -499,8 +499,8 @@ seed();
 
 const counts = {
   transactions: (db.prepare('SELECT COUNT(*) n FROM transactions').get() as { n: number }).n,
-  categorized: (db.prepare('SELECT COUNT(*) n FROM transaction_categories').get() as { n: number }).n,
-  splits: (db.prepare('SELECT COUNT(*) n FROM transaction_splits').get() as { n: number }).n,
+  categorized: (db.prepare('SELECT COUNT(*) n FROM transactions WHERE category_id IS NOT NULL').get() as { n: number }).n,
+  splits: (db.prepare('SELECT COUNT(*) n FROM transactions WHERE split_type IS NOT NULL').get() as { n: number }).n,
   rules: (db.prepare('SELECT COUNT(*) n FROM category_rules').get() as { n: number }).n,
   bankTransactions: (db.prepare('SELECT COUNT(*) n FROM bank_transactions').get() as { n: number }).n,
   manualEntries: (db.prepare('SELECT COUNT(*) n FROM manual_entries').get() as { n: number }).n,

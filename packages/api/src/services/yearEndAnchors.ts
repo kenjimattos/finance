@@ -3,8 +3,7 @@ import { lastRealizedBankDate } from './realizedBoundary.js';
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-const NOT_HIDDEN_SQL =
-  'NOT EXISTS (SELECT 1 FROM bank_transaction_hidden h WHERE h.transaction_id = t.id)';
+const NOT_HIDDEN_SQL = 't.hidden_at IS NULL';
 
 /**
  * Freeze a year-end balance anchor for every completed, settled year.

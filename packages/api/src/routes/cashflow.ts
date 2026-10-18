@@ -50,7 +50,9 @@ cashflowRouter.put('/cashflow/bill-tag/:transactionId', (req, res) => {
   const { db } = req;
   const { transactionId } = req.params;
   db.prepare(
-    `INSERT OR IGNORE INTO bank_bill_payment_tags (transaction_id) VALUES (?)`,
+    `UPDATE bank_transactions
+     SET bill_payment_tagged_at = COALESCE(bill_payment_tagged_at, datetime('now'))
+     WHERE id = ?`,
   ).run(transactionId);
   res.json({ ok: true, transactionId, tagged: true });
 });
@@ -58,7 +60,7 @@ cashflowRouter.put('/cashflow/bill-tag/:transactionId', (req, res) => {
 cashflowRouter.delete('/cashflow/bill-tag/:transactionId', (req, res) => {
   const { db } = req;
   const { transactionId } = req.params;
-  db.prepare('DELETE FROM bank_bill_payment_tags WHERE transaction_id = ?').run(transactionId);
+  db.prepare('UPDATE bank_transactions SET bill_payment_tagged_at = NULL WHERE id = ?').run(transactionId);
   res.json({ ok: true, transactionId, tagged: false });
 });
 
@@ -72,7 +74,9 @@ cashflowRouter.put('/cashflow/hide/:transactionId', (req, res) => {
   const { db } = req;
   const { transactionId } = req.params;
   db.prepare(
-    'INSERT OR IGNORE INTO bank_transaction_hidden (transaction_id) VALUES (?)',
+    `UPDATE bank_transactions
+     SET hidden_at = COALESCE(hidden_at, datetime('now'))
+     WHERE id = ?`,
   ).run(transactionId);
   res.json({ ok: true, transactionId, hidden: true });
 });
@@ -80,7 +84,7 @@ cashflowRouter.put('/cashflow/hide/:transactionId', (req, res) => {
 cashflowRouter.delete('/cashflow/hide/:transactionId', (req, res) => {
   const { db } = req;
   const { transactionId } = req.params;
-  db.prepare('DELETE FROM bank_transaction_hidden WHERE transaction_id = ?').run(transactionId);
+  db.prepare('UPDATE bank_transactions SET hidden_at = NULL WHERE id = ?').run(transactionId);
   res.json({ ok: true, transactionId, hidden: false });
 });
 
@@ -102,11 +106,10 @@ cashflowRouter.put('/bank-transactions/:id/description', (req, res, next) => {
       return;
     }
 
-    db.prepare(
-      `INSERT INTO bank_transaction_description_overrides (transaction_id, description)
-       VALUES (?, ?)
-       ON CONFLICT(transaction_id) DO UPDATE SET description = excluded.description`,
-    ).run(txId, description);
+    db.prepare('UPDATE bank_transactions SET description_override = ? WHERE id = ?').run(
+      description,
+      txId,
+    );
 
     res.json({ ok: true });
   } catch (err) {
@@ -143,9 +146,7 @@ cashflowRouter.delete('/bank-transactions/:id/description', (req, res, next) => 
   try {
     const { db } = req;
     const txId = req.params.id;
-    db.prepare(
-      'DELETE FROM bank_transaction_description_overrides WHERE transaction_id = ?',
-    ).run(txId);
+    db.prepare('UPDATE bank_transactions SET description_override = NULL WHERE id = ?').run(txId);
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -213,7 +214,7 @@ function round2(n: number): number {
 
 /**
  * BANK transactions are excluded from sums only when the user has
- * explicitly hidden them via `bank_transaction_hidden`. The day listing
+ * explicitly hidden them (`bank_transactions.hidden_at`). The day listing
  * still RETURNS hidden rows (flagged `hidden: true`) so the frontend can
  * offer a show/hide toggle — but they never contribute to balances.
  * There is no
@@ -223,8 +224,7 @@ function round2(n: number): number {
  * per-recipient description with no stable string to match — so the user
  * hides those rows by hand instead.
  */
-const BANK_TX_NOT_HIDDEN_SQL =
-  "NOT EXISTS (SELECT 1 FROM bank_transaction_hidden h WHERE h.transaction_id = t.id)";
+const BANK_TX_NOT_HIDDEN_SQL = 't.hidden_at IS NULL';
 
 /**
  * GET /cashflow?month=YYYY-MM — day-by-day cash-flow view for a given month.
@@ -442,14 +442,11 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
     bankTxRows = db
       .prepare(
         `SELECT t.id, t.account_id,  t.date,
-                COALESCE(o.description, t.description) AS description,
+                COALESCE(t.description_override, t.description) AS description,
                 t.amount, t.type, t.sort_key,
-                CASE WHEN bp.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_bill_tagged,
-                CASE WHEN h.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS is_hidden
+                CASE WHEN t.bill_payment_tagged_at IS NOT NULL THEN 1 ELSE 0 END AS is_bill_tagged,
+                CASE WHEN t.hidden_at IS NOT NULL THEN 1 ELSE 0 END AS is_hidden
          FROM bank_transactions t
-         LEFT JOIN bank_transaction_description_overrides o ON o.transaction_id = t.id
-         LEFT JOIN bank_bill_payment_tags bp ON bp.transaction_id = t.id
-         LEFT JOIN bank_transaction_hidden h ON h.transaction_id = t.id
          WHERE t.account_id IN (${placeholders})
            AND t.date >= ? AND t.date <= ?
          ORDER BY t.date ASC, COALESCE(t.sort_key, 1e18) ASC, t.id ASC`,
@@ -506,13 +503,12 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
       .prepare(
         `SELECT COALESCE(SUM(COALESCE(t.amount_in_account_currency, t.amount)), 0) AS total
          FROM transactions t
-         INNER JOIN transaction_categories tc ON tc.transaction_id = t.id
-         LEFT JOIN transaction_bill_overrides bo ON bo.transaction_id = t.id
          WHERE t.account_id = ?
+           AND t.category_id IS NOT NULL
            AND (
-                (bo.shift IS NULL AND t.date >= ? AND t.date <= ?)
-             OR (bo.shift = 1     AND t.date >= ? AND t.date <= ?)
-             OR (bo.shift = -1    AND t.date >= ? AND t.date <= ?)
+                (t.bill_shift IS NULL AND t.date >= ? AND t.date <= ?)
+             OR (t.bill_shift = 1  AND t.date >= ? AND t.date <= ?)
+             OR (t.bill_shift = -1 AND t.date >= ? AND t.date <= ?)
            )`,
       )
       .get(
@@ -701,7 +697,9 @@ cashflowRouter.post('/cashflow/sync', async (req, res, next) => {
     `);
 
     const tagBillPayment = db.prepare(
-      'INSERT OR IGNORE INTO bank_bill_payment_tags (transaction_id) VALUES (?)',
+      `UPDATE bank_transactions
+       SET bill_payment_tagged_at = COALESCE(bill_payment_tagged_at, datetime('now'))
+       WHERE id = ?`,
     );
 
     const findByProviderId = db.prepare(`

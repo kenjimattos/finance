@@ -29,10 +29,8 @@ function createSchema(d: DB): void {
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL,
       date TEXT NOT NULL,
-      amount REAL NOT NULL
-    );
-    CREATE TABLE bank_transaction_hidden (
-      transaction_id TEXT PRIMARY KEY
+      amount REAL NOT NULL,
+      hidden_at TEXT
     );
     CREATE TABLE balance_anchors (
       account_id TEXT NOT NULL,
@@ -132,7 +130,7 @@ describe('ensureYearEndAnchors', () => {
     addAnchor('a', '2025-12-31', 100);
     addTx('a', '2026-03-01', 50);
     const hidden = addTx('a', '2026-04-01', 999);
-    db.prepare('INSERT INTO bank_transaction_hidden (transaction_id) VALUES (?)').run(hidden);
+    db.prepare("UPDATE bank_transactions SET hidden_at = datetime('now') WHERE id = ?").run(hidden);
     addTx('a', '2027-02-01', 0);
 
     const created = ensureYearEndAnchors(db, NO_CUTOFF);

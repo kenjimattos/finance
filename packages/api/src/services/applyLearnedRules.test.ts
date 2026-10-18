@@ -11,18 +11,13 @@ import { applyLearnedRules } from './applyLearnedRules.js';
  * The single most important property under test is the NON-OVERWRITE
  * INVARIANT: a manual or bulk categorization is sacred. Even if a learned
  * rule for the same merchant slug points at a different category,
- * applyLearnedRules must NEVER touch an already-categorized row. Two
- * separate failure modes are exercised:
- *
- *   1. The candidates query filter (LEFT JOIN ... WHERE tc IS NULL) — if
- *      this is dropped or weakened, "manual assignment is preserved" fails.
- *   2. The INSERT OR IGNORE clause — if changed to INSERT OR REPLACE, the
- *      "primary key safeguard" test fails because we feed it a candidate
- *      list that intentionally races with a pre-existing assignment.
- *
- * Both safeguards are intentional defense-in-depth, and both have a test
- * pinning them. See the docstring on applyLearnedRules itself for the
- * design rationale.
+ * applyLearnedRules must NEVER touch an already-categorized row. The
+ * candidates filter (`WHERE t.category_id IS NULL`) is what these tests
+ * pin: if it is dropped or weakened, "does NOT overwrite a manual
+ * assignment" fails. The assignment UPDATE repeats the same condition as a
+ * safety net against a concurrent write between the query and the update;
+ * that race is not reproduced here. See the docstring on applyLearnedRules
+ * itself for the design rationale.
  *
  * Tests run against an in-memory SQLite created from scratch in
  * beforeEach, with the minimal subset of the production schema needed to
@@ -45,22 +40,17 @@ function createSchema(d: DB): void {
       description TEXT,
       amount REAL NOT NULL,
       type TEXT,
-      raw_json TEXT NOT NULL DEFAULT '{}'
+      raw_json TEXT NOT NULL DEFAULT '{}',
+      category_id INTEGER REFERENCES user_categories(id) ON DELETE SET NULL,
+      category_assigned_by TEXT,
+      category_assigned_at TEXT,
+      hidden_at TEXT
     );
 
     CREATE TABLE user_categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE COLLATE NOCASE,
       color TEXT NOT NULL DEFAULT '#000'
-    );
-
-    CREATE TABLE transaction_categories (
-      transaction_id TEXT PRIMARY KEY,
-      user_category_id INTEGER NOT NULL,
-      assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
-      assigned_by TEXT NOT NULL,
-      FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
-      FOREIGN KEY (user_category_id) REFERENCES user_categories(id) ON DELETE CASCADE
     );
 
     CREATE TABLE category_rules (
@@ -72,12 +62,6 @@ function createSchema(d: DB): void {
       disabled INTEGER NOT NULL DEFAULT 0,
       UNIQUE (merchant_slug, user_category_id),
       FOREIGN KEY (user_category_id) REFERENCES user_categories(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE transaction_hidden (
-      transaction_id TEXT PRIMARY KEY,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
     );
 
     CREATE TABLE transaction_sync_conflicts (
@@ -125,9 +109,10 @@ function insertAssignment(
   assignedBy: 'manual' | 'bulk' | 'learned',
 ): void {
   d.prepare(
-    `INSERT INTO transaction_categories (transaction_id, user_category_id, assigned_by)
-     VALUES (?, ?, ?)`,
-  ).run(txId, categoryId, assignedBy);
+    `UPDATE transactions
+     SET category_id = ?, category_assigned_by = ?, category_assigned_at = datetime('now')
+     WHERE id = ?`,
+  ).run(categoryId, assignedBy, txId);
 }
 
 function getAssignment(
@@ -136,9 +121,9 @@ function getAssignment(
 ): { user_category_id: number; assigned_by: string } | undefined {
   return d
     .prepare(
-      `SELECT user_category_id, assigned_by
-       FROM transaction_categories
-       WHERE transaction_id = ?`,
+      `SELECT category_id AS user_category_id, category_assigned_by AS assigned_by
+       FROM transactions
+       WHERE id = ? AND category_id IS NOT NULL`,
     )
     .get(txId) as { user_category_id: number; assigned_by: string } | undefined;
 }
@@ -212,7 +197,7 @@ describe('applyLearnedRules', () => {
     insertTx(db, 'tx-hidden', 'IFOOD *FANTASMA');
     insertTx(db, 'tx-visible', 'IFOOD *REAL');
     db.prepare(
-      `INSERT INTO transaction_hidden (transaction_id) VALUES ('tx-hidden')`,
+      `UPDATE transactions SET hidden_at = datetime('now') WHERE id = 'tx-hidden'`,
     ).run();
 
     applyLearnedRules(db, ITEM_ID);

@@ -4,7 +4,7 @@
  * Pluggy does NOT expose the currently open bill — its /bills endpoint only
  * returns closed bills, and `billId` on transactions is only populated after
  * closing. So we reconstruct the open-bill window ourselves, from the user's
- * configured closing_day + due_day (captured once per card in card_settings).
+ * configured closing_day + due_day (captured once per account in account_settings).
  *
  * The rules we follow:
  *  - The open bill window is (last closing_day, today], exclusive/inclusive.
