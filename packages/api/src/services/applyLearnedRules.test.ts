@@ -344,6 +344,24 @@ describe('applyLearnedRules', () => {
     assert.deepEqual(a, { user_category_id: food, assigned_by: 'learned' });
   });
 
+  it('ignores a rule whose category no longer exists', () => {
+    // A rule orphaned while foreign_keys was OFF. With FKs on, assigning its
+    // category id would throw and roll back every other assignment too.
+    db.pragma('foreign_keys = ON');
+    const food = insertCategory(db, 'Alimentação');
+    db.pragma('foreign_keys = OFF');
+    insertRule(db, 'ALIPAY', 999);
+    db.pragma('foreign_keys = ON');
+    insertRule(db, 'IFOOD', food);
+    insertTx(db, 'tx-1', 'ALIPAY');
+    insertTx(db, 'tx-2', 'IFOOD SP');
+
+    assert.doesNotThrow(() => applyLearnedRules(db, ITEM_ID));
+
+    assert.equal(getAssignment(db, 'tx-1'), undefined);
+    assert.deepEqual(getAssignment(db, 'tx-2'), { user_category_id: food, assigned_by: 'learned' });
+  });
+
   it('skips transactions with a description that yields no slug', () => {
     const food = insertCategory(db, 'Alimentação');
     insertRule(db, 'IFOOD', food);

@@ -573,6 +573,15 @@ addColumnIfMissing(db, 'transactions', 'source', "TEXT DEFAULT 'pluggy'");
 // override_count — the user corrects minority cases manually.
 db.exec(`UPDATE category_rules SET disabled = 0 WHERE disabled = 1`);
 
+// Rules left pointing at a deleted category. The FK cascade normally removes
+// them, but categories deleted while a table-rebuild migration ran with
+// foreign_keys = OFF left a few behind. They are invisible (GET /rules joins
+// on the category) and can never be applied, so drop them.
+db.exec(
+  `DELETE FROM category_rules
+   WHERE user_category_id NOT IN (SELECT id FROM user_categories)`,
+);
+
 // Backfill: transactions that have a non-numeric cardNumber in raw_json
 // (e.g. "DIGITAL-PICPAY") were previously stored with card_last4 = NULL
 // because lastFourDigits() only extracted numeric suffixes. The function

@@ -69,9 +69,12 @@ export function applyLearnedRules(db: Database, itemId: string): void {
   const ruleBySlug = new Map<string, number>();
   for (const row of db
     .prepare(
-      `SELECT merchant_slug, user_category_id
-       FROM category_rules
-       ORDER BY hit_count DESC`,
+      // The JOIN skips a rule whose category is gone: assigning its id would
+      // violate the transactions.category_id FK and abort the whole batch.
+      `SELECT r.merchant_slug, r.user_category_id
+       FROM category_rules r
+       JOIN user_categories c ON c.id = r.user_category_id
+       ORDER BY r.hit_count DESC`,
     )
     .all() as Array<{ merchant_slug: string; user_category_id: number }>) {
     if (!ruleBySlug.has(row.merchant_slug)) {
