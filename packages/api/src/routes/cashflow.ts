@@ -503,6 +503,7 @@ function buildCashFlowMonth(db: Database, year: number, month: number): CashFlow
          FROM transactions t
          WHERE t.account_id = ?
            AND t.category_id IS NOT NULL
+           AND t.hidden_at IS NULL
            AND (
                 (t.bill_shift IS NULL AND t.date >= ? AND t.date <= ?)
              OR (t.bill_shift = 1  AND t.date >= ? AND t.date <= ?)
