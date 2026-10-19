@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - **O trabalho do usuário em cada transação passou a ficar na própria transação.** Categoria, deslocamento de fatura, divisão, "ocultar" e descrição editada ficavam cada um numa tabela separada, ligada à transação, e toda soma de fatura juntava essas tabelas. O mesmo valia para as transações da conta corrente (descrição, marcação de fatura e "ocultar"). Agora cada uma dessas informações é uma coluna da transação. A separação existia para que o sync não apagasse o trabalho do usuário, mas o sync nunca apaga nem substitui linhas: ele só atualiza os campos que vêm do Pluggy. Essa garantia agora é coberta por testes que passam cada caso do sync (atualização, repostagem, troca de ID, PENDING virando POSTED e ID reaproveitado) por uma transação com todo tipo de trabalho do usuário. A migração roda sozinha na primeira abertura de cada banco e não muda nenhum número: numa cópia da base real, faturas, divisão, transações e fluxo de caixa de junho a dezembro saíram idênticos antes e depois. Ela descarta 19 marcações de abril e maio que apontavam para transações que já não existiam e que o app já não mostrava. Saem também duas tabelas antigas que nada lia, as configurações de cartão por conexão e as marcações de fatura do lado do cartão, junto com as rotas `/card-settings`. A consulta da fatura passa a exigir a conta.
 
+### Removido
+
+- **Script de diagnóstico avulso das contas do Pluggy.** `query-pluggy-accounts.ts` consultava as contas de uma conexão com um ID fixo no código, não estava ligado a nenhum comando do projeto e nada o chamava. Nenhum comportamento do app muda.
+
 ### Corrigido
 
 - **A fatura prevista no fluxo de caixa somava as transações ocultas.** O valor da fatura que o fluxo de caixa projeta no dia do vencimento contava as transações ocultas que estavam categorizadas, enquanto a tela da fatura, a divisão e a visão geral já as deixavam de fora. Agora o fluxo de caixa também as exclui, e os dois valores batem.
