@@ -17,7 +17,7 @@ Usernames listed in `DEMO_USERS` (default: `demo`) get a 403 `DemoRestricted` fr
 - `POST /connect-token` — short-lived JWT for the Pluggy Connect widget. Never cache; generate per session.
 - `POST /items { itemId }` — backend validates via `pluggy.fetchItem()` and persists.
 - `GET /items` — list all linked Pluggy items.
-- `DELETE /items/:id` — removes a bank connection and all its data via cascade. Categories and rules are preserved.
+- `DELETE /items/:id` — removes a bank connection and all its data: accounts and everything below them cascade, and the credit `transactions` and `bills` (which have no FK to `accounts`) are deleted explicitly in the same transaction. Categories, rules and the sync logs (`sync_runs`, `transaction_payloads`) are preserved.
 
 ## Accounts and settings
 
